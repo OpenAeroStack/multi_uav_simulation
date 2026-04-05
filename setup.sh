@@ -1,0 +1,30 @@
+#!/bin/bash
+# Portable setup script for multi_uav_sim
+# Source this before running anything: source setup.sh
+
+export PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:${GAZEBO_MODEL_PATH:-}"
+
+# ArduPilot - set ARDUPILOT_HOME to wherever it is on this machine
+if [[ -z "${ARDUPILOT_HOME:-}" ]]; then
+  # Try common locations
+  for candidate in \
+    "$HOME/ardupilot" \
+    "$HOME/src/ardupilot" \
+    "/opt/ardupilot"; do
+    if [[ -d "$candidate" ]]; then
+      export ARDUPILOT_HOME="$candidate"
+      break
+    fi
+  done
+fi
+
+if [[ -z "${ARDUPILOT_HOME:-}" ]]; then
+  echo "WARNING: ARDUPILOT_HOME not found. Set it manually:"
+  echo "  export ARDUPILOT_HOME=/path/to/ardupilot"
+else
+  echo "ArduPilot found at: $ARDUPILOT_HOME"
+fi
+
+echo "Project dir   : $PROJECT_DIR"
+echo "Gazebo models : $GAZEBO_MODEL_PATH"

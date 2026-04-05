@@ -137,3 +137,19 @@ mav.parm.*
 
 # IDE - VSCode
 .vscode/
+
+# MAVProxy logs
+*.tlog
+*.tlog.raw
+*.parm
+
+# Backup files
+*.bak
+EOF
+
+*.tlog
+*.tlog.raw
+*.parm
+__pycache__/
+*.pyc
+*.bak

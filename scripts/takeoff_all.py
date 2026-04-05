@@ -151,3 +151,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+#this code is for a multi-UAV takeoff script that connects to three drones, sets them to GUIDED mode, waits for their EKF to be ready in parallel using threads, and then arms and takes off each drone. The key improvement is that the EKF waiting is done simultaneously for all drones, preventing any one drone from being idle while another initializes.
+#but there a bugs in the code to be fixed:

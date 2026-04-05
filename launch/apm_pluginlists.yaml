@@ -1,0 +1,16 @@
+/**:
+  ros__parameters:
+    plugin_allowlist:
+      - sys_status
+      - sys_time
+      - setpoint_position
+      - setpoint_velocity
+      - waypoint
+      - param
+      - rc_io
+      - manual_control
+      - local_position
+      - global_position
+      - imu
+      - home_position
+      - nav_controller_output
