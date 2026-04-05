@@ -7,6 +7,13 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Source portable setup
 source "$PROJECT_DIR/setup.sh"
 
+echo "=== Killing any previous SITL/Gazebo instances ==="
+pkill -f arducopter 2>/dev/null || true
+pkill -f gzserver  2>/dev/null || true
+pkill -f gzclient  2>/dev/null || true
+sleep 5
+echo "=== Cleanup done ==="
+
 if [[ -z "${ARDUPILOT_HOME:-}" ]]; then
   echo "ERROR: ARDUPILOT_HOME is not set."
   echo "Run: export ARDUPILOT_HOME=/path/to/ardupilot"

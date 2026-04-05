@@ -3,7 +3,13 @@
 # Source this before running anything: source setup.sh
 
 export PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:${GAZEBO_MODEL_PATH:-}"
+
+# Only add to GAZEBO_MODEL_PATH if not already there
+if [[ ":${GAZEBO_MODEL_PATH:-}:" != *":$PROJECT_DIR/models:"* ]]; then
+  export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:${GAZEBO_MODEL_PATH:-}"
+fi
+
+export GAZEBO_MODEL_DATABASE_URI=""  #disable online model database to speed up Gazebo startup
 
 # ArduPilot - set ARDUPILOT_HOME to wherever it is on this machine
 if [[ -z "${ARDUPILOT_HOME:-}" ]]; then
