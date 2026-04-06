@@ -76,3 +76,9 @@ echo "Connect to UAV2: cd ~ && mavproxy.py --master=tcp:127.0.0.1:5770 --logfile
 echo "Connect to UAV3: cd ~ && mavproxy.py --master=tcp:127.0.0.1:5780 --logfile=~/mav3.tlog"
 
 wait $GAZEBO_PID
+
+
+#after running the launch script run the below command in new terminal to connect to STIL instance 
+# mavproxy.py --master=tcp:127.0.0.1:5760 
+# mavproxy.py --master=tcp:127.0.0.1:5770 
+# mavproxy.py --master=tcp:127.0.0.1:5780 
