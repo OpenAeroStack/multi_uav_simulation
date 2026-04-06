@@ -24,9 +24,13 @@
     </physics>
     <gravity>0 0 -9.8</gravity>
 
-    <include>
-      <uri>model://sun</uri>
-    </include>
+    <light name="sun" type="directional">
+       <cast_shadows>true</cast_shadows>
+       <pose>0 0 100 0 0 0</pose>
+       <diffuse>1 1 1 1</diffuse>
+       <specular>0.2 0.2 0.2 1</specular>
+       <direction>-0.5 0.1 -0.9</direction>
+    </light>
 
     <model name="ground_plane">
       <static>true</static>
@@ -49,10 +53,9 @@
             </plane>
           </geometry>
           <material>
-            <script>
-              <uri>file://media/materials/scripts/gazebo.material</uri>
-              <name>Gazebo/Grass</name>
-            </script>
+            <ambient>0.3 0.5 0.2 1</ambient>
+            <diffuse>0.3 0.5 0.2 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
           </material>
         </visual>
       </link>

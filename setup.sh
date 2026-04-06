@@ -2,6 +2,18 @@
 # Portable setup script for multi_uav_sim
 # Source this before running anything: source setup.sh
 
+# ============================================================
+# CONFIGURE THIS FOR YOUR MACHINE:
+# ============================================================
+# CONFIGURE THIS FOR YOUR MACHINE:
+# Examples:
+#   export ARDUPILOT_HOME="$HOME/ardupilot"                  # if installed in home directory
+#   export ARDUPILOT_HOME="/opt/ardupilot"                   # if installed in /opt
+#   export ARDUPILOT_HOME="/media/user/drive-uuid/ardupilot" # if on external drive (not recommended)
+
+export ARDUPILOT_HOME="/media/randilsk/eeca64c8-e2c1-4af0-b6c4-f55dd0394558/ubuntu/ardupilot"
+
+# ============================================================
 export PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Only add to GAZEBO_MODEL_PATH if not already there
