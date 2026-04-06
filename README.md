@@ -6,7 +6,7 @@ A standalone Gazebo + ArduPilot SITL simulation for 3 UAVs. All Gazebo models ar
 
 ## System Requirements
 
-- Ubuntu 20.04 (tested)
+- Ubuntu 22.04 (tested)
 - Gazebo Classic 11 (**not** Gazebo Garden/Harmonic/Fortress)
 - ArduPilot (built from source)
 - ArduPilot Gazebo plugin (`khancyr/ardupilot_gazebo`)
