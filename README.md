@@ -115,7 +115,7 @@ export ARDUPILOT_HOME="/media/user/drive/ardupilot"       # on external drive (n
 
 ---
 
-## Step 7 — Run the Simulation
+## Step 7 — Launch the Simulation
 
 ### Multi UAV (3 drones):
 ```bash
@@ -133,20 +133,27 @@ The script will:
 3. Launch Gazebo with the world file
 4. Launch 3 ArduCopter SITL instances (or 1 for single)
 
+Wait until you see all SITL instances print `Waiting for connection` before proceeding to Step 8.
+
 ---
 
-## Step 8 — Connect via MAVProxy
+## Step 8 — Control the Drones
 
-Open a new terminal for each UAV:
+Once the simulation is running you have two options: manual control via MAVProxy, or automated missions via Python scripts. Both can be used independently.
+
+---
+
+### Option A — Manual control via MAVProxy
+
+Open a separate terminal for each UAV and connect using MAVProxy. From MAVProxy you can issue commands like `mode guided`, `arm throttle`, and `takeoff 10` interactively.
+
+> **Important:** Always run MAVProxy from your home directory (`cd ~`) to avoid permission errors when writing log files.
+
+**Multi UAV — open one terminal per drone:**
 
 ```bash
 # UAV 1
-cd ~ && mavproxy.py - a simulation environment for running multiple ArduCopter instances in SITL (Software-in-the-Loop) with Gazebo. It includes launch scripts, world files, and control scripts for both multi-UAV and single-UAV simulations.
-
-## File Structure
-
-- `launch/`: Contains shell scripts to launch the simulations.
-  - `launch_multi_uav-master=tcp:127.0.0.1:5760 --logfile=~/mav1.tlog
+cd ~ && mavproxy.py --master=tcp:127.0.0.1:5760 --logfile=~/mav1.tlog
 
 # UAV 2
 cd ~ && mavproxy.py --master=tcp:127.0.0.1:5770 --logfile=~/mav2.tlog
@@ -155,102 +162,70 @@ cd ~ && mavproxy.py --master=tcp:127.0.0.1:5770 --logfile=~/mav2.tlog
 cd ~ && mavproxy.py --master=tcp:127.0.0.1:5780 --logfile=~/mav3.tlog
 ```
 
-> **Important:** Always run MAVProxy from your home directory (`cd ~`) to avoid permission errors when writing log files.
-# Multi-UAV ArduCopter SITL with Gazebo
+**Single UAV:**
 
-This project provides a simulation environment for running multiple ArduCopter instances in SITL (Software-in-the-Loop) with Gazebo. It includes launch scripts, world files, and control scripts for both multi-UAV and single-UAV simulations.
+```bash
+cd ~ && mavproxy.py --master=tcp:127.0.0.1:5760 --logfile=~/mav1.tlog
+```
 
-## File Structure
+---
 
-- `launch/`: Contains shell scripts to launch the simulations.
-  - `launch_multi_uav.sh`: Launches a 3-drone simulation.
-  - `launch_single_uav.sh`: Launches a single drone simulation.
-- `scripts/`: Contains Python scripts for controlling the UAVs.
-  - `takeoff_all.py`: Connects to the 3 simulated drones, arms them, and commands a synchronized takeoff.
-- `worlds/`: Contains Gazebo world files.
-  - `multi_uav.world`: A world with 3 Iris quadcopters.
-  - `single_uav.world`: A world with a single Iris quadcopter.
-- `*.parm`: ArduPilot parameter files. These are examples and not directly used by the default launch scripts.
+### Option B — Automated missions via Python scripts
 
-## Setup
+The `scripts/` directory contains Python scripts that connect directly to the SITL instances over MAVLink and fly pre-programmed missions. These run independently — MAVProxy does not need to be open at the same time.
 
-Before running the simulation, ensure you have a working ArduPilot and Gazebo installation. You also need to source the ArduPilot environment script.
+> **Note:** Run these from a terminal where `setup.sh` has been sourced (the launch script does this automatically, but a fresh terminal will not have it sourced). If you see connection errors, run `source setup.sh` first.
 
-1.  **Source the setup script:**
-    ```bash
-    source ~/setup_ardupilot.sh
-    ```
+**Arm and takeoff all 3 UAVs:**
 
-## How to Run
+```bash
+python3 scripts/takeoff_all.py
+```
 
-### Multi-UAV Simulation
+This connects to all 3 drones, switches each to GUIDED mode, arms them, and commands a synchronised takeoff to 5 metres. All 3 drones take off simultaneously.
 
-1.  **Launch the simulation:**
-    This script will build the ArduCopter binary, start Gazebo, and launch three SITL instances.
+**Autonomous single drone flight:**
 
-    ```bash
-    bash launch/launch_multi_uav.sh
-    ```
+```bash
+python3 scripts/single_drone_auto.py
+```
 
-2.  **Run the takeoff script:**
-    In a new terminal (after sourcing the setup script), run the following command to make the drones take off.
+This runs a full autonomous mission on UAV 1 — EKF wait, arm, takeoff, a sequence of waypoint moves, and RTL.
 
-    ```bash
-    python3 scripts/takeoff_all.py
-    ```
+**Multi-drone autonomous mission:**
 
-    The drones will connect, switch to GUIDED mode, arm, and take off to an altitude of 5 meters.
+```bash
+python3 scripts/multi_drone_mission.py
+```
 
-### Single UAV Simulation
+This runs a concurrent mission across all 3 UAVs using threads. Each drone takes off to 20 metres, flies 50 metres in a unique direction (North, East, West), holds for 5 seconds, then RTLs. All phases are barrier-synchronised so the drones move together.
 
-1.  **Launch the simulation:**
-    This will start Gazebo and a single SITL instance.
+---
 
-    ```bash
-    bash launch/launch_single.sh
-    ```
+## How It Works
 
-2.  **Control the drone:**
-    You can connect to the drone using MAVProxy from another terminal:
-    ```bash
-    mavproxy.py --master=tcp:127.0.0.1:5760
-    ```
-    From the MAVProxy command line, you can issue commands like `mode guided`, `arm throttle`, and `takeoff 5`.
+```
+setup.sh
+  └── sets ARDUPILOT_HOME, GAZEBO_MODEL_PATH, GAZEBO_RESOURCE_PATH
 
-## Configuration
+launch_multi_uav.sh
+  ├── starts Gazebo (loads world + models from repo/models)
+  │     └── libArduPilotPlugin.so (pre-installed, bridges Gazebo ↔ SITL)
+  │           └── UDP 9002/9003, 9012/9013, 9022/9023
+  ├── starts ArduCopter SITL x3 (flight controller simulation)
+  │     └── TCP 5760, 5770, 5780
+  └── MAVProxy or Python scripts connect via TCP → MAVLink
+```
 
-### Changing the Number of UAVs
+---
 
-The number of UAVs is hardcoded to 3. To change it, you need to modify the following files:
+## Port Reference
 
-1.  **`launch/launch_multi_uav.sh`**: Add or remove SITL instance launch blocks. Each drone needs a unique `sysid` and instance number (`-I`).
-2.  **`worlds/multi_uav.world`**: Add or remove `<model>` blocks for each drone. Ensure each drone has a unique name and pose.
-3.  **`scripts/takeoff_all.py`**: Modify the script to connect to the correct number of drones and MAVLink ports. It is recommended to use a loop instead of hardcoded connections for scalability.
-
-##source file i used in my setup 
-
-file name is setup_ardupilot.sh and below is the content
-
-setup_ardupilot.sh                             
-source /usr/share/gazebo-11/setup.bash
-source "/home/ubuntu/ardupilot/Tools/completion/completion.bash"
-export GAZEBO_MODEL_PATH=$GAZEBO_MODEL_PATH:/home/ubuntu/FYP/gazebo_models_worl>
-export GAZEBO_RESOURCE_PATH=$GAZEBO_RESOURCE_PATH:/home/ubuntu/FYP/gazebo_model>
-export GAZEBO_MODEL_DATABASE_URI=""
-export PATH=$PATH:$HOME/ardupilot/Tools/autotest
-export PATH=/usr/lib/ccache:$PATH
-
-export GAZEBO_MODEL_PATH=$GAZEBO_MODEL_PATH:/home/ubuntu/ardupilot_gazebo/models
-
-export GAZEBO_RESOURCE_PATH=$GAZEBO_RESOURCE_PATH:/home/ubuntu/ardupilot_gazebo>
-
-export GAZEBO_RESOURCE_PATH=$GAZEBO_RESOURCE_PATH:~/FYP/multi_uav_sim/worlds
-echo "ArduPilot environment loaded!"
-
-
-
-
-
+| UAV | Gazebo UDP in | Gazebo UDP out | MAVProxy TCP |
+|-----|--------------|----------------|--------------|
+| UAV 1 (sysid 1) | 9002 | 9003 | 5760 |
+| UAV 2 (sysid 2) | 9012 | 9013 | 5770 |
+| UAV 3 (sysid 3) | 9022 | 9023 | 5780 |
 
 ---
 
@@ -270,40 +245,14 @@ multi_uav_sim/
 │   └── gimbal_small_2d/          # 2D gimbal with camera
 ├── scripts/
 │   ├── takeoff_all.py            # arm and takeoff all 3 UAVs
-│   └── single_drone_auto.py      # autonomous single drone flight
+│   ├── single_drone_auto.py      # autonomous single drone flight
+│   └── multi_drone_mission.py    # concurrent 3-drone mission
 ├── worlds/
 │   ├── multi_uav.world           # 3 UAV world
 │   └── single_uav.world          # single UAV world
 ├── setup.sh                      # configure environment variables
 └── README.md
 ```
-
----
-
-## How It Works
-
-```
-setup.sh
-  └── sets ARDUPILOT_HOME, GAZEBO_MODEL_PATH, GAZEBO_RESOURCE_PATH
-
-launch_multi_uav.sh
-  ├── starts Gazebo (loads world + models from repo/models)
-  │     └── libArduPilotPlugin.so (pre-installed, bridges Gazebo ↔ SITL)
-  │           └── UDP 9002/9003, 9012/9013, 9022/9023
-  ├── starts ArduCopter SITL x3 (flight controller simulation)
-  │     └── TCP 5760, 5770, 5780
-  └── MAVProxy connects via TCP → MAVLink → your Python scripts
-```
-
----
-
-## Port Reference
-
-| UAV | Gazebo UDP in | Gazebo UDP out | MAVProxy TCP |
-|-----|--------------|----------------|--------------|
-| UAV 1 (sysid 1) | 9002 | 9003 | 5760 |
-| UAV 2 (sysid 2) | 9012 | 9013 | 5770 |
-| UAV 3 (sysid 3) | 9022 | 9023 | 5780 |
 
 ---
 
@@ -330,6 +279,13 @@ Always run MAVProxy from your home directory:
 cd ~ && mavproxy.py --master=tcp:127.0.0.1:5760 --logfile=~/mav1.tlog
 ```
 
+**Python script connection error:**
+Source the environment before running scripts in a fresh terminal:
+```bash
+source setup.sh
+python3 scripts/multi_drone_mission.py
+```
+
 ---
 
 ## Notes
@@ -338,3 +294,4 @@ cd ~ && mavproxy.py --master=tcp:127.0.0.1:5760 --logfile=~/mav1.tlog
 - ArduPilot binary is built fresh on each launch — this takes ~2-3 seconds if already built
 - All models are bundled in `models/` — no internet connection required to run the simulation
 - `GAZEBO_MODEL_DATABASE_URI=""` is set in `setup.sh` to disable online model fetching
+- MAVProxy and Python scripts connect to the same TCP ports — do not run both at the same time for the same UAV as they will compete for the connection
