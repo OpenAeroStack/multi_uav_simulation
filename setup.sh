@@ -3,13 +3,15 @@
 # Source this before running anything: source setup.sh
 
 # ============================================================
-# CONFIGURE THIS FOR YOUR MACHINE:
-# Examples:
-#   export ARDUPILOT_HOME="$HOME/ardupilot"
+# ARDUPILOT_HOME selection order:
+# 1) Existing ARDUPILOT_HOME from your shell, if set
+# 2) Fallback to "$HOME/ardupilot"
+#
+# Override example:
 #   export ARDUPILOT_HOME="/opt/ardupilot"
-#   export ARDUPILOT_HOME="/media/user/drive-uuid/ardupilot"
-export ARDUPILOT_HOME="/media/randilsk/eeca64c8-e2c1-4af0-b6c4-f55dd0394558/ubuntu/ardupilot"
+#   source setup.sh
 # ============================================================
+export ARDUPILOT_HOME="${ARDUPILOT_HOME:-$HOME/ardupilot}"
 
 export PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -22,10 +24,12 @@ export GAZEBO_MODEL_DATABASE_URI=""
 
 if [[ ! -d "$ARDUPILOT_HOME" ]]; then
   echo "ERROR: ARDUPILOT_HOME not found at: $ARDUPILOT_HOME"
-  echo "Edit setup.sh and set ARDUPILOT_HOME to your ardupilot path."
+  echo "Set ARDUPILOT_HOME to your ArduPilot path, then source setup.sh again."
+  echo "Example: export ARDUPILOT_HOME=\"$HOME/ardupilot\""
   exit 1
 fi
 
 echo "ArduPilot found at: $ARDUPILOT_HOME"
 echo "Project dir   : $PROJECT_DIR"
 echo "Gazebo models : $GAZEBO_MODEL_PATH"
+echo "Tip           : For namespace mode, run scripts/setup_netns_tap.sh"

@@ -6,7 +6,7 @@ It covers all required updates in:
 - `worlds/multi_uav.world`
 - `models/iris_*/model.sdf`
 - `launch/launch_multi_uav.sh`
-- `scripts/multi_drone_misison.py`
+- `scripts/multi_drone_mission.py`
 
 ## Current Mapping Pattern
 
@@ -87,7 +87,7 @@ Also update:
 
 Recommended: put launch blocks inside a loop so scaling is easier.
 
-## Step 4: Update `scripts/multi_drone_misison.py`
+## Step 4: Update `scripts/multi_drone_mission.py`
 
 Add one entry per new drone in `DRONES`.
 

@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
+import argparse
+import os
 import time
 from pymavlink import mavutil
 
-print("Connecting to drone...")
-vehicle = mavutil.mavlink_connection('tcp:127.0.0.1:5760', source_system=255)
+def parse_args():
+    parser = argparse.ArgumentParser(description="Single UAV takeoff test")
+    parser.add_argument("--host", default=os.getenv("UAV1_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.getenv("UAV1_PORT", "5760")))
+    return parser.parse_args()
+
+
+ARGS = parse_args()
+ADDR = f"tcp:{ARGS.host}:{ARGS.port}"
+print(f"Connecting to drone at {ADDR}...")
+vehicle = mavutil.mavlink_connection(ADDR, source_system=255)
 vehicle.wait_heartbeat()
 print(f"Connected! Heartbeat from system {vehicle.target_system}\n")
 

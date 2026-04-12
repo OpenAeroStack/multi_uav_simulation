@@ -23,6 +23,18 @@ fi
 WORLD_PATH="$PROJECT_DIR/worlds/single_uav.world"
 BINARY="$ARDUPILOT_HOME/build/sitl/bin/arducopter"
 DEFAULTS="$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm"
+GAZEBO_WAIT_SECONDS="${GAZEBO_WAIT_SECONDS:-20}"
+UAV1_SIM_ADDRESS="${UAV1_SIM_ADDRESS:-127.0.0.1}"
+UAV1_MAVLINK_HOST="${UAV1_MAVLINK_HOST:-127.0.0.1}"
+SITL_PID=""
+
+cleanup_child() {
+  if [[ -n "$SITL_PID" ]]; then
+    echo "=== Stopping SITL child process ==="
+    kill "$SITL_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup_child EXIT INT TERM
 
 if ! command -v gazebo >/dev/null 2>&1; then
   echo "ERROR: gazebo not found."
@@ -48,20 +60,18 @@ echo "=== Launching Gazebo with 1 UAV ==="
 gazebo --verbose "$WORLD_PATH" &
 GAZEBO_PID=$!
 
-echo "=== Waiting for Gazebo to fully load (20 seconds) ==="
-sleep 20
+echo "=== Waiting for Gazebo to fully load (${GAZEBO_WAIT_SECONDS}s) ==="
+sleep "$GAZEBO_WAIT_SECONDS"
 
 echo "=== Launching ArduCopter SITL instance 0 (UAV1) ==="
 cd ~/
-$BINARY --model gazebo-iris --speedup 1 --sysid 1 \
-  --defaults $DEFAULTS \
-  --sim-address=127.0.0.1 -I0 &
+"$BINARY" --model gazebo-iris --speedup 1 --sysid 1 \
+  --defaults "$DEFAULTS" \
+  --sim-address="$UAV1_SIM_ADDRESS" -I0 &
+SITL_PID="$!"
 
 echo ""
 echo "=== SITL instance running ==="
-echo "Connect to UAV1: cd ~ && mavproxy.py --master=tcp:127.0.0.1:5760 --logfile=~/mav1.tlog"
+echo "Connect to UAV1: cd ~ && mavproxy.py --master=tcp:${UAV1_MAVLINK_HOST}:5760 --logfile=~/mav1.tlog"
 
 wait $GAZEBO_PID
-
-#after running the launch script run the below command in new terminal to connect to STIL instance 
-# mavproxy.py --master=tcp:127.0.0.1:5760 
