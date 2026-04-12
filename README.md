@@ -176,18 +176,18 @@ The `scripts/` directory contains Python scripts that connect directly to the SI
 
 > **Note:** Run these from a terminal where `setup.sh` has been sourced (the launch script does this automatically, but a fresh terminal will not have it sourced). If you see connection errors, run `source setup.sh` first.
 
-**Arm and takeoff all 3 UAVs:**
+**Arm and takeoff a single UAV:**
 
 ```bash
-python3 scripts/takeoff_all.py
+python3 scripts/single_drone_takeoff.py
 ```
 
-This connects to all 3 drones, switches each to GUIDED mode, arms them, and commands a synchronised takeoff to 5 metres. All 3 drones take off simultaneously.
+This connects to UAV 1 (or another host and port if provided), switches to GUIDED mode, arms, and takes off.
 
 **Autonomous single drone flight:**
 
 ```bash
-python3 scripts/single_drone_auto.py
+python3 scripts/single_drone_mission.py
 ```
 
 This runs a full autonomous mission on UAV 1 — EKF wait, arm, takeoff, a sequence of waypoint moves, and RTL.
@@ -199,6 +199,39 @@ python3 scripts/multi_drone_mission.py
 ```
 
 This runs a concurrent mission across all 3 UAVs using threads. Each drone takes off to 20 metres, flies 50 metres in a unique direction (North, East, West), holds for 5 seconds, then RTLs. All phases are barrier-synchronised so the drones move together.
+
+You can override per-UAV endpoints for namespace mode:
+
+```bash
+UAV1_HOST=10.42.1.2 UAV2_HOST=10.42.2.2 UAV3_HOST=10.42.3.2 \
+python3 scripts/multi_drone_mission.py
+```
+
+---
+
+## Namespace + TAP + NS-3 Flow (3 UAV)
+
+1. Create namespace and TAP plumbing:
+
+```bash
+bash scripts/setup_netns_tap.sh
+```
+
+2. Launch Gazebo + SITL with netns-ready setup:
+
+```bash
+bash launch/launch_multi_uav_netns.sh
+```
+
+3. Start the NS-3 real-time TapBridge scenario from [ns3/README.md](ns3/README.md).
+
+4. Run ROS 2 nodes or MAVLink tools against namespace IPs as needed.
+
+Cleanup when done:
+
+```bash
+bash scripts/cleanup_netns_tap.sh
+```
 
 ---
 
@@ -244,12 +277,16 @@ multi_uav_sim/
 │   ├── iris_with_ardupilot/      # iris with ardupilot config
 │   └── gimbal_small_2d/          # 2D gimbal with camera
 ├── scripts/
-│   ├── takeoff_all.py            # arm and takeoff all 3 UAVs
-│   ├── single_drone_auto.py      # autonomous single drone flight
+│   ├── single_drone_takeoff.py   # single UAV arm + takeoff helper
+│   ├── single_drone_mission.py   # autonomous single drone flight
 │   └── multi_drone_mission.py    # concurrent 3-drone mission
+│   └── setup_netns_tap.sh        # create netns + TAP + bridge plumbing
 ├── worlds/
 │   ├── multi_uav.world           # 3 UAV world
 │   └── single_uav.world          # single UAV world
+├── ns3/
+│   ├── three_uav_tapbridge_rt.cc # NS-3 real-time TapBridge skeleton
+│   └── README.md
 ├── setup.sh                      # configure environment variables
 └── README.md
 ```
