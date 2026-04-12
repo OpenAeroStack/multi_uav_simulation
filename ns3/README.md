@@ -32,6 +32,12 @@ cd "$NS3_HOME"
 sudo ./ns3 run "scratch/three_uav_tapbridge_rt --tap1=tap-uav1 --tap2=tap-uav2 --tap3=tap-uav3 --delayMs=20 --lossRate=0.01"
 ```
 
+For repeatable performance runs, set a finite duration and export FlowMonitor XML:
+
+```bash
+./ns3 run "scratch/three_uav_tapbridge_rt --tap1=tap-uav1 --tap2=tap-uav2 --tap3=tap-uav3 --delayMs=50 --lossRate=0.02 --simDurationSec=60 --enableFlowMonitor=1 --flowmonXml=results.xml"
+```
+
 If your ns-3 version uses `./waf`:
 
 ```bash
@@ -47,6 +53,35 @@ sudo ./waf --run "scratch/three_uav_tapbridge_rt --tap1=tap-uav1 --tap2=tap-uav2
 - `--lossRate`: per-device receive loss probability (0.0 to 1.0).
 - `--dataRate`: channel data rate, default `50Mbps`.
 - `--simDurationSec`: stop after N seconds (`0` means run continuously).
+- `--enableFlowMonitor`: `1`/`0`, enable or disable FlowMonitor (default enabled).
+- `--flowmonXml`: XML output path for FlowMonitor stats, default `three_uav_flowmon.xml`.
+
+## What You Get From FlowMonitor
+
+At the end of the run, the scenario prints:
+
+- Throughput (`throughputMbps`)
+- Average delay (`avgDelayMs`)
+- Average jitter (`avgJitterMs`)
+- Packet loss (`lossPct`)
+
+It also writes detailed per-flow metrics to `results.xml` (or your configured file).
+
+## Feeding UAV Positions Into NS-3
+
+This baseline file does not yet consume external position streams, but the recommended integration path is:
+
+1. Gazebo publishes UAV pose updates.
+2. A bridge process forwards pose updates to NS-3 in real time.
+3. NS-3 updates each node's `MobilityModel` from those updates.
+
+Transport options for step 2:
+
+- UDP socket bridge: simple and low-overhead.
+- Shared memory: lowest latency on one machine.
+- ROS 2 bridge: best when the rest of your stack is ROS 2.
+
+For your current project, ROS 2 bridge is usually the most maintainable choice.
 
 ## Notes
 
