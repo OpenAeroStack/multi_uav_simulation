@@ -39,24 +39,24 @@ def _env_float(name: str, default: float) -> float:
 DRONES = [
     {
         "name": "UAV1",
-        "host": os.getenv("UAV1_HOST", "127.0.0.1"),
-        "port": _env_int("UAV1_PORT", 5760),
+        "host": "10.42.1.2", # Namespace IP is used not the local host
+        "port": 14550,
         "sysid": 1,
-        "direction": os.getenv("UAV1_DIRECTION", "left"),
+        "direction": "left",
     },
     {
         "name": "UAV2",
-        "host": os.getenv("UAV2_HOST", "127.0.0.1"),
-        "port": _env_int("UAV2_PORT", 5770),
+        "host": "10.42.2.2",
+        "port": 14550,
         "sysid": 2,
-        "direction": os.getenv("UAV2_DIRECTION", "right"),
+        "direction": "right",
     },
     {
         "name": "UAV3",
-        "host": os.getenv("UAV3_HOST", "127.0.0.1"),
-        "port": _env_int("UAV3_PORT", 5780),
+        "host": "10.42.3.2",
+        "port": 14550,
         "sysid": 3,
-        "direction": os.getenv("UAV3_DIRECTION", "forward"),
+        "direction": "forward",
     },
 ]
 
@@ -322,6 +322,11 @@ def run_mission(cfg: dict):
         drone.log(f"ERROR: {exc}")
         with errors_lock:
             errors.append((drone.name, exc))
+            
+        # These lines are used to prevent the other drones from hanging forever!
+        barrier_takeoff.abort()
+        barrier_waypoint.abort()
+        barrier_hold.abort()
 
 
 def main():
