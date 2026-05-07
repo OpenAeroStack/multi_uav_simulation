@@ -29,3 +29,17 @@ fi
 echo "ArduPilot found at: $ARDUPILOT_HOME"
 echo "Project dir   : $PROJECT_DIR"
 echo "Gazebo models : $GAZEBO_MODEL_PATH"
+
+# ROS 2
+set +u
+source /opt/ros/humble/setup.bash
+if [[ -f "$HOME/ros2_ws/install/setup.bash" ]]; then
+  source "$HOME/ros2_ws/install/setup.bash"
+fi
+set -u
+
+if [[ -f "$HOME/ros2_ws/install/setup.bash" ]]; then
+  set +u  # colcon setup scripts use unbound variables
+  source "$HOME/ros2_ws/install/setup.bash"
+  set -u
+fi
