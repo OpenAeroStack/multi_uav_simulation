@@ -1,334 +1,190 @@
-# multi_uav_sim
+# Multi-UAV Simulation Framework
 
-A standalone Gazebo + ArduPilot SITL simulation for 3 UAVs. All Gazebo models are bundled in the repo — the only external dependencies are Gazebo 11, ArduPilot, and the ArduPilot Gazebo plugin.
+This repository contains a high-performance, containerless simulation
+framework for Multi-UAV swarming. It integrates **ArduPilot SITL**,
+**Gazebo**, and **ns-3** to create a highly realistic testing
+environment.
 
----
+Unlike standard simulations where multiple drones collide on `localhost`
+ports, this architecture uses strictly isolated **Linux Network
+Namespaces** and virtual ethernet bridges to give each UAV its own
+dedicated IP address, routing table, and MAVLink stream.
 
-## System Requirements
+------------------------------------------------------------------------
 
-- Ubuntu 22.04 (tested)
-- Gazebo Classic 11 (**not** Gazebo Garden/Harmonic/Fortress)
-- ArduPilot (built from source)
-- ArduPilot Gazebo plugin (`khancyr/ardupilot_gazebo`)
-- MAVProxy
-- Python 3
+##  Architecture Highlights
 
----
+To achieve complete network isolation while allowing the 3D physics
+engine and network simulator to communicate, this framework implements
+several advanced routing techniques.
 
-## Step 1 — Install Gazebo 11
+### Strict Subnet Isolation (`/24`)
 
-```bash
-sudo apt update
-sudo apt install gazebo11 libgazebo11-dev
+Each drone operates on its own dedicated `/24` subnet (e.g.,
+`10.42.1.x`, `10.42.2.x`) to prevent routing collisions when commanding
+the swarm.
+
+### Two-Way UDP Physics Mirrors (`socat`)
+
+This approach overcomes the hardcoded `127.0.0.1` socket binding in the
+ArduPilot Gazebo plugin. The framework uses `socat` to build symmetrical
+relays that catch motor commands from the namespace, send them across
+the virtual bridge to Gazebo, and seamlessly return the 3D physics data
+back to ArduPilot.
+
+### Headless MAVProxy Daemons
+
+Each namespace runs a lightweight background `mavproxy.py` router to
+broadcast the drone's telemetry to the standard `14550` port. This
+allows a single Python swarm controller script to command the entire
+fleet simultaneously.
+
+### Custom SDF Routing
+
+The Gazebo model files (`model.sdf`) are explicitly configured with
+`<fdm_addr>` tags pointing to the exact namespace IP address of each
+drone.
+
+------------------------------------------------------------------------
+
+##  Prerequisites
+
+Ensure the following dependencies are installed on your Ubuntu machine:
+
+-   **Ubuntu** (native installation recommended)
+-   **ArduPilot SITL** (ArduCopter)
+-   **Gazebo** (with `libArduPilotPlugin.so`)
+-   **ns-3** (Network Simulator 3)
+-   **Python 3** (with `pymavlink`)
+-   **MAVProxy**
+-   **socat**
+
+Install socat if needed:
+
+``` bash
+sudo apt-get install socat
 ```
 
-Verify:
-```bash
-gazebo --version
-# Should print: Gazebo multi-robot simulator, version 11.x.x
+------------------------------------------------------------------------
+
+##  Quick Start Guide
+
+### 1. Initialize the Network Infrastructure
+
+Before launching any physics or drones, you must build the virtual
+bridges, `veth` pairs, and routing tables.
+
+``` bash
+cd scripts/
+sudo ./setup_network.sh
 ```
 
----
+------------------------------------------------------------------------
 
-## Step 2 — Install ArduPilot
+### 2. Launch the Simulation Stack
 
-```bash
-cd ~
-git clone https://github.com/ArduPilot/ardupilot.git
-cd ardupilot
-git submodule update --init --recursive
+The master launch script handles the boot sequence. It will:
+
+-   Start Gazebo with the **3-drone world**
+-   Build the **socat two-way UDP mirrors** for all three drones
+-   Boot **ArduPilot SITL** inside the network namespaces
+-   Launch **MAVProxy daemons** to route telemetry
+
+Run:
+
+``` bash
+./launch_multi_uav.sh
 ```
 
-Install dependencies:
-```bash
-Tools/environment_install/install-prereqs-ubuntu.sh -y
-. ~/.profile
+Wait until the terminal prints:
+
+    === All 3 SITL instances running ===
+
+------------------------------------------------------------------------
+
+### 3. Execute the Autonomous Swarm Mission
+
+Once the drones have booted and acquired a **3D GPS lock**, launch the
+central Python controller to orchestrate the flight.
+
+Open a **new terminal window** and run:
+
+``` bash
+cd scripts/
+python3 multi_drone_mission.py
 ```
 
-Build ArduCopter for SITL:
-```bash
-./waf configure --board sitl
-./waf copter
+**Note:**\
+The mission script utilizes a synchronization **Barrier**. All three
+drones must reach the **20.0 m takeoff altitude** before the swarm is
+permitted to proceed to Waypoint 1.
+
+------------------------------------------------------------------------
+
+## 🛠️ Common Troubleshooting
+
+### "No route to host"
+
+**Cause:**\
+The virtual ethernet bridges do not exist, or there is a subnet
+collision.
+
+**Fix:**\
+Ensure you ran:
+
+``` bash
+sudo ./setup_network.sh
 ```
 
-Verify the binary exists:
-```bash
-ls build/sitl/bin/arducopter
+Verify the script uses a **/24 subnet mask**, not `/16`.
+
+------------------------------------------------------------------------
+
+### "Connection refused" / "Link 1 Down"
+
+**Cause:**\
+MAVProxy cannot connect to ArduPilot's locked `127.0.0.1:5760` port,
+usually because ArduPilot crashed or has not finished booting.
+
+**Fix:**\
+Ensure you are **not running MAVProxy as root**:
+
+``` bash
+sudo -u $USER mavproxy.py
 ```
 
----
+------------------------------------------------------------------------
 
-## Step 3 — Install ArduPilot Gazebo Plugin
+### "Frozen Time" / Drones Won't Arm
 
-```bash
-cd ~
-git clone https://github.com/khancyr/ardupilot_gazebo.git
-cd ardupilot_gazebo
-mkdir build && cd build
-cmake ..
-make -j4
-sudo make install
-```
+**Cause:**\
+ArduPilot is not receiving physics data from Gazebo, causing its
+internal clock to freeze at `0.00` and preventing MAVLink heartbeats.
 
-Verify the plugin is installed:
-```bash
-ls /usr/lib/x86_64-linux-gnu/gazebo-11/plugins/ | grep ArduPilot
-# Should show: libArduPilotPlugin.so
-```
+**Fix:**
 
----
+1.  Check the Gazebo GUI to ensure the simulation clock is ticking (not
+    paused).
+2.  Verify that your drone's `model.sdf` file contains the correct
+    `<fdm_addr>` pointing to its specific namespace IP (e.g.,
+    `10.42.1.2`).
+3.  Confirm the `socat` relays are running in the background.
 
-## Step 4 — Install MAVProxy
+------------------------------------------------------------------------
 
-```bash
-pip3 install MAVProxy
-```
+##  Repository Structure
 
----
+    /models/
+        Drone SDF files with updated <fdm_addr> plugin targets
 
-## Step 5 — Clone This Repo
+    /worlds/
+        Gazebo environment files
 
-```bash
-git clone <your-repo-url>
-cd multi_uav_sim
-```
+    /scripts/setup_network.sh
+        Generates the Linux network namespaces
 
----
+    /scripts/launch_multi_uav.sh
+        Automated boot sequence and socat relay generation
 
-## Step 6 — Configure `setup.sh`
-
-Open `setup.sh` and set `ARDUPILOT_HOME` to wherever you cloned ArduPilot:
-
-```bash
-# Edit this line in setup.sh:
-export ARDUPILOT_HOME="$HOME/ardupilot"
-```
-
-Common paths:
-```bash
-export ARDUPILOT_HOME="$HOME/ardupilot"                   # installed in home directory
-export ARDUPILOT_HOME="/opt/ardupilot"                    # installed in /opt
-export ARDUPILOT_HOME="/media/user/drive/ardupilot"       # on external drive (not recommended)
-```
-
-> **Note:** Everything else in `setup.sh` is automatic — model paths, resource paths, and the Gazebo database are all configured for you.
-
----
-
-## Step 7 — Launch the Simulation
-
-### Multi UAV (3 drones):
-```bash
-bash launch/launch_multi_uav.sh
-```
-
-### Single UAV:
-```bash
-bash launch/launch_single.sh
-```
-
-The script will:
-1. Kill any previous Gazebo/ArduPilot instances
-2. Build the ArduCopter binary
-3. Launch Gazebo with the world file
-4. Launch 3 ArduCopter SITL instances (or 1 for single)
-
-Wait until you see all SITL instances print `Waiting for connection` before proceeding to Step 8.
-
----
-
-## Step 8 — Control the Drones
-
-Once the simulation is running you have two options: manual control via MAVProxy, or automated missions via Python scripts. Both can be used independently.
-
----
-
-### Option A — Manual control via MAVProxy
-
-Open a separate terminal for each UAV and connect using MAVProxy. From MAVProxy you can issue commands like `mode guided`, `arm throttle`, and `takeoff 10` interactively.
-
-> **Important:** Always run MAVProxy from your home directory (`cd ~`) to avoid permission errors when writing log files.
-
-**Multi UAV — open one terminal per drone:**
-
-```bash
-# UAV 1
-cd ~ && mavproxy.py --master=tcp:127.0.0.1:5760 --logfile=~/mav1.tlog
-
-# UAV 2
-cd ~ && mavproxy.py --master=tcp:127.0.0.1:5770 --logfile=~/mav2.tlog
-
-# UAV 3
-cd ~ && mavproxy.py --master=tcp:127.0.0.1:5780 --logfile=~/mav3.tlog
-```
-
-**Single UAV:**
-
-```bash
-cd ~ && mavproxy.py --master=tcp:127.0.0.1:5760 --logfile=~/mav1.tlog
-```
-
----
-
-### Option B — Automated missions via Python scripts
-
-The `scripts/` directory contains Python scripts that connect directly to the SITL instances over MAVLink and fly pre-programmed missions. These run independently — MAVProxy does not need to be open at the same time.
-
-> **Note:** Run these from a terminal where `setup.sh` has been sourced (the launch script does this automatically, but a fresh terminal will not have it sourced). If you see connection errors, run `source setup.sh` first.
-
-**Arm and takeoff a single UAV:**
-
-```bash
-python3 scripts/single_drone_takeoff.py
-```
-
-This connects to UAV 1 (or another host and port if provided), switches to GUIDED mode, arms, and takes off.
-
-**Autonomous single drone flight:**
-
-```bash
-python3 scripts/single_drone_mission.py
-```
-
-This runs a full autonomous mission on UAV 1 — EKF wait, arm, takeoff, a sequence of waypoint moves, and RTL.
-
-**Multi-drone autonomous mission:**
-
-```bash
-python3 scripts/multi_drone_mission.py
-```
-
-This runs a concurrent mission across all 3 UAVs using threads. Each drone takes off to 20 metres, flies 50 metres in a unique direction (North, East, West), holds for 5 seconds, then RTLs. All phases are barrier-synchronised so the drones move together.
-
-You can override per-UAV endpoints for namespace mode:
-
-```bash
-UAV1_HOST=10.42.1.2 UAV2_HOST=10.42.2.2 UAV3_HOST=10.42.3.2 \
-python3 scripts/multi_drone_mission.py
-```
-
----
-
-## Namespace + TAP + NS-3 Flow (3 UAV)
-
-1. Create namespace and TAP plumbing:
-
-```bash
-bash scripts/setup_netns_tap.sh
-```
-
-2. Launch Gazebo + SITL with netns-ready setup:
-
-```bash
-bash launch/launch_multi_uav_netns.sh
-```
-
-3. Start the NS-3 real-time TapBridge scenario from [ns3/README.md](ns3/README.md).
-
-4. Run ROS 2 nodes or MAVLink tools against namespace IPs as needed.
-
-Cleanup when done:
-
-```bash
-bash scripts/cleanup_netns_tap.sh
-```
-
----
-
-## How It Works
-
-```
-setup.sh
-  └── sets ARDUPILOT_HOME, GAZEBO_MODEL_PATH, GAZEBO_RESOURCE_PATH
-
-launch_multi_uav.sh
-  ├── starts Gazebo (loads world + models from repo/models)
-  │     └── libArduPilotPlugin.so (pre-installed, bridges Gazebo ↔ SITL)
-  │           └── UDP 9002/9003, 9012/9013, 9022/9023
-  ├── starts ArduCopter SITL x3 (flight controller simulation)
-  │     └── TCP 5760, 5770, 5780
-  └── MAVProxy or Python scripts connect via TCP → MAVLink
-```
-
----
-
-## Port Reference
-
-| UAV | Gazebo UDP in | Gazebo UDP out | MAVProxy TCP |
-|-----|--------------|----------------|--------------|
-| UAV 1 (sysid 1) | 9002 | 9003 | 5760 |
-| UAV 2 (sysid 2) | 9012 | 9013 | 5770 |
-| UAV 3 (sysid 3) | 9022 | 9023 | 5780 |
-
----
-
-## Project Structure
-
-```
-multi_uav_sim/
-├── launch/
-│   ├── launch_multi_uav.sh       # launch 3 UAV simulation
-│   └── launch_single.sh          # launch single UAV simulation
-├── models/                       # all Gazebo models (bundled)
-│   ├── iris_1/                   # UAV 1 model (SITL ports 9002/9003)
-│   ├── iris_2/                   # UAV 2 model (SITL ports 9012/9013)
-│   ├── iris_3/                   # UAV 3 model (SITL ports 9022/9023)
-│   ├── iris_with_standoffs/      # base iris mesh and physics
-│   ├── iris_with_ardupilot/      # iris with ardupilot config
-│   └── gimbal_small_2d/          # 2D gimbal with camera
-├── scripts/
-│   ├── single_drone_takeoff.py   # single UAV arm + takeoff helper
-│   ├── single_drone_mission.py   # autonomous single drone flight
-│   └── multi_drone_mission.py    # concurrent 3-drone mission
-│   └── setup_netns_tap.sh        # create netns + TAP + bridge plumbing
-├── worlds/
-│   ├── multi_uav.world           # 3 UAV world
-│   └── single_uav.world          # single UAV world
-├── ns3/
-│   ├── three_uav_tapbridge_rt.cc # NS-3 real-time TapBridge skeleton
-│   └── README.md
-├── setup.sh                      # configure environment variables
-└── README.md
-```
-
----
-
-## Troubleshooting
-
-**Ports already in use:**
-```bash
-pkill -f arducopter && pkill -f gzserver && pkill -f gzclient
-sleep 5
-```
-
-**Gazebo models not found:**
-Make sure you are running from a fresh terminal after editing `setup.sh`. Do not manually `source setup.sh` before running the launch script — the launch script sources it automatically.
-
-**ArduPilot Gazebo plugin not found:**
-```bash
-ls /usr/lib/x86_64-linux-gnu/gazebo-11/plugins/ | grep ArduPilot
-```
-If missing, repeat Step 3.
-
-**MAVProxy permission denied:**
-Always run MAVProxy from your home directory:
-```bash
-cd ~ && mavproxy.py --master=tcp:127.0.0.1:5760 --logfile=~/mav1.tlog
-```
-
-**Python script connection error:**
-Source the environment before running scripts in a fresh terminal:
-```bash
-source setup.sh
-python3 scripts/multi_drone_mission.py
-```
-
----
-
-## Notes
-
-- Requires **Gazebo Classic 11** — not compatible with Gazebo Harmonic/Garden/Fortress
-- ArduPilot binary is built fresh on each launch — this takes ~2-3 seconds if already built
-- All models are bundled in `models/` — no internet connection required to run the simulation
-- `GAZEBO_MODEL_DATABASE_URI=""` is set in `setup.sh` to disable online model fetching
-- MAVProxy and Python scripts connect to the same TCP ports — do not run both at the same time for the same UAV as they will compete for the connection
+    /scripts/multi_drone_mission.py
+        Pymavlink swarm controller
