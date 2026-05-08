@@ -8,6 +8,7 @@ VETH_PREFIX="${VETH_PREFIX:-veth-uav}"
 TAP_PREFIX="${TAP_PREFIX:-tap-uav}"
 BASE_SUBNET_A="${BASE_SUBNET_A:-10}"
 BASE_SUBNET_B="${BASE_SUBNET_B:-42}"
+SHARED_SUBNET="${SHARED_SUBNET:-0}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Re-running with sudo for network namespace setup..."
@@ -23,9 +24,22 @@ for i in $(seq 1 "$UAV_COUNT"); do
   veth_root="${VETH_PREFIX}${i}"
   veth_ns="eth0-${NS_PREFIX}${i}"
   tap_name="${TAP_PREFIX}${i}"
-  subnet="${BASE_SUBNET_A}.${BASE_SUBNET_B}.${i}"
-  ns_ip="${subnet}.2/24"
-  br_ip="${subnet}.1/24"
+
+  # Default mode: each UAV slice has its own /24 and the root bridge gets an IP
+  # (handy when you want the host to talk to each namespace via br-uavN).
+  #
+  # Shared subnet mode: all namespaces share one /24 so they can ping each other
+  # through NS-3 TapBridge/WiFi. In this mode we do NOT assign an IP to br-uavN
+  # to avoid duplicate addresses in the root namespace.
+  if [[ "$SHARED_SUBNET" == "1" ]]; then
+    subnet="${BASE_SUBNET_A}.${BASE_SUBNET_B}.0"
+    ns_ip="${subnet}.$((10 + i))/24"
+    br_ip=""
+  else
+    subnet="${BASE_SUBNET_A}.${BASE_SUBNET_B}.${i}"
+    ns_ip="${subnet}.2/24"
+    br_ip="${subnet}.1/24"
+  fi
 
   ip netns del "$ns_name" 2>/dev/null || true
   ip link del "$br_name" 2>/dev/null || true
@@ -45,7 +59,9 @@ for i in $(seq 1 "$UAV_COUNT"); do
   ip netns exec "$ns_name" ip link set eth0 up
 
   ip link add "$br_name" type bridge
-  ip addr add "$br_ip" dev "$br_name"
+  if [[ -n "$br_ip" ]]; then
+    ip addr add "$br_ip" dev "$br_name"
+  fi
   ip link set "$br_name" up
 
   ip tuntap add dev "$tap_name" mode tap user "$owner_user"
@@ -57,7 +73,11 @@ for i in $(seq 1 "$UAV_COUNT"); do
 
   echo "  ns address : ${ns_ip}"
   echo "  tap device : ${tap_name}"
-  echo "  bridge ip  : ${br_ip}"
+  if [[ -n "$br_ip" ]]; then
+    echo "  bridge ip  : ${br_ip}"
+  else
+    echo "  bridge ip  : (none; SHARED_SUBNET=1)"
+  fi
   echo
  done
 
