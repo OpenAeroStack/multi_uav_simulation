@@ -8,7 +8,7 @@
 #   export ARDUPILOT_HOME="$HOME/ardupilot"
 #   export ARDUPILOT_HOME="/opt/ardupilot"
 #   export ARDUPILOT_HOME="/media/user/drive-uuid/ardupilot"
-export ARDUPILOT_HOME="/media/randilsk/eeca64c8-e2c1-4af0-b6c4-f55dd0394558/ubuntu/ardupilot"
+export ARDUPILOT_HOME="$HOME/ardupilot"
 # ============================================================
 
 export PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
