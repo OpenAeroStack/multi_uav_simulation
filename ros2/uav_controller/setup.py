@@ -27,3 +27,5 @@ setup(
         ],
     },
 )
+
+#tells python how to install the package and its dependencies, and defines the console scripts for running the nodes.
