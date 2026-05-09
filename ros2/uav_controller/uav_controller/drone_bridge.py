@@ -3,46 +3,22 @@ drone_bridge.py
 ---------------
 MAVLink (commands) + AP_DDS (telemetry) bridge for one UAV.
 
-                    ┌─────────────────┐
-                    │  ArduPilot SITL │
-                    └────────┬────────┘
-                             │
-              ┌──────────────┴──────────────┐
-              │                             │
-        MAVLink TCP                   DDS topics
-        (commands only)             (telemetry only)
-              │                             │
-        arm, mode,               /ap/navsat
-        takeoff, RTL             /ap/pose/filtered
-                                 /ap/battery
-              └──────────────┬──────────────┘
-                             │
-                      drone_bridge.py
-                             │
-                    ┌────────┴────────┐
-                    │     ROS2        │
-                    │  your code      │
-                    └─────────────────┘
+Telemetry (from DDS → republished on /uavN):
+    /uav{N}/gps        sensor_msgs/NavSatFix
+    /uav{N}/rel_alt    std_msgs/Float32
+    /uav{N}/battery    std_msgs/Float32
+    /uav{N}/mode       std_msgs/String
+    /uav{N}/armed      std_msgs/Bool
 
-Telemetry (re-published from DDS onto /uavN namespace):
-    /uav{N}/gps        sensor_msgs/NavSatFix   ← from /ap/navsat
-    /uav{N}/rel_alt    std_msgs/Float32         ← from /ap/pose/filtered
-    /uav{N}/battery    std_msgs/Float32         ← from /ap/battery
-    /uav{N}/mode       std_msgs/String          ← from MAVLink heartbeat
-    /uav{N}/armed      std_msgs/Bool            ← from MAVLink heartbeat
-
-Commands (services → MAVLink):
+Services (MAVLink commands):
     /uav{N}/arm        std_srvs/Trigger
     /uav{N}/disarm     std_srvs/Trigger
     /uav{N}/takeoff    std_srvs/Trigger
     /uav{N}/land       std_srvs/Trigger
     /uav{N}/rtl        std_srvs/Trigger
 
-Parameters:
-    uav_id           int    default 1
-    mavlink_host     str    default '127.0.0.1'
-    mavlink_port     int    default 5760
-    takeoff_altitude float  default 10.0
+Topics subscribed (for waypoint commands from mission nodes):
+    /uav{N}/goto       geographic_msgs/GeoPoint  (lat, lon, alt)
 """
 
 import threading
@@ -54,12 +30,11 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 
 from std_msgs.msg import Bool, String, Float32
 from sensor_msgs.msg import NavSatFix, BatteryState
-from geometry_msgs.msg import PoseStamped
+from geographic_msgs.msg import GeoPoint
 from std_srvs.srv import Trigger
 from pymavlink import mavutil
 
 
-# QoS that matches what AP_DDS publishes with
 AP_DDS_QOS = QoSProfile(
     depth=10,
     reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -85,19 +60,16 @@ class DroneBridge(Node):
         ns          = f'/uav{self.uav_id}'
 
         # ── internal state ────────────────────────────────────────────────────
-        # Telemetry — filled by DDS callbacks
         self.lat     = 0.0
         self.lon     = 0.0
         self.alt_msl = 0.0
         self.rel_alt = 0.0
         self.battery = 0.0
-        self.gps_ok  = False  # True once valid navsat arrives
+        self.gps_ok  = False
+        self.armed   = False
+        self.mode    = 'UNKNOWN'
 
-        # Commands state — filled by MAVLink heartbeat
-        self.armed = False
-        self.mode  = 'UNKNOWN'
-
-        # ── MAVLink connection (commands only) ────────────────────────────────
+        # ── MAVLink connection ────────────────────────────────────────────────
         self.get_logger().info(
             f'[UAV{self.uav_id}] Connecting MAVLink → tcp:{host}:{port}')
         self.mav = mavutil.mavlink_connection(
@@ -105,25 +77,37 @@ class DroneBridge(Node):
         self.mav.wait_heartbeat()
         self.get_logger().info(f'[UAV{self.uav_id}] MAVLink heartbeat OK')
 
+        # ArduPilot only streams HEARTBEAT until a GCS requests more.
+        # Request GLOBAL_POSITION_INT (for rel_alt) and basic status.
+        for stream_id, rate_hz in [
+            (mavutil.mavlink.MAV_DATA_STREAM_POSITION,        10),
+            (mavutil.mavlink.MAV_DATA_STREAM_EXTENDED_STATUS,  2),
+        ]:
+            self.mav.mav.request_data_stream_send(
+                self.mav.target_system, self.mav.target_component,
+                stream_id, rate_hz, 1)
+        self.get_logger().info(f'[UAV{self.uav_id}] Telemetry streams requested')
+
         # ── DDS subscribers (telemetry) ───────────────────────────────────────
         self.create_subscription(
-            NavSatFix, '/ap/navsat',
-            self._cb_navsat, AP_DDS_QOS)
-
-        self.create_subscription(
-            PoseStamped, '/ap/pose/filtered',
-            self._cb_pose, AP_DDS_QOS)
-
+            NavSatFix,    '/ap/navsat',
+            self._cb_navsat,  AP_DDS_QOS)
         self.create_subscription(
             BatteryState, '/ap/battery',
             self._cb_battery, AP_DDS_QOS)
 
-        # ── publishers (re-publish on /uavN for mission code) ─────────────────
+        # ── publishers ────────────────────────────────────────────────────────
         self.pub_gps     = self.create_publisher(NavSatFix, f'{ns}/gps',     10)
         self.pub_rel_alt = self.create_publisher(Float32,   f'{ns}/rel_alt', 10)
         self.pub_mode    = self.create_publisher(String,    f'{ns}/mode',    10)
         self.pub_armed   = self.create_publisher(Bool,      f'{ns}/armed',   10)
         self.pub_battery = self.create_publisher(Float32,   f'{ns}/battery', 10)
+
+        # ── goto subscriber ───────────────────────────────────────────────────
+        # Mission nodes publish here, bridge forwards via MAVLink
+        self.create_subscription(
+            GeoPoint, f'{ns}/goto',
+            self._cb_goto, 10)
 
         # ── services ──────────────────────────────────────────────────────────
         self.create_service(Trigger, f'{ns}/arm',     self._srv_arm)
@@ -144,42 +128,66 @@ class DroneBridge(Node):
             f'[UAV{self.uav_id}] Bridge ready'
             f' | waiting for DDS GPS from /ap/navsat ...')
         self.get_logger().info(
-            f'[UAV{self.uav_id}] Services available: '
+            f'[UAV{self.uav_id}] Services: '
             f'{ns}/arm  {ns}/takeoff  {ns}/land  {ns}/rtl')
+        self.get_logger().info(
+            f'[UAV{self.uav_id}] Goto topic: {ns}/goto  (geographic_msgs/GeoPoint)')
 
     # ── DDS callbacks ─────────────────────────────────────────────────────────
 
-    def _cb_navsat(self, msg: NavSatFix):
-        """GPS from /ap/navsat (DDS)."""
+    def _cb_navsat(self, msg):
         self.lat     = msg.latitude
         self.lon     = msg.longitude
         self.alt_msl = msg.altitude
         self.gps_ok  = (msg.latitude != 0.0 or msg.longitude != 0.0)
         self.pub_gps.publish(msg)
 
-    def _cb_pose(self, msg: PoseStamped):
-        """Pose from /ap/pose/filtered (DDS). Z = altitude above home in m."""
-        self.rel_alt = msg.pose.position.z
-        alt_msg = Float32()
-        alt_msg.data = float(self.rel_alt)
-        self.pub_rel_alt.publish(alt_msg)
-
-    def _cb_battery(self, msg: BatteryState):
-        """Battery from /ap/battery (DDS). percentage is 0.0-1.0."""
+    def _cb_battery(self, msg):
         self.battery = msg.percentage * 100.0
         bat_msg = Float32()
         bat_msg.data = float(self.battery)
         self.pub_battery.publish(bat_msg)
 
-    # ── MAVLink heartbeat loop (armed + mode only) ────────────────────────────
+    # ── goto callback ─────────────────────────────────────────────────────────
+
+    def _cb_goto(self, msg: GeoPoint):
+        """
+        Receives GeoPoint (lat, lon, alt) from mission nodes
+        and sends SET_POSITION_TARGET_GLOBAL_INT via MAVLink.
+        altitude field of GeoPoint is used as relative altitude.
+        """
+        self.get_logger().info(
+            f'[UAV{self.uav_id}] Goto → '
+            f'({msg.latitude:.6f}, {msg.longitude:.6f}, alt={msg.altitude:.1f}m)')
+        self.mav.mav.set_position_target_global_int_send(
+            0,
+            self.mav.target_system,
+            self.mav.target_component,
+            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+            0b110111111000,   # position only
+            int(msg.latitude  * 1e7),
+            int(msg.longitude * 1e7),
+            msg.altitude,
+            0, 0, 0,
+            0, 0, 0,
+            0, 0)
+
+    # ── MAVLink heartbeat loop ────────────────────────────────────────────────
 
     def _mav_loop(self):
-        """Reads only HEARTBEAT — everything else comes from DDS now."""
         while not self._stop:
             msg = self.mav.recv_match(
-                type=['HEARTBEAT'], blocking=True, timeout=2.0)
+                type=['HEARTBEAT', 'GLOBAL_POSITION_INT'],
+                blocking=True, timeout=2.0)
             if msg is None:
                 continue
+            if msg.get_type() == 'GLOBAL_POSITION_INT':
+                self.rel_alt = msg.relative_alt / 1000.0  # mm → m
+                alt_msg = Float32()
+                alt_msg.data = float(self.rel_alt)
+                self.pub_rel_alt.publish(alt_msg)
+                continue
+            # HEARTBEAT
             self.armed = bool(
                 msg.base_mode &
                 mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
@@ -190,7 +198,6 @@ class DroneBridge(Node):
 
             mode_msg = String(); mode_msg.data = self.mode
             self.pub_mode.publish(mode_msg)
-
             armed_msg = Bool(); armed_msg.data = self.armed
             self.pub_armed.publish(armed_msg)
 
@@ -206,7 +213,7 @@ class DroneBridge(Node):
 
     # ── MAVLink command helpers ───────────────────────────────────────────────
 
-    def _set_mode(self, mode_name: str):
+    def _set_mode(self, mode_name):
         mode_id = self.mav.mode_mapping()[mode_name]
         self.mav.mav.set_mode_send(
             self.mav.target_system,
@@ -231,27 +238,35 @@ class DroneBridge(Node):
     # ── service handlers ──────────────────────────────────────────────────────
 
     def _srv_arm(self, req, res):
-        self.get_logger().info(
-            f'[UAV{self.uav_id}] Waiting for DDS GPS...')
-        if not self._wait_for(lambda: self.gps_ok, timeout=30.0):
+        self.get_logger().info(f'[UAV{self.uav_id}] Waiting for DDS GPS...')
+        if not self._wait_for(lambda: self.gps_ok, timeout=50.0):
             res.success = False
-            res.message = ('GPS not ready via DDS — '
-                           'is micro_ros_agent running?')
+            res.message = 'GPS not ready — is micro_ros_agent running?'
             self.get_logger().warn(res.message)
             return res
-
         self._set_mode('GUIDED')
-        time.sleep(0.5)
-        self._send_arm(True)
+        time.sleep(1.0)
 
-        if self._wait_for(lambda: self.armed, timeout=20.0):
-            res.success = True
-            res.message = f'UAV{self.uav_id} armed successfully'
-            self.get_logger().info(res.message)
-        else:
-            res.success = False
-            res.message = 'Arm timed out — check PreArm messages'
-            self.get_logger().warn(res.message)
+        deadline   = time.time() + 40.0
+        last_arm   = 0.0
+        attempt    = 0
+        while time.time() < deadline:
+            if self.armed:
+                res.success = True
+                res.message = f'UAV{self.uav_id} armed successfully'
+                self.get_logger().info(res.message)
+                return res
+            if time.time() - last_arm > 3.0:
+                attempt += 1
+                self.get_logger().info(
+                    f'[UAV{self.uav_id}] Arm attempt {attempt}...')
+                self._send_arm(True)
+                last_arm = time.time()
+            time.sleep(0.3)
+
+        res.success = False
+        res.message = 'Arm timed out — check PreArm messages in SITL console'
+        self.get_logger().warn(res.message)
         return res
 
     def _srv_disarm(self, req, res):
@@ -268,14 +283,12 @@ class DroneBridge(Node):
                 res.success = False
                 res.message = arm_res.message
                 return res
-
         self.get_logger().info(
             f'[UAV{self.uav_id}] Taking off to {self.alt}m...')
         self.mav.mav.command_long_send(
             self.mav.target_system, self.mav.target_component,
             mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
             0, 0, 0, 0, 0, 0, 0, self.alt)
-
         target = self.alt * 0.85
         if self._wait_for(lambda: self.rel_alt >= target, timeout=30.0):
             res.success = True
@@ -284,8 +297,7 @@ class DroneBridge(Node):
             self.get_logger().info(res.message)
         else:
             res.success = False
-            res.message = (f'Takeoff timed out — '
-                           f'current alt {self.rel_alt:.1f}m')
+            res.message = f'Takeoff timed out — alt {self.rel_alt:.1f}m'
             self.get_logger().warn(res.message)
         return res
 

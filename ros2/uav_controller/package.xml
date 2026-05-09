@@ -4,14 +4,15 @@
   <name>uav_controller</name>
   <version>0.1.0</version>
   <description>ROS2 UAV controller for ArduPilot SITL via AP_DDS + MAVLink</description>
-  <maintainer email="you@example.com">randilsk</maintainer>
+  <maintainer email="you@example.com">your name</maintainer>
   <license>MIT</license>
 
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>geometry_msgs</depend>
   <depend>sensor_msgs</depend>
-  <depend>std_srvs</depend>
+  <depend>geographic_msgs</depend>
   <depend>ardupilot_msgs</depend>
 
   <test_depend>ament_copyright</test_depend>
@@ -23,5 +24,3 @@
     <build_type>ament_python</build_type>
   </export>
 </package>
-
-#this contains the metadata for the uav_controller package, including its name, version, description, maintainer, license, dependencies, and build type.

@@ -104,8 +104,7 @@ Verify DDS is compiled in:
 
 ```bash
 cd ~/ardu_ws/src
-git clone https://github.com/micro-ROS/micro_ros_agent.git
-
+git clone https://github.com/microROS/micro-ROS-Agent
 cd ~/ardu_ws
 source /opt/ros/humble/setup.bash
 colcon build --packages-select micro_ros_agent ardupilot_msgs

@@ -1,6 +1,6 @@
 source;share/uav_controller/hook/pythonpath.ps1
 source;share/uav_controller/hook/pythonpath.dsv
 source;share/uav_controller/hook/pythonpath.sh
-source;../../build/uav_controller/share/uav_controller/hook/pythonpath_develop.ps1
-source;../../build/uav_controller/share/uav_controller/hook/pythonpath_develop.dsv
-source;../../build/uav_controller/share/uav_controller/hook/pythonpath_develop.sh
+source;share/uav_controller/hook/ament_prefix_path.ps1
+source;share/uav_controller/hook/ament_prefix_path.dsv
+source;share/uav_controller/hook/ament_prefix_path.sh

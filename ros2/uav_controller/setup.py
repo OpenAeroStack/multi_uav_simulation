@@ -24,6 +24,8 @@ setup(
         'console_scripts': [
             'drone_bridge     = uav_controller.drone_bridge:main',
             'takeoff_mission  = uav_controller.takeoff_mission:main',
+            'l_mission       = uav_controller.l_mission:main',
+
         ],
     },
 )
