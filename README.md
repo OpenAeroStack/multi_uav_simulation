@@ -285,6 +285,65 @@ This auto-arms, takes off to 10m, hovers 10 seconds, then RTLs.
 
 ---
 
+### Terminal 5 — Run a 3-drone coordinated mission (multi_mission)
+
+`multi_mission` runs all three UAVs through a barrier-synchronised mission over ROS2.
+Each phase waits for every drone to finish before the next phase begins — no drone
+advances until all three are ready.
+
+**Mission phases:**
+
+| Phase | Action |
+|-------|--------|
+| 0 | All 3 connect to their `drone_bridge` and wait for GPS |
+| 1 | All 3 takeoff to 20 m — barrier sync (no one moves until all are airborne) |
+| 2 | UAV1 → West 50 m, UAV2 → East 50 m, UAV3 → North 50 m — barrier sync |
+| 3 | All 3 hold position for 5 s — barrier sync |
+| 4 | All 3 RTL simultaneously |
+
+**Step 1 — Start the 3-UAV simulation**
+
+```bash
+cd ~/FYP/multi_uav_sim
+bash launch/launch_multi_uav.sh
+```
+
+**Step 2 — Start one `drone_bridge` per UAV (one terminal each)**
+
+```bash
+# Terminal 2
+ros2 run uav_controller drone_bridge --ros-args -p uav_id:=1 -p mavlink_port:=5760 -p takeoff_altitude:=20.0
+
+# Terminal 3
+ros2 run uav_controller drone_bridge --ros-args -p uav_id:=2 -p mavlink_port:=5770 -p takeoff_altitude:=20.0
+
+# Terminal 4
+ros2 run uav_controller drone_bridge --ros-args -p uav_id:=3 -p mavlink_port:=5780 -p takeoff_altitude:=20.0
+```
+
+Wait until all three bridges print the `✓ DDS GPS flowing` line before proceeding.
+
+**Step 3 — Launch the mission**
+
+```bash
+# Terminal 5
+ros2 run uav_controller multi_mission
+```
+
+You will see per-drone phase logs interleaved in the terminal.
+All errors are collected and summarised at the end.
+
+**Mission config (editable at top of `multi_mission.py`)**
+
+| Constant | Default | Meaning |
+|----------|---------|---------|
+| `TAKEOFF_ALT` | `20.0 m` | Takeoff altitude for all drones |
+| `MOVE_DISTANCE` | `50.0 m` | Distance each drone flies in its direction |
+| `HOLD_TIME` | `5.0 s` | How long drones hover at their waypoints |
+| `WP_RADIUS` | `2.0 m` | Arrival threshold to consider a waypoint reached |
+
+---
+
 ## Part 3 — MAVProxy / Python Script Control (no ROS2)
 
 These work independently without running drone_bridge.
@@ -323,7 +382,8 @@ Located at `ros2/uav_controller/`. Provides:
 | Node | Command | Purpose |
 |------|---------|---------|
 | `drone_bridge` | `ros2 run uav_controller drone_bridge` | MAVLink+DDS ↔ ROS2 bridge |
-| `takeoff_mission` | `ros2 run uav_controller takeoff_mission` | Auto arm+takeoff+RTL |
+| `takeoff_mission` | `ros2 run uav_controller takeoff_mission` | Auto arm+takeoff+RTL (single UAV) |
+| `multi_mission` | `ros2 run uav_controller multi_mission` | Barrier-synchronised 3-drone mission |
 
 ### Topics published by drone_bridge
 
@@ -385,8 +445,9 @@ multi_uav_sim/
 ├── ros2/                         # ROS2 workspace
 │   └── uav_controller/           # ROS2 package
 │       └── uav_controller/
-│           ├── drone_bridge.py   # MAVLink+DDS ↔ ROS2 bridge node
-│           └── takeoff_mission.py# example mission node
+│           ├── drone_bridge.py    # MAVLink+DDS ↔ ROS2 bridge node
+│           ├── takeoff_mission.py # single-drone auto takeoff+RTL
+│           └── multi_mission.py   # barrier-synchronised 3-drone mission
 ├── scripts/                      # pymavlink scripts (no ROS2 needed)
 │   ├── single_drone_takeoff.py
 │   ├── single_drone_mission.py
