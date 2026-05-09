@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 source "$PROJECT_DIR/setup.sh"
+source /opt/ros/humble/setup.bash
+source ~/ardu_ws/install/setup.bash
 
 echo "=== Killing previous instances ==="
 pkill -f arducopter 2>/dev/null || true
@@ -34,8 +36,6 @@ sleep 15
 
 # ── 2. micro-ROS agent (MUST be running before SITL starts) ──────────────────
 echo "=== Starting micro-ROS agent ==="
-source /opt/ros/humble/setup.bash
-source ~/ardu_ws/install/setup.bash
 ros2 run micro_ros_agent micro_ros_agent udp4 --port 2019 &
 AGENT_PID=$!
 echo "Waiting for agent to bind port (3s)..."

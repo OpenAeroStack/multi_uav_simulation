@@ -6,6 +6,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Source portable setup
 source "$PROJECT_DIR/setup.sh"
+source /opt/ros/humble/setup.bash
 
 echo "=== Killing any previous SITL/Gazebo instances ==="
 pkill -f arducopter 2>/dev/null || true
@@ -45,7 +46,9 @@ if [[ ! -x "$BINARY" ]]; then
 fi
 
 echo "=== Launching Gazebo with 1 UAV ==="
-gazebo --verbose "$WORLD_PATH" &
+gazebo --verbose "$WORLD_PATH" \
+    -s libgazebo_ros_init.so \
+    -s libgazebo_ros_factory.so &
 GAZEBO_PID=$!
 
 echo "=== Waiting for Gazebo to fully load (20 seconds) ==="
