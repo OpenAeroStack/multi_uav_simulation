@@ -25,7 +25,9 @@ UAV1_DEFAULTS="$BASE_DEFAULTS,$DDS_PARAMS"
 
 # ── 1. Gazebo ────────────────────────────────────────────────────────────────
 echo "=== Launching Gazebo ==="
-gazebo --verbose "$PROJECT_DIR/worlds/single_uav.world" &
+gazebo --verbose "$PROJECT_DIR/worlds/single_uav.world" \
+    -s libgazebo_ros_init.so \
+    -s libgazebo_ros_factory.so &
 GAZEBO_PID=$!
 echo "Waiting for Gazebo to load (15s)..."
 sleep 15
