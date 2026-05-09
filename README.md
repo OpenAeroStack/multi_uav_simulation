@@ -204,6 +204,14 @@ For 3 UAVs (MAVLink only, no DDS):
 bash launch/launch_multi_uav.sh
 ```
 
+For 3 UAVs with DDS/ROS2 (required for `multi_mission`):
+```bash
+bash launch/launch_multi_dds.sh
+```
+
+This starts everything in one step: Gazebo, 3 SITL instances, 3 `micro_ros_agent` instances,
+and 3 `drone_bridge` nodes.
+
 Wait until you see:
 ```
 Waiting for connection....
@@ -285,7 +293,7 @@ This auto-arms, takes off to 10m, hovers 10 seconds, then RTLs.
 
 ---
 
-### Terminal 5 — Run a 3-drone coordinated mission (multi_mission)
+### Running a 3-drone coordinated mission (multi_mission)
 
 `multi_mission` runs all three UAVs through a barrier-synchronised mission over ROS2.
 Each phase waits for every drone to finish before the next phase begins — no drone
@@ -295,43 +303,35 @@ advances until all three are ready.
 
 | Phase | Action |
 |-------|--------|
-| 0 | All 3 connect to their `drone_bridge` and wait for GPS |
-| 1 | All 3 takeoff to 20 m — barrier sync (no one moves until all are airborne) |
+| 0 | All 3 wait for GPS from their `drone_bridge` |
+| 1 | All 3 takeoff to 20 m — barrier sync (none moves until all are airborne) |
 | 2 | UAV1 → West 50 m, UAV2 → East 50 m, UAV3 → North 50 m — barrier sync |
 | 3 | All 3 hold position for 5 s — barrier sync |
 | 4 | All 3 RTL simultaneously |
 
-**Step 1 — Start the 3-UAV simulation**
+**Terminal 1 — Launch everything**
 
 ```bash
 cd ~/FYP/multi_uav_sim
-bash launch/launch_multi_uav.sh
+bash launch/launch_multi_dds.sh
 ```
 
-**Step 2 — Start one `drone_bridge` per UAV (one terminal each)**
+This starts Gazebo, all 3 SITL instances, all 3 `micro_ros_agent` instances, and all 3
+`drone_bridge` nodes automatically. Watch the output and wait until all three bridges print:
 
-```bash
-# Terminal 2
-ros2 run uav_controller drone_bridge --ros-args -p uav_id:=1 -p mavlink_port:=5760 -p takeoff_altitude:=20.0
-
-# Terminal 3
-ros2 run uav_controller drone_bridge --ros-args -p uav_id:=2 -p mavlink_port:=5770 -p takeoff_altitude:=20.0
-
-# Terminal 4
-ros2 run uav_controller drone_bridge --ros-args -p uav_id:=3 -p mavlink_port:=5780 -p takeoff_altitude:=20.0
+```
+[UAV1] ✓ DDS GPS flowing ...
+[UAV2] ✓ DDS GPS flowing ...
+[UAV3] ✓ DDS GPS flowing ...
 ```
 
-Wait until all three bridges print the `✓ DDS GPS flowing` line before proceeding.
-
-**Step 3 — Launch the mission**
+**Terminal 2 — Run the mission**
 
 ```bash
-# Terminal 5
 ros2 run uav_controller multi_mission
 ```
 
-You will see per-drone phase logs interleaved in the terminal.
-All errors are collected and summarised at the end.
+Per-drone phase logs appear interleaved. All errors are collected and summarised at the end.
 
 **Mission config (editable at top of `multi_mission.py`)**
 
@@ -432,6 +432,7 @@ ros2 run uav_controller drone_bridge --ros-args \
 multi_uav_sim/
 ├── launch/
 │   ├── launch_multi_uav.sh       # 3 UAV simulation (MAVLink only)
+│   ├── launch_multi_dds.sh       # 3 UAV simulation (DDS + ROS2, all-in-one)
 │   ├── launch_single.sh          # single UAV (MAVLink only)
 │   └── launch_single_dds.sh      # single UAV with DDS + ROS2
 ├── models/                       # all Gazebo models (bundled)
