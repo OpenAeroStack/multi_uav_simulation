@@ -47,7 +47,9 @@ UAV3_DEFAULTS="$BASE,$PROJECT_DIR/params/uav3_dds.parm"
 # ── 1. Gazebo ─────────────────────────────────────────────────────────────────
 echo ""
 echo "=== [1/4] Launching Gazebo ==="
-gazebo --verbose "$PROJECT_DIR/worlds/multi_uav.world" &
+gazebo --verbose "$PROJECT_DIR/worlds/multi_uav.world" \
+    -s libgazebo_ros_init.so \
+    -s libgazebo_ros_factory.so &
 GAZEBO_PID=$!
 echo "Waiting for Gazebo (15s)..."
 sleep 15
