@@ -27,6 +27,7 @@ setup(
             'l_mission       = uav_controller.l_mission:main',
             'multi_mission   = uav_controller.multi_mission:main',
             'faculty_mission  = uav_controller.faculty_mission:main',
+            'airport_mission   = uav_controller.airport_mission:main',
 
         ],
     },
