@@ -1,0 +1,52 @@
+    <?xml version="1.0" encoding="utf-8"?>
+    <COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+      <asset>
+        <unit name="meter" meter="1"/>
+        <up_axis>Z_UP</up_axis>
+      </asset>
+      <library_geometries>
+        <geometry id="_32552725-mesh" name="332552725">
+  <mesh>
+    <source id="_32552725-mesh-positions">
+      <float_array id="_32552725-mesh-positions-array" count="24">165.0129 -90.49327 30.64108 164.0837 -99.81071 31.75145 145.0748 -97.39508 34.49623 146.1943 -87.88839 32.66627 165.0129 -90.49327 54.49623 146.1943 -87.88839 54.49623 145.0748 -97.39508 54.49623 164.0837 -99.81071 54.49623</float_array>
+      <technique_common>
+        <accessor source="#_32552725-mesh-positions-array" count="8" stride="3">
+          <param name="X" type="float" />
+          <param name="Y" type="float" />
+          <param name="Z" type="float" />
+        </accessor>
+      </technique_common>
+    </source>
+    <source id="_32552725-mesh-normals">
+      <float_array id="_32552725-mesh-normals-array" count="30">0 0 1 0.1371126 0.9905555 0 -0.9931378 0.1169503 0 -0.1260648 -0.992022 0 0.9950644 -0.09923136 0 0 0 1 0.1371126 0.9905555 0 -0.9931377 0.1169503 0 -0.1260649 -0.9920221 0 0.9950644 -0.09923136 0</float_array>
+      <technique_common>
+        <accessor source="#_32552725-mesh-normals-array" count="10" stride="3">
+          <param name="X" type="float" />
+          <param name="Y" type="float" />
+          <param name="Z" type="float" />
+        </accessor>
+      </technique_common>
+    </source>
+    <vertices id="_32552725-mesh-vertices">
+      <input semantic="POSITION" source="#_32552725-mesh-positions" />
+    </vertices>
+    <triangles count="10">
+      <input semantic="VERTEX" source="#_32552725-mesh-vertices" offset="0" />
+      <input semantic="NORMAL" source="#_32552725-mesh-normals" offset="1" />
+      <p>4 0 6 0 7 0 3 1 4 1 0 1 2 2 5 2 3 2 7 3 2 3 1 3 4 4 1 4 0 4 4 5 5 5 6 5 3 6 5 6 4 6 2 7 6 7 5 7 7 8 6 8 2 8 4 9 7 9 1 9</p>
+    </triangles>
+  </mesh>
+</geometry>
+
+      </library_geometries>
+      <library_visual_scenes>
+        <visual_scene id="Scene" name="Scene">
+          <node id="332552725" name="332552725" type="NODE">
+            <instance_geometry url="#_32552725-mesh"/>
+          </node>
+        </visual_scene>
+      </library_visual_scenes>
+      <scene>
+        <instance_visual_scene url="#Scene"/>
+      </scene>
+    </COLLADA>

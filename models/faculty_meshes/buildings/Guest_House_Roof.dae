@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset>
+  <library_geometries>
+    <geometry id="GuestHouseRoof-mesh" name="Guest House Roof">
+      <mesh>
+        <source id="GuestHouseRoof-positions">
+          <float_array id="GuestHouseRoof-positions-array" count="18">42.17237 153.90622 54.12608 22.78149 161.24667 54.12608 10.60054 129.06475 54.12608 30.00281 121.72416 54.12608 28.80768 147.87777 58.12608 23.97092 135.09313 58.12608</float_array>
+          <technique_common>
+            <accessor source="#GuestHouseRoof-positions-array" count="6" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="GuestHouseRoof-normals">
+          <float_array id="GuestHouseRoof-normals-array" count="12">0.1274 0.3366 0.9330 -0.1274 -0.3366 0.9330 0.3367 -0.1274 0.9330 -0.3366 0.1274 0.9330</float_array>
+          <technique_common>
+            <accessor source="#GuestHouseRoof-normals-array" count="4" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="GuestHouseRoof-vertices">
+          <input semantic="POSITION" source="#GuestHouseRoof-positions"/>
+        </vertices>
+        <triangles count="6">
+          <input semantic="VERTEX"  source="#GuestHouseRoof-vertices" offset="0"/>
+          <input semantic="NORMAL"  source="#GuestHouseRoof-normals"  offset="1"/>
+          <p>0 0 1 0 4 0 3 1 5 1 2 1 0 2 4 2 5 2 0 2 5 2 3 2 1 3 2 3 5 3 1 3 5 3 4 3</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="GuestHouseRoof-node" name="Guest House Roof" type="NODE">
+        <instance_geometry url="#GuestHouseRoof-mesh"/>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset>
+  <library_geometries>
+    <geometry id="B902Roof-mesh" name="Building 535658902 Roof">
+      <mesh>
+        <source id="B902Roof-positions">
+          <float_array id="B902Roof-positions-array" count="18">-110.04285 119.79743 45.74036 -105.65072 107.58184 45.74036 -121.63475 101.84757 45.74036 -126.02678 114.06316 45.74036 -113.95613 111.49790 48.74036 -117.72142 110.14710 48.74036</float_array>
+          <technique_common>
+            <accessor source="#B902Roof-positions-array" count="6" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="B902Roof-normals">
+          <float_array id="B902Roof-normals-array" count="12">-0.3948 -0.1420 -0.9077 0.3948 0.1420 -0.9077 0.1417 -0.3949 -0.9077 -0.1417 0.3949 -0.9077</float_array>
+          <technique_common>
+            <accessor source="#B902Roof-normals-array" count="4" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="B902Roof-vertices">
+          <input semantic="POSITION" source="#B902Roof-positions"/>
+        </vertices>
+        <triangles count="6">
+          <input semantic="VERTEX"  source="#B902Roof-vertices" offset="0"/>
+          <input semantic="NORMAL"  source="#B902Roof-normals"  offset="1"/>
+          <p>0 0 1 0 4 0 3 1 5 1 2 1 0 2 4 2 5 2 0 2 5 2 3 2 1 3 2 3 5 3 1 3 5 3 4 3</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="B902Roof-node" name="Building 535658902 Roof" type="NODE">
+        <instance_geometry url="#B902Roof-mesh"/>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

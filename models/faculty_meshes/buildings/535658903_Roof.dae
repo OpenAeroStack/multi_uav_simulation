@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset>
+  <library_geometries>
+    <geometry id="B903Roof-mesh" name="Building 535658903 Roof">
+      <mesh>
+        <source id="B903Roof-positions">
+          <float_array id="B903Roof-positions-array" count="27">-7.77097 -72.48684 59.26336 -5.95351 -75.75526 59.26336 -4.00747 -74.76820 59.26336 1.32709 -85.00776 59.26336 -5.91959 -88.99376 59.26336 -8.71798 -83.48446 59.26336 -23.87177 -91.14366 59.26336 -27.97147 -83.33525 59.26336 -10.45868 -81.87575 62.76336</float_array>
+          <technique_common>
+            <accessor source="#B903Roof-positions-array" count="9" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="B903Roof-normals">
+          <float_array id="B903Roof-normals-array" count="24">-0.3948 -0.2195 -0.8921 0.3235 -0.6378 -0.6989 -0.3213 -0.1674 -0.9321 -0.1849 0.3362 -0.9235 0.8679 0.4408 0.2290 -0.3809 0.7536 -0.5358 0.1871 0.0983 -0.9774 0.2116 -0.3940 -0.8944</float_array>
+          <technique_common>
+            <accessor source="#B903Roof-normals-array" count="8" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="B903Roof-vertices">
+          <input semantic="POSITION" source="#B903Roof-positions"/>
+        </vertices>
+        <triangles count="8">
+          <input semantic="VERTEX"  source="#B903Roof-vertices" offset="0"/>
+          <input semantic="NORMAL"  source="#B903Roof-normals"  offset="1"/>
+          <p>0 0 1 0 8 0 1 1 2 1 8 1 2 2 3 2 8 2 3 3 4 3 8 3 4 4 5 4 8 4 5 5 6 5 8 5 6 6 7 6 8 6 7 7 0 7 8 7</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="B903Roof-node" name="Building 535658903 Roof" type="NODE">
+        <instance_geometry url="#B903Roof-mesh"/>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

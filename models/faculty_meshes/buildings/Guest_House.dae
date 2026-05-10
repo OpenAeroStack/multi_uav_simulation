@@ -1,0 +1,52 @@
+    <?xml version="1.0" encoding="utf-8"?>
+    <COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+      <asset>
+        <unit name="meter" meter="1"/>
+        <up_axis>Z_UP</up_axis>
+      </asset>
+      <library_geometries>
+        <geometry id="Guest_House-mesh" name="Guest House">
+  <mesh>
+    <source id="Guest_House-mesh-positions">
+      <float_array id="Guest_House-mesh-positions-array" count="24">41.77945 153.597 32.26333 22.87129 160.7548 29.37678 10.99351 129.3739 31.14533 29.91287 122.216 34.12608 41.77945 153.597 54.12608 22.87129 160.7548 54.12608 10.99351 129.3739 54.12608 29.91287 122.216 54.12608</float_array>
+      <technique_common>
+        <accessor source="#Guest_House-mesh-positions-array" count="8" stride="3">
+          <param name="X" type="float" />
+          <param name="Y" type="float" />
+          <param name="Z" type="float" />
+        </accessor>
+      </technique_common>
+    </source>
+    <source id="Guest_House-mesh-normals">
+      <float_array id="Guest_House-mesh-normals-array" count="30">0 0 1 0.354039 0.9352307 0 -0.9352478 0.3539936 0 -0.3538559 -0.9353 0 0.9353583 -0.3537018 0 0 0 1 0.3540391 0.9352307 0 -0.9352478 0.3539936 0 -0.3538559 -0.9352999 0 0.9353582 -0.3537018 0</float_array>
+      <technique_common>
+        <accessor source="#Guest_House-mesh-normals-array" count="10" stride="3">
+          <param name="X" type="float" />
+          <param name="Y" type="float" />
+          <param name="Z" type="float" />
+        </accessor>
+      </technique_common>
+    </source>
+    <vertices id="Guest_House-mesh-vertices">
+      <input semantic="POSITION" source="#Guest_House-mesh-positions" />
+    </vertices>
+    <triangles count="10">
+      <input semantic="VERTEX" source="#Guest_House-mesh-vertices" offset="0" />
+      <input semantic="NORMAL" source="#Guest_House-mesh-normals" offset="1" />
+      <p>4 0 6 0 7 0 5 1 0 1 1 1 2 2 5 2 1 2 3 3 6 3 2 3 4 4 3 4 0 4 4 5 5 5 6 5 5 6 4 6 0 6 2 7 6 7 5 7 3 8 7 8 6 8 4 9 7 9 3 9</p>
+    </triangles>
+  </mesh>
+</geometry>
+
+      </library_geometries>
+      <library_visual_scenes>
+        <visual_scene id="Scene" name="Scene">
+          <node id="Guest House" name="Guest House" type="NODE">
+            <instance_geometry url="#Guest_House-mesh"/>
+          </node>
+        </visual_scene>
+      </library_visual_scenes>
+      <scene>
+        <instance_visual_scene url="#Scene"/>
+      </scene>
+    </COLLADA>

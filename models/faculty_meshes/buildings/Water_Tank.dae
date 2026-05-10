@@ -1,0 +1,52 @@
+    <?xml version="1.0" encoding="utf-8"?>
+    <COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+      <asset>
+        <unit name="meter" meter="1"/>
+        <up_axis>Z_UP</up_axis>
+      </asset>
+      <library_geometries>
+        <geometry id="Water_Tank-mesh" name="Water Tank">
+  <mesh>
+    <source id="Water_Tank-mesh-positions">
+      <float_array id="Water_Tank-mesh-positions-array" count="24">36.37232 -139.9748 49.13243 26.82308 -139.9748 48.82965 25.62523 -150.1271 49.83966 36.97684 -149.5371 50.07959 36.37232 -139.9748 70.07959 26.82308 -139.9748 70.07959 25.62523 -150.1271 70.07959 36.97684 -149.5371 70.07959</float_array>
+      <technique_common>
+        <accessor source="#Water_Tank-mesh-positions-array" count="8" stride="3">
+          <param name="X" type="float" />
+          <param name="Y" type="float" />
+          <param name="Z" type="float" />
+        </accessor>
+      </technique_common>
+    </source>
+    <source id="Water_Tank-mesh-normals">
+      <float_array id="Water_Tank-mesh-normals-array" count="30">0 0 1 0 1 0 -0.9931113 0.1171751 0 0.05190455 -0.9986521 0 0.9980076 0.06309348 0 0 0 1 0 1 0 -0.9931113 0.1171751 0 0.05190455 -0.9986521 0 0.9980077 0.06309348 0</float_array>
+      <technique_common>
+        <accessor source="#Water_Tank-mesh-normals-array" count="10" stride="3">
+          <param name="X" type="float" />
+          <param name="Y" type="float" />
+          <param name="Z" type="float" />
+        </accessor>
+      </technique_common>
+    </source>
+    <vertices id="Water_Tank-mesh-vertices">
+      <input semantic="POSITION" source="#Water_Tank-mesh-positions" />
+    </vertices>
+    <triangles count="10">
+      <input semantic="VERTEX" source="#Water_Tank-mesh-vertices" offset="0" />
+      <input semantic="NORMAL" source="#Water_Tank-mesh-normals" offset="1" />
+      <p>5 0 7 0 4 0 5 1 0 1 1 1 2 2 5 2 1 2 3 3 6 3 2 3 4 4 3 4 0 4 5 5 6 5 7 5 5 6 4 6 0 6 2 7 6 7 5 7 3 8 7 8 6 8 4 9 7 9 3 9</p>
+    </triangles>
+  </mesh>
+</geometry>
+
+      </library_geometries>
+      <library_visual_scenes>
+        <visual_scene id="Scene" name="Scene">
+          <node id="Water Tank" name="Water Tank" type="NODE">
+            <instance_geometry url="#Water_Tank-mesh"/>
+          </node>
+        </visual_scene>
+      </library_visual_scenes>
+      <scene>
+        <instance_visual_scene url="#Scene"/>
+      </scene>
+    </COLLADA>

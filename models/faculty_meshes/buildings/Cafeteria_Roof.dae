@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset>
+  <library_geometries>
+    <geometry id="CafeteriaRoof-mesh" name="Cafeteria Roof">
+      <mesh>
+        <source id="CafeteriaRoof-positions">
+          <float_array id="CafeteriaRoof-positions-array" count="18">40.27357 -11.17963 57.85761 29.30797 -34.36058 57.85761 67.12061 -49.61429 57.85761 77.47907 -25.82600 57.85761 46.77156 -27.54531 61.85761 60.31905 -32.94495 61.85761</float_array>
+          <technique_common>
+            <accessor source="#CafeteriaRoof-positions-array" count="6" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="CafeteriaRoof-normals">
+          <float_array id="CafeteriaRoof-normals-array" count="12">-0.2683 0.1269 0.9550 0.2717 -0.1183 0.9551 0.1105 0.2771 0.9545 -0.1107 -0.2744 0.9552</float_array>
+          <technique_common>
+            <accessor source="#CafeteriaRoof-normals-array" count="4" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="CafeteriaRoof-vertices">
+          <input semantic="POSITION" source="#CafeteriaRoof-positions"/>
+        </vertices>
+        <triangles count="6">
+          <input semantic="VERTEX"  source="#CafeteriaRoof-vertices" offset="0"/>
+          <input semantic="NORMAL"  source="#CafeteriaRoof-normals"  offset="1"/>
+          <p>0 0 1 0 4 0 3 1 5 1 2 1 0 2 4 2 5 2 0 2 5 2 3 2 1 3 2 3 5 3 1 3 5 3 4 3</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="CafeteriaRoof-node" name="Cafeteria Roof" type="NODE">
+        <instance_geometry url="#CafeteriaRoof-mesh"/>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

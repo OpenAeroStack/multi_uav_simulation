@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset>
+  <library_geometries>
+    <geometry id="DeptMechRoof-mesh" name="Dept Mechanical Roof">
+      <mesh>
+        <source id="DeptMechRoof-positions">
+          <float_array id="DeptMechRoof-positions-array" count="18">47.19642 64.37420 56.97169 22.51742 62.93669 56.97169 25.71615 7.90224 56.97169 50.39514 9.33975 56.97169 35.57412 51.31586 60.97169 37.33844 20.96059 60.97169</float_array>
+          <technique_common>
+            <accessor source="#DeptMechRoof-positions-array" count="6" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="DeptMechRoof-normals">
+          <float_array id="DeptMechRoof-normals-array" count="12">-0.0179 0.3074 0.9514 0.0179 -0.3074 0.9514 0.3074 0.0179 0.9514 -0.3074 -0.0179 0.9514</float_array>
+          <technique_common>
+            <accessor source="#DeptMechRoof-normals-array" count="4" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="DeptMechRoof-vertices">
+          <input semantic="POSITION" source="#DeptMechRoof-positions"/>
+        </vertices>
+        <triangles count="6">
+          <input semantic="VERTEX"  source="#DeptMechRoof-vertices" offset="0"/>
+          <input semantic="NORMAL"  source="#DeptMechRoof-normals"  offset="1"/>
+          <p>0 0 1 0 4 0 3 1 5 1 2 1 0 2 4 2 5 2 0 2 5 2 3 2 1 3 2 3 5 3 1 3 5 3 4 3</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="DeptMechRoof-node" name="Dept Mechanical Roof" type="NODE">
+        <instance_geometry url="#DeptMechRoof-mesh"/>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

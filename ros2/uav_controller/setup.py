@@ -26,6 +26,7 @@ setup(
             'takeoff_mission  = uav_controller.takeoff_mission:main',
             'l_mission       = uav_controller.l_mission:main',
             'multi_mission   = uav_controller.multi_mission:main',
+            'faculty_mission  = uav_controller.faculty_mission:main',
 
         ],
     },

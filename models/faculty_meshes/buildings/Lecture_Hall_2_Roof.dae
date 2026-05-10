@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset>
+  <library_geometries>
+    <geometry id="LH2Roof-mesh" name="Lecture Hall 2 Roof">
+      <mesh>
+        <source id="LH2Roof-positions">
+          <float_array id="LH2Roof-positions-array" count="18">96.57131 131.01721 61.71548 83.65289 114.38500 61.71548 103.96504 99.59794 61.71548 117.49727 116.23180 61.71548 98.74704 116.50886 65.71548 102.09622 114.10711 65.71548</float_array>
+          <technique_common>
+            <accessor source="#LH2Roof-positions-array" count="6" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="LH2Roof-normals">
+          <float_array id="LH2Roof-normals-array" count="12">-0.2784 0.2163 0.9358 0.2737 -0.2227 0.9357 0.2071 0.2888 0.9347 -0.2073 -0.2847 0.9359</float_array>
+          <technique_common>
+            <accessor source="#LH2Roof-normals-array" count="4" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="LH2Roof-vertices">
+          <input semantic="POSITION" source="#LH2Roof-positions"/>
+        </vertices>
+        <triangles count="6">
+          <input semantic="VERTEX"  source="#LH2Roof-vertices" offset="0"/>
+          <input semantic="NORMAL"  source="#LH2Roof-normals"  offset="1"/>
+          <p>0 0 1 0 4 0 3 1 5 1 2 1 0 2 4 2 5 2 0 2 5 2 3 2 1 3 2 3 5 3 1 3 5 3 4 3</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="LH2Roof-node" name="Lecture Hall 2 Roof" type="NODE">
+        <instance_geometry url="#LH2Roof-mesh"/>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

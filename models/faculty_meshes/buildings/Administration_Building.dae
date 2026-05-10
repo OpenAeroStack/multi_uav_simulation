@@ -1,0 +1,52 @@
+    <?xml version="1.0" encoding="utf-8"?>
+    <COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+      <asset>
+        <unit name="meter" meter="1"/>
+        <up_axis>Z_UP</up_axis>
+      </asset>
+      <library_geometries>
+        <geometry id="Administration_Building-mesh" name="Administration Building">
+  <mesh>
+    <source id="Administration_Building-mesh-positions">
+      <float_array id="Administration_Building-mesh-positions-array" count="24">131.708 44.00294 33.55646 118.61 26.15843 31.33755 160.3558 -4.476694 31.82666 173.4427 13.35669 32.45199 131.708 44.00294 53.55646 118.61 26.15843 53.55646 160.3558 -4.476694 53.55646 173.4427 13.35669 53.55646</float_array>
+      <technique_common>
+        <accessor source="#Administration_Building-mesh-positions-array" count="8" stride="3">
+          <param name="X" type="float" />
+          <param name="Y" type="float" />
+          <param name="Z" type="float" />
+        </accessor>
+      </technique_common>
+    </source>
+    <source id="Administration_Building-mesh-normals">
+      <float_array id="Administration_Building-mesh-normals-array" count="30">0 0 1 -0.8061453 0.5917177 0 -0.591634 -0.8062067 0 0.8062101 -0.5916294 0 0.5918767 0.8060286 0 0 0 1 -0.8061453 0.5917177 0 -0.591634 -0.8062067 0 0.8062101 -0.5916295 0 0.5918767 0.8060286 0</float_array>
+      <technique_common>
+        <accessor source="#Administration_Building-mesh-normals-array" count="10" stride="3">
+          <param name="X" type="float" />
+          <param name="Y" type="float" />
+          <param name="Z" type="float" />
+        </accessor>
+      </technique_common>
+    </source>
+    <vertices id="Administration_Building-mesh-vertices">
+      <input semantic="POSITION" source="#Administration_Building-mesh-positions" />
+    </vertices>
+    <triangles count="10">
+      <input semantic="VERTEX" source="#Administration_Building-mesh-vertices" offset="0" />
+      <input semantic="NORMAL" source="#Administration_Building-mesh-normals" offset="1" />
+      <p>5 0 7 0 4 0 5 1 0 1 1 1 2 2 5 2 1 2 3 3 6 3 2 3 0 4 7 4 3 4 5 5 6 5 7 5 5 6 4 6 0 6 2 7 6 7 5 7 3 8 7 8 6 8 0 9 4 9 7 9</p>
+    </triangles>
+  </mesh>
+</geometry>
+
+      </library_geometries>
+      <library_visual_scenes>
+        <visual_scene id="Scene" name="Scene">
+          <node id="Administration Building" name="Administration Building" type="NODE">
+            <instance_geometry url="#Administration_Building-mesh"/>
+          </node>
+        </visual_scene>
+      </library_visual_scenes>
+      <scene>
+        <instance_visual_scene url="#Scene"/>
+      </scene>
+    </COLLADA>

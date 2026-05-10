@@ -1,0 +1,409 @@
+<?xml version='1.0'?>
+<sdf version='1.7'>
+
+  <world name='faculty_world'>
+
+    <!-- SCENE -->
+    <scene>
+      <ambient>0.4 0.4 0.4 1</ambient>
+      <background>0.65 0.78 0.95 1</background>
+      <shadows>true</shadows>
+      <sky>
+        <time>10</time>
+        <sunrise>6</sunrise>
+        <sunset>18</sunset>
+        <clouds>
+          <speed>2</speed>
+          <humidity>0.5</humidity>
+          <mean_size>0.5</mean_size>
+          <ambient>0.8 0.8 0.8 1</ambient>
+        </clouds>
+      </sky>
+      <fog>
+        <color>0.8 0.85 0.9 1</color>
+        <type>linear</type>
+        <start>500</start>
+        <end>1200</end>
+        <density>0.001</density>
+      </fog>
+    </scene>
+
+    <!-- SUN -->
+    <light type='directional' name='sun'>
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 100 0 0 0</pose>
+      <diffuse>0.95 0.92 0.85 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.2 -0.9</direction>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+    </light>
+
+    <!-- PHYSICS -->
+    <physics type='ode'>
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>-1</real_time_update_rate>
+      <ode>
+        <solver>
+          <type>quick</type>
+          <iters>100</iters>
+          <sor>1.0</sor>
+        </solver>
+        <constraints>
+          <cfm>0.0</cfm>
+          <erp>0.2</erp>
+          <contact_max_correcting_vel>0.1</contact_max_correcting_vel>
+          <contact_surface_layer>0.0</contact_surface_layer>
+        </constraints>
+      </ode>
+    </physics>
+
+    <gravity>0 0 -9.81</gravity>
+
+    <!-- GPS ORIGIN: Faculty of Engineering, University of Ruhuna -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <latitude_deg>6.07778</latitude_deg>
+      <longitude_deg>80.20722</longitude_deg>
+      <elevation>30</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+
+    <!-- ATMOSPHERE -->
+    <atmosphere type='adiabatic'>
+      <temperature>305</temperature>
+      <pressure>101325</pressure>
+      <temperature_gradient>-0.0065</temperature_gradient>
+    </atmosphere>
+
+    <!-- MAGNETIC FIELD: Galle, Sri Lanka -->
+    <magnetic_field>9.5e-6 4.08e-5 -9.0e-6</magnetic_field>
+
+    <!-- WIND -->
+    <wind>
+      <linear_velocity>1.5 0.5 0</linear_velocity>
+    </wind>
+
+    <!-- CAMERA -->
+    <gui fullscreen='0'>
+      <camera name='user_camera'>
+        <!-- Terrain surface near origin is Z≈39m (GPS-absolute coords).
+             Camera sits 12m above terrain, angled 47° down at drones. -->
+        <pose>0 -3 51 0 0.817 1.5707</pose>
+        <view_controller>orbit</view_controller>
+        <projection_type>perspective</projection_type>
+      </camera>
+    </gui>
+
+    <!-- ============================================================ -->
+    <!-- TERRAIN                                                      -->
+    <!-- ============================================================ -->
+    <model name='terrain'>
+      <static>true</static>
+      <link name='terrain_link'>
+        <visual name='terrain_visual'>
+          <cast_shadows>false</cast_shadows>
+          <geometry>
+            <mesh>
+              <uri>model://faculty_meshes/terrain.dae</uri>
+            </mesh>
+          </geometry>
+        </visual>
+        <collision name='terrain_collision'>
+          <geometry>
+            <mesh>
+              <uri>model://faculty_meshes/terrain.dae</uri>
+            </mesh>
+          </geometry>
+          <surface>
+            <friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+            <contact><ode><min_depth>0.001</min_depth></ode></contact>
+          </surface>
+        </collision>
+      </link>
+      <pose>0 0 0 0 0 0</pose>
+    </model>
+
+    <!-- ============================================================ -->
+    <!-- BUILDINGS                                                    -->
+    <!-- ============================================================ -->
+
+    <model name='administration_building'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Administration_Building.dae</uri></mesh></geometry>
+          <material><ambient>0.91 0.88 0.80 1</ambient><diffuse>0.89 0.85 0.77 1</diffuse><specular>0.06 0.06 0.05 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Administration_Building.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -0.60 0 0 0</pose>
+    </model>
+
+    <model name='administration_building_roof'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Administration_Building_Roof.dae</uri></mesh></geometry>
+          <material><ambient>0.62 0.28 0.14 1</ambient><diffuse>0.58 0.24 0.11 1</diffuse><specular>0.08 0.05 0.03 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Administration_Building_Roof.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.6</mu><mu2>0.6</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -0.60 0 0 0</pose>
+    </model>
+
+    <model name='dept_electrical'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Department_of_Electrical_and_Information_Engineering.dae</uri></mesh></geometry>
+          <material><ambient>0.78 0.80 0.86 1</ambient><diffuse>0.76 0.79 0.85 1</diffuse><specular>0.10 0.10 0.12 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Department_of_Electrical_and_Information_Engineering.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -2.16 0 0 0</pose>
+    </model>
+
+    <model name='dept_electrical_roof'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Dept_Electrical_Roof.dae</uri></mesh></geometry>
+          <material><ambient>0.60 0.26 0.12 1</ambient><diffuse>0.56 0.22 0.10 1</diffuse><specular>0.08 0.05 0.03 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Dept_Electrical_Roof.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.6</mu><mu2>0.6</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -2.16 0 0 0</pose>
+    </model>
+
+    <model name='dept_civil'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Department_of_Civil_and_Environment_Engineering.dae</uri></mesh></geometry>
+          <material><ambient>0.80 0.76 0.70 1</ambient><diffuse>0.78 0.74 0.68 1</diffuse><specular>0.05 0.05 0.04 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Department_of_Civil_and_Environment_Engineering.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -0.73 0 0 0</pose>
+    </model>
+
+    <model name='dept_civil_roof'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Dept_Civil_Roof.dae</uri></mesh></geometry>
+          <material><ambient>0.62 0.27 0.13 1</ambient><diffuse>0.58 0.23 0.11 1</diffuse><specular>0.08 0.05 0.03 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Dept_Civil_Roof.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.6</mu><mu2>0.6</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -0.73 0 0 0</pose>
+    </model>
+
+    <model name='dept_mechanical'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Department_of_Mechanical_and_Manufacturing_Engineering.dae</uri></mesh></geometry>
+          <material><ambient>0.72 0.73 0.75 1</ambient><diffuse>0.70 0.71 0.73 1</diffuse><specular>0.08 0.08 0.09 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Department_of_Mechanical_and_Manufacturing_Engineering.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -0.61 0 0 0</pose>
+    </model>
+
+    <model name='dept_mechanical_roof'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Dept_Mechanical_Roof.dae</uri></mesh></geometry>
+          <material><ambient>0.60 0.26 0.12 1</ambient><diffuse>0.56 0.22 0.10 1</diffuse><specular>0.08 0.05 0.03 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Dept_Mechanical_Roof.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.6</mu><mu2>0.6</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -0.61 0 0 0</pose>
+    </model>
+
+    <model name='lecture_hall_1'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Lecture_hall_1.dae</uri></mesh></geometry>
+          <material><ambient>0.87 0.84 0.79 1</ambient><diffuse>0.85 0.82 0.76 1</diffuse><specular>0.07 0.06 0.06 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Lecture_hall_1.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -0.80 0 0 0</pose>
+    </model>
+
+    <model name='lecture_hall_1_roof'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Lecture_Hall_1_Roof.dae</uri></mesh></geometry>
+          <material><ambient>0.63 0.28 0.13 1</ambient><diffuse>0.59 0.24 0.11 1</diffuse><specular>0.08 0.05 0.03 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Lecture_Hall_1_Roof.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.6</mu><mu2>0.6</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -0.80 0 0 0</pose>
+    </model>
+
+    <model name='lecture_hall_2'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Lecture_Hall_2.dae</uri></mesh></geometry>
+          <material><ambient>0.88 0.85 0.80 1</ambient><diffuse>0.86 0.83 0.78 1</diffuse><specular>0.07 0.06 0.06 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Lecture_Hall_2.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -0.46 0 0 0</pose>
+    </model>
+
+    <model name='lecture_hall_2_roof'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Lecture_Hall_2_Roof.dae</uri></mesh></geometry>
+          <material><ambient>0.63 0.28 0.13 1</ambient><diffuse>0.59 0.24 0.11 1</diffuse><specular>0.08 0.05 0.03 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Lecture_Hall_2_Roof.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.6</mu><mu2>0.6</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -0.46 0 0 0</pose>
+    </model>
+
+    <model name='cafeteria'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Cafeteria.dae</uri></mesh></geometry>
+          <material><ambient>0.88 0.81 0.68 1</ambient><diffuse>0.86 0.79 0.66 1</diffuse><specular>0.05 0.04 0.04 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Cafeteria.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -0.20 0 0 0</pose>
+    </model>
+
+    <model name='cafeteria_roof'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Cafeteria_Roof.dae</uri></mesh></geometry>
+          <material><ambient>0.65 0.30 0.14 1</ambient><diffuse>0.61 0.26 0.12 1</diffuse><specular>0.08 0.05 0.03 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Cafeteria_Roof.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.6</mu><mu2>0.6</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -0.20 0 0 0</pose>
+    </model>
+
+    <model name='guest_house'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Guest_House.dae</uri></mesh></geometry>
+          <material><ambient>0.93 0.91 0.87 1</ambient><diffuse>0.91 0.89 0.85 1</diffuse><specular>0.06 0.06 0.05 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Guest_House.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -1.33 0 0 0</pose>
+    </model>
+
+    <model name='guest_house_roof'>
+      <static>true</static>
+      <link name='link'>
+        <visual name='visual'><cast_shadows>true</cast_shadows>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Guest_House_Roof.dae</uri></mesh></geometry>
+          <material><ambient>0.64 0.29 0.13 1</ambient><diffuse>0.60 0.25 0.11 1</diffuse><specular>0.08 0.05 0.03 1</specular><emissive>0 0 0 1</emissive></material>
+        </visual>
+        <collision name='collision'>
+          <geometry><mesh><uri>model://faculty_meshes/buildings/Guest_House_Roof.dae</uri></mesh></geometry>
+          <surface><friction><ode><mu>0.6</mu><mu2>0.6</mu2></ode></friction></surface>
+        </collision>
+      </link>
+      <pose>0 0 -1.33 0 0 0</pose>
+    </model>
+
+    <!-- ============================================================ -->
+    <!-- UAV MODELS                                                   -->
+    <!-- Spawned at Admin Building front yard (near axes marker)      -->
+    <!-- Separated 3m apart, 0.5m above ground                       -->
+    <!-- ============================================================ -->
+
+    <!-- UAV 1 - SITL instance 0 - ports 9002/9003 -->
+    <!-- Z=39.3: terrain surface at (−3,8) ≈ 38.7m + 0.5m clearance -->
+    <model name="iris_1_demo">
+      <pose>-3 8 39.3 0 0 0</pose>
+      <include>
+        <uri>model://iris_1</uri>
+      </include>
+    </model>
+
+    <!-- UAV 2 - SITL instance 1 - ports 9012/9013 (CLUSTER HEAD) -->
+    <model name="iris_2_demo">
+      <pose>0 8 39.3 0 0 0</pose>
+      <include>
+        <uri>model://iris_2</uri>
+      </include>
+    </model>
+
+    <!-- UAV 3 - SITL instance 2 - ports 9022/9023 -->
+    <model name="iris_3_demo">
+      <pose>3 8 39.3 0 0 0</pose>
+      <include>
+        <uri>model://iris_3</uri>
+      </include>
+    </model>
+
+  </world>
+
+</sdf>

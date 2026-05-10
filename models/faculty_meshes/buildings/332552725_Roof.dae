@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset>
+  <library_geometries>
+    <geometry id="B725Roof-mesh" name="Building 332552725 Roof">
+      <mesh>
+        <source id="B725Roof-positions">
+          <float_array id="B725Roof-positions-array" count="18">165.48584 -90.33102 54.49623 164.50145 -100.08545 54.49623 144.60276 -97.55994 54.49623 145.77994 -87.60856 54.49623 160.08041 -94.55719 58.49623 150.10458 -93.23530 58.49623</float_array>
+          <technique_common>
+            <accessor source="#B725Roof-positions-array" count="6" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="B725Roof-normals">
+          <float_array id="B725Roof-normals-array" count="12">-0.6251 0.0631 -0.7780 0.6237 -0.0738 -0.7781 -0.0831 -0.6269 -0.7746 0.0788 0.6210 -0.7798</float_array>
+          <technique_common>
+            <accessor source="#B725Roof-normals-array" count="4" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="B725Roof-vertices">
+          <input semantic="POSITION" source="#B725Roof-positions"/>
+        </vertices>
+        <triangles count="6">
+          <input semantic="VERTEX"  source="#B725Roof-vertices" offset="0"/>
+          <input semantic="NORMAL"  source="#B725Roof-normals"  offset="1"/>
+          <p>0 0 1 0 4 0 3 1 5 1 2 1 0 2 4 2 5 2 0 2 5 2 3 2 1 3 2 3 5 3 1 3 5 3 4 3</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="B725Roof-node" name="Building 332552725 Roof" type="NODE">
+        <instance_geometry url="#B725Roof-mesh"/>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

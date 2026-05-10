@@ -1,0 +1,52 @@
+    <?xml version="1.0" encoding="utf-8"?>
+    <COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+      <asset>
+        <unit name="meter" meter="1"/>
+        <up_axis>Z_UP</up_axis>
+      </asset>
+      <library_geometries>
+        <geometry id="Department_of_Electrical_and_Information_Engineering-mesh" name="Department of Electrical and Information Engineering">
+  <mesh>
+    <source id="Department_of_Electrical_and_Information_Engineering-mesh-positions">
+      <float_array id="Department_of_Electrical_and_Information_Engineering-mesh-positions-array" count="24">-14.08302 23.35318 37.53799 -26.62128 3.638497 38.98209 16.97158 -26.21739 38.60217 29.50985 -6.502708 37.78953 -14.08302 23.35318 58.98209 -26.62128 3.638497 58.98209 16.97158 -26.21739 58.98209 29.50985 -6.502708 58.98209</float_array>
+      <technique_common>
+        <accessor source="#Department_of_Electrical_and_Information_Engineering-mesh-positions-array" count="8" stride="3">
+          <param name="X" type="float" />
+          <param name="Y" type="float" />
+          <param name="Z" type="float" />
+        </accessor>
+      </technique_common>
+    </source>
+    <source id="Department_of_Electrical_and_Information_Engineering-mesh-normals">
+      <float_array id="Department_of_Electrical_and_Information_Engineering-mesh-normals-array" count="30">0 0 1 -0.8438058 0.5366487 0 -0.5650602 -0.8250498 0 0.8438056 -0.5366491 0 0.5650601 0.8250498 0 0 0 1 -0.8438058 0.5366487 0 -0.5650601 -0.8250497 0 0.8438056 -0.536649 0 0.5650601 0.8250498 0</float_array>
+      <technique_common>
+        <accessor source="#Department_of_Electrical_and_Information_Engineering-mesh-normals-array" count="10" stride="3">
+          <param name="X" type="float" />
+          <param name="Y" type="float" />
+          <param name="Z" type="float" />
+        </accessor>
+      </technique_common>
+    </source>
+    <vertices id="Department_of_Electrical_and_Information_Engineering-mesh-vertices">
+      <input semantic="POSITION" source="#Department_of_Electrical_and_Information_Engineering-mesh-positions" />
+    </vertices>
+    <triangles count="10">
+      <input semantic="VERTEX" source="#Department_of_Electrical_and_Information_Engineering-mesh-vertices" offset="0" />
+      <input semantic="NORMAL" source="#Department_of_Electrical_and_Information_Engineering-mesh-normals" offset="1" />
+      <p>5 0 7 0 4 0 1 1 4 1 0 1 6 2 1 2 2 2 7 3 2 3 3 3 4 4 3 4 0 4 5 5 6 5 7 5 1 6 5 6 4 6 6 7 5 7 1 7 7 8 6 8 2 8 4 9 7 9 3 9</p>
+    </triangles>
+  </mesh>
+</geometry>
+
+      </library_geometries>
+      <library_visual_scenes>
+        <visual_scene id="Scene" name="Scene">
+          <node id="Department of Electrical and Information Engineering" name="Department of Electrical and Information Engineering" type="NODE">
+            <instance_geometry url="#Department_of_Electrical_and_Information_Engineering-mesh"/>
+          </node>
+        </visual_scene>
+      </library_visual_scenes>
+      <scene>
+        <instance_visual_scene url="#Scene"/>
+      </scene>
+    </COLLADA>
