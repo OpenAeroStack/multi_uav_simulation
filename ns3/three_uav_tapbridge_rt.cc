@@ -207,14 +207,18 @@ int main(int argc, char* argv[])
         }
     }
 
-  // 802.11n ad-hoc WiFi with Friis loss and a fixed propagation delay mapped from --delayMs.
+  // Ad-hoc WiFi with Friis loss and a fixed propagation delay mapped from --delayMs.
+  //
+  // NOTE: In ns-3.38, the tap-bridge WiFi examples use 802.11a + ConstantRate
+  // and run TapBridge in UseLocal mode. This combination is robust for
+  // real-time TapBridge bridging.
   WifiHelper wifi;
-  wifi.SetStandard(WIFI_STANDARD_80211n);
+  wifi.SetStandard(WIFI_STANDARD_80211a);
   wifi.SetRemoteStationManager("ns3::ConstantRateWifiManager",
                                "DataMode",
-                               StringValue("HtMcs7"),
+                               StringValue("OfdmRate54Mbps"),
                                "ControlMode",
-                               StringValue("HtMcs0"));
+                               StringValue("OfdmRate24Mbps"));
 
   YansWifiChannelHelper channel = YansWifiChannelHelper::Default();
   channel.SetPropagationDelay("ns3::FixedPropagationDelayModel",
@@ -278,6 +282,7 @@ int main(int argc, char* argv[])
   Simulator::Schedule(Seconds(1.0), &LogNodePositions, nodes);
 
   // NetAnim configuration (must be constructed before Simulator::Run()).
+  NS_LOG_UNCOND("NetAnim XML will be written to: " << animFile);
   AnimationInterface anim(animFile);
   anim.EnablePacketMetadata(true);
 
@@ -324,6 +329,8 @@ int main(int argc, char* argv[])
     }
 
   Simulator::Run();
+
+  NS_LOG_UNCOND("NetAnim XML written to: " << animFile);
 
   if (enableFlowMonitor && monitor)
     {
