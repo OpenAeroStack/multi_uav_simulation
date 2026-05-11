@@ -68,6 +68,7 @@ echo "micro_ros_agents running on ports 2019-2021"
 echo ""
 echo "=== [3/4] Launching 3 SITL instances ==="
 cd ~/
+
 $BINARY --model gazebo-iris --speedup 1 --sysid 1 \
     --defaults $UAV1_DEFAULTS --sim-address=127.0.0.1 -I0 \
     --home 37.523640,-122.255122,1.7,0 &
@@ -75,12 +76,13 @@ sleep 2
 
 $BINARY --model gazebo-iris --speedup 1 --sysid 2 \
     --defaults $UAV2_DEFAULTS --sim-address=127.0.0.1 -I1 \
-    --home 37.523613,-122.255122,1.7,0 &
+    --home 37.523640,-122.255122,1.7,0 &
 sleep 2
 
 $BINARY --model gazebo-iris --speedup 1 --sysid 3 \
     --defaults $UAV3_DEFAULTS --sim-address=127.0.0.1 -I2 \
-    --home 37.523586,-122.255122,1.7,0 &
+    --home 37.523640,-122.255122,1.7,0 &
+    
 sleep 3
 
 echo "Waiting for SITL instances to boot (15s)..."

@@ -225,7 +225,7 @@ class DroneBridge(Node):
         self.mav.mav.command_long_send(
             self.mav.target_system, self.mav.target_component,
             mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
-            0, 1.0 if arm else 0.0, 0, 0, 0, 0, 0, 0)
+            0, 1.0 if arm else 0.0, 2989.0, 0, 0, 0, 0, 0)
 
     def _wait_for(self, condition_fn, timeout=30.0, interval=0.3):
         deadline = time.time() + timeout
