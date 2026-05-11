@@ -6,19 +6,27 @@ airport_mission.py
 GPS Origin: 37.523640N, -122.255122E (San Carlos Airport, CA)
 
 Cluster roles:
-  UAV1 -> CLUSTER HEAD: hovers at 30m center, aggregates member reports
+  UAV1 -> CLUSTER HEAD: hovers at 50m center, aggregates member reports
   UAV2 -> Member: patrols North sector, camera active
   UAV3 -> Member: patrols South sector, camera active
 
 Mission phases:
-  1. All 3 takeoff to 20m                    <- barrier sync
-  2. UAV1 climbs to 30m (head position)
+  1. All 3 takeoff to 40m                    <- barrier sync
+  1b. UAV2 climbs to 35m, UAV3 to 40m       <- vertical separation during climb
+  2. UAV1 climbs to 50m (head position)
      UAV2 flies to North patrol point        <- barrier sync
      UAV3 flies to South patrol point
   3. UAV2 flies to second North point
      UAV3 flies to second South point        <- barrier sync
   4. All hold 8 seconds                      <- barrier sync
   5. All RTL simultaneously
+
+FIXES vs original:
+  - TAKEOFF_ALT raised 20m → 40m (clears KSQL airport buildings)
+  - HEAD_ALT raised 30m → 50m
+  - UAV2/UAV3 climb to different interim altitudes (35m/40m) before
+    moving horizontally, preventing mid-air collision during initial climb
+  - PATROL_ALT raised 15m → 40m
 
 Cluster status published to /cluster/status every 2 seconds.
 Camera feeds: /uav2/camera/image_raw, /uav3/camera/image_raw
@@ -67,12 +75,17 @@ def haversine_m(lat1, lon1, lat2, lon2):
 
 # ── Mission config ────────────────────────────────────────────────────────────
 
-TAKEOFF_ALT  = 20.0   # m
-HEAD_ALT     = 30.0   # m — cluster head flies higher
-PATROL_ALT   = 15.0   # m — members fly lower for surveillance
-PATROL_DIST  = 80.0   # m — patrol radius from spawn
-HOLD_TIME    = 8.0    # seconds
-WP_RADIUS    = 3.0    # metres arrival threshold
+TAKEOFF_ALT    = 40.0   # m — raised from 20m, clears KSQL airport buildings
+HEAD_ALT       = 50.0   # m — cluster head flies above members
+PATROL_ALT     = 40.0   # m — members patrol at takeoff altitude
+PATROL_DIST    = 80.0   # m — patrol radius from spawn
+HOLD_TIME      =  8.0   # seconds
+WP_RADIUS      =  3.0   # metres arrival threshold
+
+# Vertical separation during initial climb — prevents UAV2/UAV3 collision
+# UAV2 levels at 35m, UAV3 at 40m, then both move horizontally
+UAV2_CLIMB_ALT = 35.0   # m
+UAV3_CLIMB_ALT = 40.0   # m
 
 N_DRONES = 3
 
@@ -231,13 +244,14 @@ class AirportMission(Node):
 
             home_lat, home_lon = s.lat, s.lon
 
-            self.get_logger().info('[UAV1] Phase 1 — Takeoff to 20m')
+            self.get_logger().info('[UAV1] Phase 1 — Takeoff to 40m')
             if not self._call_service(self.takeoff_clients[1], 1, '/takeoff', 90):
                 raise RuntimeError('UAV1 takeoff failed')
             time.sleep(2.0)
             barrier_takeoff.wait()
 
-            self.get_logger().info('[UAV1] Climbing to cluster head altitude 30m')
+            # Climb to cluster head altitude
+            self.get_logger().info(f'[UAV1] Climbing to cluster head altitude {HEAD_ALT}m')
             self._fly_to(1, home_lat, home_lon, HEAD_ALT, 'Head Position')
 
             cluster_timer = self.create_timer(2.0, self._publish_cluster_status)
@@ -260,7 +274,7 @@ class AirportMission(Node):
             with errors_lock: errors.append((1, str(e)))
 
     def _mission_member(self, uid, bearing1, bearing2, label):
-        """Generic member — two patrol waypoints then RTL."""
+        """Generic member — vertical separation climb, two patrol waypoints, RTL."""
         s = self.states[uid]
         try:
             self.get_logger().info(f'[UAV{uid}] Member ({label}) — Waiting for GPS...')
@@ -270,18 +284,29 @@ class AirportMission(Node):
 
             home_lat, home_lon = s.lat, s.lon
 
-            self.get_logger().info(f'[UAV{uid}] Phase 1 — Takeoff to 20m')
+            # Phase 1 — takeoff
+            self.get_logger().info(f'[UAV{uid}] Phase 1 — Takeoff to {TAKEOFF_ALT}m')
             if not self._call_service(
                     self.takeoff_clients[uid], uid, '/takeoff', 90):
                 raise RuntimeError(f'UAV{uid} takeoff failed')
             time.sleep(2.0)
             barrier_takeoff.wait()
 
+            # Phase 1b — climb to staggered altitude BEFORE moving horizontally
+            # UAV2 → 35m, UAV3 → 40m to avoid collision during climb
+            climb_alt = UAV2_CLIMB_ALT if uid == 2 else UAV3_CLIMB_ALT
+            self.get_logger().info(
+                f'[UAV{uid}] Phase 1b — Vertical separation climb to {climb_alt}m')
+            self._fly_to(uid, home_lat, home_lon, climb_alt,
+                         f'Separation alt {climb_alt}m')
+
+            # Phase 2 — fly to first patrol point at full patrol altitude
             p1_lat, p1_lon = move_gps(home_lat, home_lon, PATROL_DIST, bearing1)
             self.get_logger().info(f'[UAV{uid}] Phase 2 — {label} patrol P1')
             self._fly_to(uid, p1_lat, p1_lon, PATROL_ALT, f'{label} P1')
             barrier_patrol1.wait()
 
+            # Phase 3 — fly to second patrol point
             p2_lat, p2_lon = move_gps(home_lat, home_lon, PATROL_DIST, bearing2)
             self.get_logger().info(f'[UAV{uid}] Phase 3 — {label} patrol P2')
             self._fly_to(uid, p2_lat, p2_lon, PATROL_ALT, f'{label} P2')
@@ -306,14 +331,18 @@ class AirportMission(Node):
         self.get_logger().info('╔══════════════════════════════════════════════════╗')
         self.get_logger().info('║     Airport Clustering Mission — 3 UAVs         ║')
         self.get_logger().info('║                                                  ║')
-        self.get_logger().info('║  UAV1 -> CLUSTER HEAD (30m center hover)        ║')
-        self.get_logger().info('║  UAV2 -> Member: North sector patrol + camera   ║')
-        self.get_logger().info('║  UAV3 -> Member: South sector patrol + camera   ║')
+        self.get_logger().info('║  UAV1 -> CLUSTER HEAD (50m center hover)        ║')
+        self.get_logger().info('║  UAV2 -> Member: North sector patrol @ 40m      ║')
+        self.get_logger().info('║  UAV3 -> Member: South sector patrol @ 40m      ║')
+        self.get_logger().info('║                                                  ║')
+        self.get_logger().info('║  Collision avoidance: UAV2 climbs to 35m first  ║')
+        self.get_logger().info('║                       UAV3 climbs to 40m first  ║')
         self.get_logger().info('║                                                  ║')
         self.get_logger().info('║  Monitor: ros2 topic echo /cluster/status        ║')
         self.get_logger().info('╚══════════════════════════════════════════════════╝')
         self.get_logger().info('')
-        self.get_logger().info('[Mission] Waiting 60s for all SITL instances to initialize...')
+        self.get_logger().info(
+            '[Mission] Waiting 60s for all SITL instances to initialize...')
         time.sleep(60.0)
 
         threads = [
@@ -322,11 +351,11 @@ class AirportMission(Node):
                 name='UAV1-HEAD', daemon=True),
             threading.Thread(
                 target=self._mission_member,
-                args=(2, 0.0, 45.0, 'North'),    # North then NE
+                args=(2, 0.0, 45.0, 'North'),
                 name='UAV2-North', daemon=True),
             threading.Thread(
                 target=self._mission_member,
-                args=(3, 180.0, 225.0, 'South'),  # South then SW
+                args=(3, 180.0, 225.0, 'South'),
                 name='UAV3-South', daemon=True),
         ]
 
