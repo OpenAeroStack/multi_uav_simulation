@@ -28,8 +28,6 @@ share/python-wheels/
 MANIFEST
 
 # PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
 
@@ -54,16 +52,16 @@ coverage.xml
 *.mo
 *.pot
 
-# Django stuff:
+# Django stuff
 *.log
 local_settings.py
 db.sqlite3
 
-# Flask stuff:
+# Flask stuff
 instance/
 .webassets-cache
 
-# Scrapy stuff:
+# Scrapy stuff
 .scrapy
 
 # Sphinx documentation
@@ -73,7 +71,7 @@ docs/_build/
 target/
 
 # Jupyter Notebook
-.ipynb_checkpoints
+.ipynb_checkpoints/
 
 # IPython
 profile_default/
@@ -88,7 +86,7 @@ celerybeat-schedule
 # SageMath parsed files
 *.sage.py
 
-# Environments
+# Python virtual environments
 .env
 .venv
 env/
@@ -116,7 +114,6 @@ dmypy.json
 .pyre/
 
 # ArduPilot/SITL specific
-build/
 bin/
 .waf-*.log
 *.bin
@@ -128,14 +125,12 @@ bin/
 *.obj
 *.tlog*
 mav.parm.*
-*.pyc
 
 # Gazebo
 .gazebo/
-*.log
 *.gzlog
 
-# IDE - VSCode
+# VS Code
 .vscode/
 
 # MAVProxy logs
@@ -144,12 +139,4 @@ mav.parm.*
 *.parm
 
 # Backup files
-*.bak
-EOF
-
-*.tlog
-*.tlog.raw
-*.parm
-__pycache__/
-*.pyc
 *.bak

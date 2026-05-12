@@ -11,7 +11,7 @@
 #   export ARDUPILOT_HOME="/opt/ardupilot"
 #   source setup.sh
 # ============================================================
-export ARDUPILOT_HOME=$HOME/phase_1/ardupilot
+export ARDUPILOT_HOME=$HOME/ardupilot
 
 export PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
