@@ -4,12 +4,26 @@
 
 # ============================================================
 # CONFIGURE THIS FOR YOUR MACHINE:
+#
+# You can either:
+#   1) Export ARDUPILOT_HOME before sourcing this file, OR
+#   2) Let this script auto-detect a common location.
+#
 # Examples:
 #   export ARDUPILOT_HOME="$HOME/ardupilot"
+#   export ARDUPILOT_HOME="$HOME/ardu_ws/src/ardupilot"
 #   export ARDUPILOT_HOME="/opt/ardupilot"
-#   export ARDUPILOT_HOME="/media/user/drive-uuid/ardupilot"
-export ARDUPILOT_HOME="$HOME/ardu_ws/src/ardupilot"
 # ============================================================
+
+if [[ -z "${ARDUPILOT_HOME:-}" ]]; then
+  if [[ -d "$HOME/ardu_ws/src/ardupilot" ]]; then
+    ARDUPILOT_HOME="$HOME/ardu_ws/src/ardupilot"
+  elif [[ -d "$HOME/ardupilot" ]]; then
+    ARDUPILOT_HOME="$HOME/ardupilot"
+  fi
+fi
+
+export ARDUPILOT_HOME="${ARDUPILOT_HOME:-$HOME/ardu_ws/src/ardupilot}"
 
 export PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -24,7 +38,7 @@ export LD_LIBRARY_PATH=/opt/ros/humble/lib:${LD_LIBRARY_PATH}
 
 if [[ ! -d "$ARDUPILOT_HOME" ]]; then
   echo "ERROR: ARDUPILOT_HOME not found at: $ARDUPILOT_HOME"
-  echo "Edit setup.sh and set ARDUPILOT_HOME to your ardupilot path."
+  echo "Set ARDUPILOT_HOME to your ArduPilot checkout path (e.g. export ARDUPILOT_HOME=\"$HOME/ardupilot\")"
   exit 1
 fi
 

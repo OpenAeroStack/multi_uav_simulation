@@ -81,6 +81,19 @@ cleanup_ns3() {
 }
 trap cleanup_ns3 EXIT INT TERM
 
+safe_source() {
+  # ROS 2 setup scripts commonly reference variables that may be unset.
+  # This launcher uses 'set -u', so temporarily disable nounset while sourcing.
+  local file="$1"
+  if [[ ! -f "$file" ]]; then
+    return 1
+  fi
+  set +u
+  # shellcheck disable=SC1090
+  source "$file"
+  set -u
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Orchestration order (required):
 #   1) setup netns + TAP (SHARED_SUBNET=1)
@@ -126,9 +139,18 @@ echo "=== [3/8] Waiting 3 seconds for TAP devices to be ready ==="
 sleep 3
 
 # ── Source ROS2 ─────────────────────────────────────────────────────────────
-source /opt/ros/humble/setup.bash
-source ~/ardu_ws/install/setup.bash
-source "$PROJECT_DIR/ros2/install/setup.bash" 2>/dev/null || {
+safe_source /opt/ros/humble/setup.bash || {
+  echo "ERROR: ROS2 Humble setup not found at /opt/ros/humble/setup.bash"
+  exit 1
+}
+
+if [[ -f "$HOME/ardu_ws/install/setup.bash" ]]; then
+  safe_source "$HOME/ardu_ws/install/setup.bash"
+else
+  echo "WARNING: $HOME/ardu_ws/install/setup.bash not found; skipping ardu_ws overlay"
+fi
+
+safe_source "$PROJECT_DIR/ros2/install/setup.bash" 2>/dev/null || {
   echo "ERROR: ROS2 package not built. Run: bash build_ros2.sh"
   exit 1
 }
