@@ -65,14 +65,14 @@
     </model>
 
     <model name="iris_2_demo">
-      <pose>3 0 0 0 0 0</pose>     
+      <pose>5 0 0 0 0 0</pose>     
       <include>
         <uri>model://iris_2</uri>
       </include>
     </model>
 
     <model name="iris_3_demo">
-      <pose>6 0 0 0 0 0</pose>      
+      <pose>10 0 0 0 0 0</pose>      
       <include>
         <uri>model://iris_3</uri>
       </include>

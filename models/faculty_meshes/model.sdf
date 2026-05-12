@@ -1,0 +1,24 @@
+<?xml version='1.0'?>
+<sdf version='1.6'>
+  <model name='faculty_meshes'>
+    <static>true</static>
+    <link name='terrain_link'>
+      <visual name='terrain_visual'>
+        <geometry>
+          <mesh>
+            <uri>model://faculty_meshes/terrain.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+    </link>
+    <link name='buildings_link'>
+      <visual name='buildings_visual'>
+        <geometry>
+          <mesh>
+            <uri>model://faculty_meshes/buildings.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+    </link>
+  </model>
+</sdf>

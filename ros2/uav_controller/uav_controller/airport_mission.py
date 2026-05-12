@@ -351,12 +351,12 @@ class AirportMission(Node):
                 name='UAV1-HEAD', daemon=True),
             threading.Thread(
                 target=self._mission_member,
-                args=(2, 0.0, 45.0, 'North'),
-                name='UAV2-North', daemon=True),
+                args=(2, 180.0, 225.0, 'South'),   # UAV2 → South
+                name='UAV2-South', daemon=True),
             threading.Thread(
                 target=self._mission_member,
-                args=(3, 180.0, 225.0, 'South'),
-                name='UAV3-South', daemon=True),
+                args=(3, 0.0, 45.0, 'North'),       # UAV3 → North
+                name='UAV3-North', daemon=True),
         ]
 
         for t in threads: t.start()

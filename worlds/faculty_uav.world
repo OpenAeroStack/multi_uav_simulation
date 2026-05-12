@@ -382,7 +382,7 @@
     <!-- UAV 1 - SITL instance 0 - ports 9002/9003 -->
     <!-- Z=39.3: terrain surface at (−3,8) ≈ 38.7m + 0.5m clearance -->
     <model name="iris_1_demo">
-      <pose>-3 8 39.3 0 0 0</pose>
+      <pose>0 0 60 0 0 0</pose>
       <include>
         <uri>model://iris_1</uri>
       </include>
