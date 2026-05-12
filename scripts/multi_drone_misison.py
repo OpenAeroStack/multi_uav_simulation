@@ -21,6 +21,10 @@ import math
 import threading
 import time
 
+# TODO(AP_DDS): This script uses direct MAVLink TCP connections via pymavlink.
+# When running the AP_DDS + micro-ROS pipeline (ports 2019-2021), mission logic
+# should be implemented as a ROS2 node subscribing to the AP_DDS topic namespace
+# (e.g. /uav{i}/ap/navsat) from the micro-ROS agent configuration.
 from pymavlink import mavutil
 
 # ─── Configuration ────────────────────────────────────────────────────────────
