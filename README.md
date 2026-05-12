@@ -94,7 +94,7 @@ cd ardupilot
 git submodule update --init --recursive
 
 # Build with DDS enabled (capital DDS)
-./waf configure --board sitl --enable-DDS
+./waf configure --board sitl --enable-dds
 ./waf copter
 ```
 
