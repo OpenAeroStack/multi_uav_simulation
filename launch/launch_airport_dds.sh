@@ -4,9 +4,12 @@
 # Launches ksql_airport world with 3 UAVs, DDS, and drone_bridge nodes.
 #
 # UAV roles:
-#   UAV1 (port 5760) → CLUSTER HEAD — hovers center at 30m
-#   UAV2 (port 5770) → Member — North sector patrol
-#   UAV3 (port 5780) → Member — South sector patrol
+#   UAV1 (port 5760) → CLUSTER HEAD — hovers center at 50m
+#   UAV2 (port 5770) → Member — South sector patrol (takeoff alt 35m)
+#   UAV3 (port 5780) → Member — North sector patrol (takeoff alt 40m)
+#
+# Collision avoidance: UAV2 takeoff=35m, UAV3 takeoff=40m
+# They are vertically separated from liftoff — no mid-air crossing.
 #
 # Then in terminal 2:
 #   ros2 run uav_controller airport_mission
@@ -82,7 +85,7 @@ sleep 2
 $BINARY --model gazebo-iris --speedup 1 --sysid 3 \
     --defaults $UAV3_DEFAULTS --sim-address=127.0.0.1 -I2 \
     --home 37.523640,-122.255122,1.7,0 &
-    
+
 sleep 3
 
 echo "Waiting for SITL instances to boot (15s)..."
@@ -92,24 +95,27 @@ sleep 15
 echo ""
 echo "=== [4/4] Starting 3 drone_bridge nodes ==="
 
+# UAV1 — CLUSTER HEAD — takeoff to 40m
 ros2 run uav_controller drone_bridge --ros-args \
-    -p uav_id:=1 -p mavlink_port:=5760 -p takeoff_altitude:=20.0 &
+    -p uav_id:=1 -p mavlink_port:=5760 -p takeoff_altitude:=40.0 &
 sleep 1
 
+# UAV2 — Member South — takeoff to 35m (lower than UAV3 for collision avoidance)
 ros2 run uav_controller drone_bridge --ros-args \
-    -p uav_id:=2 -p mavlink_port:=5770 -p takeoff_altitude:=20.0 &
+    -p uav_id:=2 -p mavlink_port:=5770 -p takeoff_altitude:=35.0 &
 sleep 1
 
+# UAV3 — Member North — takeoff to 40m
 ros2 run uav_controller drone_bridge --ros-args \
-    -p uav_id:=3 -p mavlink_port:=5780 -p takeoff_altitude:=20.0 &
+    -p uav_id:=3 -p mavlink_port:=5780 -p takeoff_altitude:=40.0 &
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║       Airport Clustering Mission — 3 UAVs               ║"
 echo "║                                                          ║"
-echo "║  UAV1 → CLUSTER HEAD (hovers center at 30m)             ║"
-echo "║  UAV2 → Member: North sector patrol + camera            ║"
-echo "║  UAV3 → Member: South sector patrol + camera            ║"
+echo "║  UAV1 → CLUSTER HEAD (hovers center at 50m)             ║"
+echo "║  UAV2 → Member: South sector patrol (takeoff 35m)       ║"
+echo "║  UAV3 → Member: North sector patrol (takeoff 40m)       ║"
 echo "║                                                          ║"
 echo "║  Wait for all 3 bridges to show:                        ║"
 echo "║    ✓ DDS GPS flowing                                     ║"
