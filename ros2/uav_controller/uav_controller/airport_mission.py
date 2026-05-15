@@ -376,7 +376,7 @@ class AirportMission(Node):
             self.get_logger().error('╚══════════════════════════════════════╝')
         else:
             self.get_logger().info('╔══════════════════════════════════════╗')
-            self.get_logger().info('║  AIRPORT MISSION COMPLETE  ✅        ║')
+            self.get_logger().info('║  AIRPORT MISSION COMPLETE            ║')
             self.get_logger().info('╚══════════════════════════════════════╝')
 
 
