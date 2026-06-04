@@ -38,6 +38,6 @@ done
 echo "[launch] SITL instances started."
 echo ""
 echo "Now start NS-3 in a SEPARATE terminal:"
-echo "  sudo ~/ns-allinone-3.38.1/ns-3.38.1/build/scratch/ns3-scratch-three_uav_tapbridge_rt"
+echo "  sudo ~/ns-allinone-3.38/ns-3.38/build/scratch/ns3.38-three_uav_tapbridge_rt-default"
 echo ""
 echo "Then connect MAVProxy or run Python scripts as normal."
