@@ -145,6 +145,9 @@ int main(int argc, char *argv[])
     Simulator::Stop(simTime > 0
                     ? Seconds(simTime)
                     : Seconds(3600.0 * 24)); // 24h ceiling if "unlimited"
+    
+    AsciiTraceHelper ascii;
+    phy.EnableAsciiAll(ascii.CreateFileStream("/tmp/ns3_wifi_trace.tr"));
     Simulator::Run();
     Simulator::Destroy();
     return 0;
