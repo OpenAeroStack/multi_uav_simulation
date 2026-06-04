@@ -15,10 +15,32 @@
 #include "ns3/tap-bridge-module.h"
 #include "ns3/propagation-module.h"
 #include "ns3/internet-module.h"
+#include "ns3/stats-module.h"
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("ThreeUavTapBridge");
+
+void PublishStats(Ptr<YansWifiChannel> channel, NodeContainer nodes, void* zmqPub)
+{
+    // For each pair, get the loss model output
+    for (uint32_t i = 0; i < nodes.GetN(); i++) {
+        for (uint32_t j = i+1; j < nodes.GetN(); j++) {
+            Ptr<MobilityModel> mobI = nodes.Get(i)->GetObject<MobilityModel>();
+            Ptr<MobilityModel> mobJ = nodes.Get(j)->GetObject<MobilityModel>();
+            
+            double txPowerDbm = 20.0;
+            // Walk the loss model chain
+            double rxPower = logDist->CalcRxPower(txPowerDbm, mobI, mobJ);
+            
+            // Publish: "RSSI i j rxPower"
+            std::string msg = "RSSI " + std::to_string(i+1) + " " + 
+                              std::to_string(j+1) + " " + std::to_string(rxPower);
+            zmq_send(zmqPub, msg.c_str(), msg.size(), 0);
+        }
+    }
+    Simulator::Schedule(Seconds(0.5), &PublishStats, channel, nodes, zmqPub);
+}
 
 int main(int argc, char *argv[])
 {
