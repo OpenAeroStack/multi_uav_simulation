@@ -1,44 +1,40 @@
+cat > ~/finaly_year_project/multi_uav_simulation/scripts/setup_netns_tap.sh << 'EOF'
 #!/bin/bash
-# setup_netns_tap.sh
-# Creates three network namespaces and TAP-to-bridge plumbing.
-# Run once before launching NS-3 and the SITL stack.
-# Requires: iproute2 (ip command), bridge-utils
-
 set -euo pipefail
 
-for i in 1 2 3; do
-  NS="uav${i}ns"
-  TAP="tap-uav${i}"
-  BR="br-uav${i}"
-  VETH_H="veth${i}h"
-  VETH_NS="veth${i}n"
-  # IP inside the namespace: 10.42.<i>.2/24
-  NS_IP="10.42.${i}.2/24"
-
-  echo "[ns-tap] Setting up $NS / $TAP / $BR"
-
-  # Namespace
-  ip netns add "$NS" 2>/dev/null || true
-
-  # TAP device (NS-3 will open this)
-  ip tuntap add dev "$TAP" mode tap || true
+setup_ns() {
+  local NS=$1 TAP=$2 BR=$3 VETH_H=$4 VETH_NS=$5 NS_IP=$6
+  echo "[ns-tap] Setting up $NS / $TAP / $BR ($NS_IP)"
+  ip netns add "$NS"                                     2>/dev/null || true
+  ip tuntap add dev "$TAP" mode tap                      2>/dev/null || true
   ip link set "$TAP" up
-
-  # Bridge
-  ip link add name "$BR" type bridge || true
+  ip link add name "$BR" type bridge                     2>/dev/null || true
   ip link set "$TAP" master "$BR"
   ip link set "$BR" up
-
-  # veth pair: one end in root, one end in namespace
-  ip link add "$VETH_H" type veth peer name "$VETH_NS" || true
+  ip link add "$VETH_H" type veth peer name "$VETH_NS"   2>/dev/null || true
   ip link set "$VETH_H" master "$BR"
   ip link set "$VETH_H" up
   ip link set "$VETH_NS" netns "$NS"
   ip netns exec "$NS" ip link set "$VETH_NS" up
   ip netns exec "$NS" ip addr add "$NS_IP" dev "$VETH_NS" 2>/dev/null || true
   ip netns exec "$NS" ip link set lo up
+}
 
-done
+# GCS — micro-ROS agents live here
+setup_ns gcsns  tap-gcs  br-gcs  veth0h veth0n 10.42.0.10/24
 
-echo "[ns-tap] Done. Namespaces: uav1ns uav2ns uav3ns"
-echo "         TAP devices:      tap-uav1 tap-uav2 tap-uav3"
+# UAV nodes
+setup_ns uav1ns tap-uav1 br-uav1 veth1h veth1n 10.42.0.11/24
+setup_ns uav2ns tap-uav2 br-uav2 veth2h veth2n 10.42.0.12/24
+setup_ns uav3ns tap-uav3 br-uav3 veth3h veth3n 10.42.0.13/24
+
+echo ""
+echo "[ns-tap] Done."
+echo "  gcsns  → 10.42.0.10  (tap-gcs,  br-gcs)"
+echo "  uav1ns → 10.42.0.11  (tap-uav1, br-uav1)"
+echo "  uav2ns → 10.42.0.12  (tap-uav2, br-uav2)"
+echo "  uav3ns → 10.42.0.13  (tap-uav3, br-uav3)"
+EOF
+
+chmod +x ~/finaly_year_project/multi_uav_simulation/scripts/setup_netns_tap.sh
+echo "Done — setup_netns_tap.sh updated"
