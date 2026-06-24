@@ -82,8 +82,36 @@
       </include>
     </model>
 
+    <!-- People spread along the drone's north (+X) flight path -->
     <model name="person_1">
-      <pose>3 0 0 0 0 1.57</pose>   <!-- 3m in front of drone, facing it -->
+      <pose>10 0 0 0 0 1.57</pose>
+      <static>true</static>
+      <include>
+        <uri>model://person_standing</uri>
+        <static>true</static>
+      </include>
+    </model>
+
+    <model name="person_2">
+      <pose>20 4 0 0 0 1.57</pose>
+      <static>true</static>
+      <include>
+        <uri>model://person_standing</uri>
+        <static>true</static>
+      </include>
+    </model>
+
+    <model name="person_3">
+      <pose>30 -4 0 0 0 1.57</pose>
+      <static>true</static>
+      <include>
+        <uri>model://person_standing</uri>
+        <static>true</static>
+      </include>
+    </model>
+
+    <model name="person_4">
+      <pose>40 0 0 0 0 1.57</pose>
       <static>true</static>
       <include>
         <uri>model://person_standing</uri>
