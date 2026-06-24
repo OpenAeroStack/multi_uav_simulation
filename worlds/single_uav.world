@@ -82,5 +82,14 @@
       </include>
     </model>
 
+    <model name="person_1">
+      <pose>3 0 0 0 0 1.57</pose>   <!-- 3m in front of drone, facing it -->
+      <static>true</static>
+      <include>
+        <uri>model://person_standing</uri>
+        <static>true</static>
+      </include>
+    </model>
+
   </world>
 </sdf>
