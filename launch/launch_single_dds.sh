@@ -46,7 +46,7 @@ echo "=== Launching UAV1 SITL with DDS enabled ==="
 cd ~/
 $BINARY --model gazebo-iris --speedup 1 --sysid 1 \
   --defaults $UAV1_DEFAULTS \
-  --sim-address=127.0.0.1 -I0 &
+  --sim-address 127.0.0.1 -I0 &
 SITL_PID=$!
 
 echo ""

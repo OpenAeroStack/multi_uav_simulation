@@ -72,15 +72,15 @@ echo ""
 echo "=== [3/4] Launching 3 SITL instances ==="
 cd ~/
 $BINARY --model gazebo-iris --speedup 1 --sysid 1 \
-    --defaults $UAV1_DEFAULTS --sim-address=127.0.0.1 -I0 &
+    --defaults $UAV1_DEFAULTS --sim-address 127.0.0.1 -I0 &
 sleep 2
 
 $BINARY --model gazebo-iris --speedup 1 --sysid 2 \
-    --defaults $UAV2_DEFAULTS --sim-address=127.0.0.1 -I1 &
+    --defaults $UAV2_DEFAULTS --sim-address 127.0.0.1 -I1 &
 sleep 2
 
 $BINARY --model gazebo-iris --speedup 1 --sysid 3 \
-    --defaults $UAV3_DEFAULTS --sim-address=127.0.0.1 -I2 &
+    --defaults $UAV3_DEFAULTS --sim-address 127.0.0.1 -I2 &
 sleep 3
 
 echo "Waiting for SITL instances to boot (15s)..."

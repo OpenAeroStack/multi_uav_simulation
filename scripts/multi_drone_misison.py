@@ -18,6 +18,7 @@ Mission flow:
 """
 
 import math
+import argparse
 import threading
 import time
 
@@ -26,9 +27,9 @@ from pymavlink import mavutil
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 DRONES = [
-    {"name": "UAV1", "port": 5760, "sysid": 1, "direction": "left"},
-    {"name": "UAV2", "port": 5770, "sysid": 2, "direction": "right"},
-    {"name": "UAV3", "port": 5780, "sysid": 3, "direction": "forward"},
+    {"name": "UAV1", "tcp_port": 5760, "udp_port": 14601, "sysid": 1, "direction": "left"},
+    {"name": "UAV2", "tcp_port": 5770, "udp_port": 14602, "sysid": 2, "direction": "right"},
+    {"name": "UAV3", "tcp_port": 5780, "udp_port": 14603, "sysid": 3, "direction": "forward"},
 ]
 
 TAKEOFF_ALT   = 20      # metres
@@ -51,11 +52,21 @@ errors_lock = threading.Lock()
 class Drone:
     """Wraps a single pymavlink connection plus all helper methods."""
 
-    def __init__(self, name: str, port: int, sysid: int, direction: str):
+    def __init__(
+        self,
+        name: str,
+        tcp_port: int,
+        udp_port: int,
+        sysid: int,
+        direction: str,
+        link: str,
+    ):
         self.name      = name
-        self.port      = port
+        self.tcp_port  = tcp_port
+        self.udp_port  = udp_port
         self.sysid     = sysid
         self.direction = direction
+        self.link      = link
         self.vehicle   = None          # set in connect()
 
     # ── logging ───────────────────────────────────────────────────────────────
@@ -66,7 +77,11 @@ class Drone:
     # ── connection ────────────────────────────────────────────────────────────
 
     def connect(self):
-        addr = f"tcp:127.0.0.1:{self.port}"
+        if self.link == 'udp':
+            # Listen for MAVLink from SITL (which must be started with --out=udp:127.0.0.1:<udp_port>)
+            addr = f"udpin:0.0.0.0:{self.udp_port}"
+        else:
+            addr = f"tcp:127.0.0.1:{self.tcp_port}"
         self.log(f"Connecting to {addr} ...")
         self.vehicle = mavutil.mavlink_connection(addr, source_system=255)
         self.vehicle.wait_heartbeat()
@@ -271,9 +286,11 @@ def run_mission(cfg: dict):
     """
     drone = Drone(
         name      = cfg["name"],
-        port      = cfg["port"],
+        tcp_port  = cfg["tcp_port"],
+        udp_port  = cfg["udp_port"],
         sysid     = cfg["sysid"],
         direction = cfg["direction"],
+        link      = cfg["link"],
     )
 
     try:
@@ -317,6 +334,15 @@ def run_mission(cfg: dict):
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
+    parser = argparse.ArgumentParser(description='3-drone mission via MAVLink TCP or UDP')
+    parser.add_argument(
+        '--link', choices=['tcp', 'udp'], default='tcp',
+        help='MAVLink transport: tcp uses 5760/5770/5780; udp listens on 14601/14602/14603')
+    args = parser.parse_args()
+
+    for cfg in DRONES:
+        cfg['link'] = args.link
+
     print("=" * 60)
     print("  MULTI-DRONE MISSION  —  3 UAVs")
     print("=" * 60)

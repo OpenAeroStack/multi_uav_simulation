@@ -32,7 +32,7 @@ NS3_HOME="${NS3_HOME:-}"
 NS3_PID_FILE="/tmp/ns3_pid.txt"
 SYNC_NS3_SCRATCH="${SYNC_NS3_SCRATCH:-1}"
 
-# NS-3 scenario runtime knobs (used when starting the three-uav TapBridge program)
+# NS-3 scenario runtime knobs
 NS3_SIM_DURATION_SEC="${NS3_SIM_DURATION_SEC:-0}"
 NS3_ANIM_FILE="${NS3_ANIM_FILE:-/tmp/three_uav_anim.xml}"
 NS3_FLOWMON_XML="${NS3_FLOWMON_XML:-/tmp/three_uav_flowmon.xml}"
@@ -45,8 +45,6 @@ resolve_ns3_home() {
     return 0
   fi
 
-  # Default to the newest matching ns-3 allinone install under $HOME.
-  # Example: $HOME/ns-allinone-3.38/ns-3.38
   local candidate
   candidate=$(ls -d "$HOME"/ns-allinone-3.*/ns-3.* 2>/dev/null | sort -V | tail -n 1 || true)
   if [[ -z "$candidate" ]]; then
@@ -86,7 +84,6 @@ wait_for_tcp_port() {
   local start_ts
   start_ts=$(date +%s)
   while true; do
-    # /dev/tcp is supported by bash.
     if (echo >"/dev/tcp/$host/$port") >/dev/null 2>&1; then
       return 0
     fi
@@ -112,35 +109,20 @@ cleanup_ns3() {
 trap cleanup_ns3 EXIT INT TERM
 
 safe_source() {
-  # ROS 2 setup scripts commonly reference variables that may be unset.
-  # This launcher uses 'set -u', so temporarily disable nounset while sourcing.
   local file="$1"
   if [[ ! -f "$file" ]]; then
     return 1
   fi
   set +u
-  # shellcheck disable=SC1090
   source "$file"
   set -u
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Orchestration order (required):
-#   1) setup netns + TAP (SHARED_SUBNET=1)
-#   2) start NS-3 TapBridge scenario (background)
-#   3) wait 3s for TAP devices
-#   4) launch Gazebo (background) via ros2 launch
-#   5) start arducopter in each namespace
-#   6) start micro_ros_agent for each port
-#   7) launch ROS2 mission node
-#   8) wait on NS-3 PID
-# ─────────────────────────────────────────────────────────────────────────────
-
-# 1) Namespace/TAP setup (shared /24 so NS-3 can bridge UAVs together)
+# 1) Namespace/TAP setup
 echo "=== [1/8] Setting up namespaces and TAP devices (SHARED_SUBNET=1) ==="
 sudo -E SHARED_SUBNET=1 "$PROJECT_DIR/scripts/setup_netns_tap.sh"
 
-# 2) Start NS-3 TapBridge real-time scenario in background (with sudo)
+# 2) Start NS-3 TapBridge real-time scenario in background
 echo "=== [2/8] Starting NS-3 TapBridge scenario in background ==="
 resolve_ns3_home
 if [[ ! -d "$NS3_HOME" ]]; then
@@ -150,13 +132,9 @@ fi
 
 sync_ns3_scratch_program
 
-# NS3_SIM_DURATION_SEC=0 means "run forever" (no Simulator::Stop in the .cc).
-# Do NOT override it to 120: SITL missions last longer than 2 minutes and
-# killing NS-3 mid-flight tears down the TAP bridges for all UAVs.
-# Set NS3_SIM_DURATION_SEC to a positive value only for bounded test runs.
 echo "NS-3 outputs: anim=$NS3_ANIM_FILE flowmon=$NS3_FLOWMON_XML duration=${NS3_SIM_DURATION_SEC}s"
 (
-  set +x   # suppress xtrace — prevents "cd ..." noise bleeding into main script
+  set +x
   set -euo pipefail
   cd "$NS3_HOME"
   exec sudo ./build/scratch/three-uav/ns3.38-three-uav-default \
@@ -209,12 +187,10 @@ safe_source "$PROJECT_DIR/ros2/install/setup.bash" 2>/dev/null || {
 }
 
 # 4) Launch Gazebo Classic
-# Use multi_uav.world (regular iris models with fdm_addr=127.0.0.1)
-# because SITL runs in root namespace alongside Gazebo.
-echo "=== [4/8] Launching Gazebo Classic (background) ==="
-WORLD_PATH="$PROJECT_DIR/worlds/multi_uav.world"
+echo "=== [4/8] Launching Gazebo Classic with Airport World ==="
+WORLD_PATH="$PROJECT_DIR/worlds/airport_3uav.world"
 if ! command -v gazebo >/dev/null 2>&1; then
-  echo "ERROR: gazebo command not found. Install Gazebo Classic 11 (gazebo11)."
+  echo "ERROR: gazebo command not found. Install Gazebo Classic 11."
   exit 1
 fi
 if [[ ! -f "$WORLD_PATH" ]]; then
@@ -230,30 +206,16 @@ echo "Sleeping 15 seconds for Gazebo to start..."
 sleep 15
 
 # 5) Start micro_ros_agent inside gcsns
-#    gcsns has IP 10.42.0.10 on the NS-3 WiFi channel.
-#    Running agents here means XRCE-DDS UDP frames FROM the SITL instances
-#    (which use --serial1 udpclient:10.42.0.10:PORT) traverse the NS-3
-#    simulated WiFi channel before reaching the agent.
-echo "=== [5/8] Starting 3 micro_ros_agent instances inside gcsns (UDP4 ports 2019-2021) ==="
+echo "=== [5/8] Starting 3 micro_ros_agent instances inside gcsns ==="
 if ! ros2 pkg prefix micro_ros_agent >/dev/null 2>&1; then
-  echo "ERROR: ROS2 package 'micro_ros_agent' not found in the current environment."
-  echo "- If you built it in ~/ardu_ws, ensure ~/ardu_ws/install/setup.bash exists."
-  echo "- Otherwise install it: sudo apt install ros-humble-micro-ros-agent"
+  echo "ERROR: ROS2 package 'micro_ros_agent' not found."
   exit 1
 fi
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
-# Verify gcsns exists (created by setup_netns_tap.sh)
-if ! ip netns list | grep -q '^gcsns'; then
-  echo "ERROR: namespace 'gcsns' not found — did setup_netns_tap.sh run successfully?"
-  exit 1
-fi
-
 for i in 1 2 3; do
   PORT=$((2018+i))
-  echo "  - micro_ros_agent udp4 port ${PORT} for uav${i} (ns=/uav${i}) — inside gcsns"
-  # Run agent inside gcsns so it binds to 10.42.0.10 on the NS-3 WiFi channel.
-  # We use 'sudo ip netns exec gcsns' then drop back to OWNER_USER for the agent.
+  echo "  - micro_ros_agent udp4 port ${PORT} for uav${i} — inside gcsns"
   sudo -E ip netns exec gcsns \
     su - "${SUDO_USER:-$USER}" -s /bin/bash -c "
       source /opt/ros/humble/setup.bash
@@ -265,24 +227,12 @@ for i in 1 2 3; do
     " &
   sleep 1
 done
-echo "  Agents started inside gcsns. Waiting 3s for them to be fully ready..."
+echo "  Agents started inside gcsns. Waiting 3s..."
 sleep 3
 
 # 6) Start arducopter in ROOT namespace
-#    SITL runs in root ns so it can reach Gazebo on 127.0.0.1 (same ns).
-#    DDS/micro-ROS traffic is routed to gcsns (10.42.0.10) via --serial1,
-#    so it still traverses the NS-3 WiFi channel.
 echo "=== [6/8] Starting 3 ArduCopter SITL instances (root namespace) ==="
-if [[ -z "${ARDUPILOT_HOME:-}" ]]; then
-  echo "ERROR: ARDUPILOT_HOME not set. Check setup.sh"
-  exit 1
-fi
 BINARY="$ARDUPILOT_HOME/build/sitl/bin/arducopter"
-if [[ ! -x "$BINARY" ]]; then
-  echo "ERROR: arducopter binary not found/executable: $BINARY"
-  exit 1
-fi
-
 BASE_DEFAULTS="$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm"
 
 for i in 1 2 3; do
@@ -291,7 +241,7 @@ for i in 1 2 3; do
   SITL_LOG="/tmp/uav${i}_sitl.log"
   SITL_DIR="/tmp/sitl_uav${i}"
   mkdir -p "$SITL_DIR"
-  sudo rm -f "$SITL_DIR/eeprom.bin"            # may be root-owned from previous run
+  sudo rm -f "$SITL_DIR/eeprom.bin"
   sudo rm -f "$SITL_DIR"/*.bin 2>/dev/null || true
   rm -f "$SITL_LOG" 2>/dev/null || true
 
@@ -303,7 +253,7 @@ for i in 1 2 3; do
       --defaults "$UAV_DEFAULTS" \
       --sim-address 127.0.0.1 \
       --serial1 "udpclient:10.42.0.10:$((2018+i))" \
-      --home -35.363261,149.165230,584,0 \
+      --home 37.523640,-122.255122,1.7,0 \
       ${SITL_EXTRA_ARGS:-} \
   ) >"$SITL_LOG" 2>&1 &
   SITL_PID=$!
@@ -325,26 +275,32 @@ for i in 1 2 3; do
   wait_for_tcp_port "$mavlink_host" "$mavlink_port" 90
 done
 
-# 7) Start drone_bridge nodes, then launch mission
-echo "=== [7/8] Starting 3 drone_bridge nodes, then multi_mission ==="
+# 7) Start drone_bridge nodes, then launch airport mission
+echo "=== [7/8] Starting 3 drone_bridge nodes, then airport_mission ==="
 
-# SITL runs in root namespace — MAVLink TCP is on 127.0.0.1:5760/5770/5780.
+# UAV1 Alt: 40m, UAV2 Alt: 35m, UAV3 Alt: 40m
+declare -A ALTS
+ALTS[1]=40.0
+ALTS[2]=35.0
+ALTS[3]=40.0
+
 for i in 1 2 3; do
   mavlink_host="127.0.0.1"
   mavlink_port=$((5760 + 10 * (i - 1)))
-  echo "  - [UAV${i}] drone_bridge mavlink_host=${mavlink_host} mavlink_port=${mavlink_port}"
+  alt=${ALTS[$i]}
+  echo "  - [UAV${i}] drone_bridge mavlink_host=${mavlink_host} mavlink_port=${mavlink_port} alt=${alt}"
   ros2 run uav_controller drone_bridge --ros-args \
     -p uav_id:=${i} \
     -p mavlink_host:=${mavlink_host} \
     -p mavlink_port:=${mavlink_port} \
-    -p takeoff_altitude:=20.0 &
+    -p takeoff_altitude:=${alt} &
   sleep 1
 done
 
 sleep 3
-ros2 run uav_controller multi_mission &
+ros2 run uav_controller airport_mission &
 MISSION_PID=$!
-echo "Mission PID: $MISSION_PID"
+echo "Airport Mission PID: $MISSION_PID"
 
 # 8) Wait for NS-3 to finish
 echo "=== [8/8] Waiting for NS-3 (PID $NS3_PID) ==="

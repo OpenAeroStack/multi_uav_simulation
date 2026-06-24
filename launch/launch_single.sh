@@ -58,7 +58,7 @@ echo "=== Launching ArduCopter SITL instance 0 (UAV1) ==="
 cd ~/
 $BINARY --model gazebo-iris --speedup 1 --sysid 1 \
   --defaults $DEFAULTS \
-  --sim-address=127.0.0.1 -I0 &
+  --sim-address 127.0.0.1 -I0 &
 
 echo ""
 echo "=== SITL instance running ==="

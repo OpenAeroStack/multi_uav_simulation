@@ -55,19 +55,19 @@ echo "=== Launching ArduCopter SITL instance 0 (UAV1) ==="
 cd ~/  # run from home so tlog files go to ~/
 $BINARY --model gazebo-iris --speedup 1 --sysid 1 \
   --defaults $DEFAULTS \
-  --sim-address=127.0.0.1 -I0 &
+  --sim-address 127.0.0.1 -I0 &
 sleep 5
 
 echo "=== Launching ArduCopter SITL instance 1 (UAV2) ==="
 $BINARY --model gazebo-iris --speedup 1 --sysid 2 \
   --defaults $DEFAULTS \
-  --sim-address=127.0.0.1 -I1 &
+  --sim-address 127.0.0.1 -I1 &
 sleep 5
 
 echo "=== Launching ArduCopter SITL instance 2 (UAV3) ==="
 $BINARY --model gazebo-iris --speedup 1 --sysid 3 \
   --defaults $DEFAULTS \
-  --sim-address=127.0.0.1 -I2 &
+  --sim-address 127.0.0.1 -I2 &
 
 echo ""
 echo "=== All 3 SITL instances running ==="
