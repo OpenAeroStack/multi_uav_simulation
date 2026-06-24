@@ -247,7 +247,7 @@ class DroneBridge(Node):
         self._set_mode('GUIDED')
         time.sleep(1.0)
 
-        deadline   = time.time() + 40.0
+        deadline   = time.time() + 120.0
         last_arm   = 0.0
         attempt    = 0
         while time.time() < deadline:
@@ -290,7 +290,7 @@ class DroneBridge(Node):
             mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
             0, 0, 0, 0, 0, 0, 0, self.alt)
         target = self.alt * 0.85
-        if self._wait_for(lambda: self.rel_alt >= target, timeout=30.0):
+        if self._wait_for(lambda: self.rel_alt >= target, timeout=120.0):
             res.success = True
             res.message = (f'UAV{self.uav_id} reached '
                            f'{self.rel_alt:.1f}m (target {self.alt}m)')
