@@ -30,6 +30,7 @@ setup(
             'airport_mission   = uav_controller.airport_mission:main',
             'position_accuracy_test = uav_controller.position_accuracy_test:main',
             'single_uav_mission = uav_controller.single_uav_mission:main',
+            'city_mission = uav_controller.city_mission:main',
         ],
     },
 )
