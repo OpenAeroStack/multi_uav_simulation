@@ -85,7 +85,7 @@ cd ~/
 
 $BINARY --model gazebo-iris --speedup 1 --sysid 1 \
     --defaults $UAV1_DEFAULTS --sim-address=127.0.0.1 -I0 \
-    --home $HOME_GPS &
+    --home $HOME_GPS \ --out udp:127.0.0.1:14550  &
 sleep 2
 
 $BINARY --model gazebo-iris --speedup 1 --sysid 2 \

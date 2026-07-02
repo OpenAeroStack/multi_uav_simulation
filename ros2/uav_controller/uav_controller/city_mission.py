@@ -86,16 +86,16 @@ def haversine_m(lat1, lon1, lat2, lon2):
 # Conversion: 1 degree lat ≈ 111320m, 1 degree lon ≈ 88600m at lat 37.34°
 
 # City centre — fast_food_93 area (world x=28, y=-14)
-CITY_LAT     = 37.337642
-CITY_LON     = -121.885010
+CITY_LAT = 37.338562
+CITY_LON = -121.886223
 
 # Pond/pier area (world x=199, y=-17)
-POND_LAT     = 37.337615
-POND_LON     = -121.883180
+POND_LAT = 37.340176
+POND_LON = -121.887016
 
 # Mountain area (world x=209, y=-154)
-MTN_LAT      = 37.336385
-MTN_LON      = -121.883086
+MTN_LAT  = 37.340092
+MTN_LON  = -121.884521
 
 # Altitudes
 HEAD_ALT     = 60.0   # m — cluster head altitude
