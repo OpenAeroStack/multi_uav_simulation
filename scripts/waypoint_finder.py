@@ -10,10 +10,12 @@ Usage:
     Terminal 2: python3 scripts/waypoint_finder.py --uav 1
 
 Keys:
-    w = north 20m    s = south 20m
-    a = west  20m    d = east  20m
+    w = north 10m    s = south 10m
+    a = west  10m    d = east  10m
     W = north 100m   S = south 100m  (capitals = big steps)
     A = west  100m   D = east  100m
+    r = rise 5m      f = fall 5m
+    R = rise 20m     F = fall 20m
     t = takeoff
     p = print current GPS (copy this into your mission)
     q = quit
@@ -99,6 +101,13 @@ class WaypointFinder(Node):
         d = {0:'N',90:'E',180:'S',270:'W'}[bearing]
         print(f'  → {d} {dist:.0f}m  target=({self.target_lat:.6f}, '
               f'{self.target_lon:.6f})')
+    
+    def change_alt(self, delta):
+        self.alt = max(2.0, self.alt + delta)
+        self._resend()
+        print(f'  → altitude target = {self.alt:.1f}m '
+              f'(current actual = {self.rel_alt:.1f}m)')
+        
 
     def print_gps(self):
         if self.lat is None:
@@ -121,7 +130,7 @@ def getch():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--uav', type=int, default=1)
-    ap.add_argument('--alt', type=float, default=60.0)
+    ap.add_argument('--alt', type=float, default=30.0)
     args = ap.parse_args()
 
     rclpy.init()
@@ -143,6 +152,10 @@ def main():
         elif c == 'S': node.nudge(180, STEP_BIG)
         elif c == 'A': node.nudge(270, STEP_BIG)
         elif c == 'D': node.nudge(90,  STEP_BIG)
+        elif c == 'r': node.change_alt(+5.0)   # rise 5m
+        elif c == 'f': node.change_alt(-5.0)   # fall 5m
+        elif c == 'R': node.change_alt(+20.0)  # rise 20m
+        elif c == 'F': node.change_alt(-20.0)  # fall 20m
         elif c == 'p': node.print_gps()
 
     rclpy.shutdown()
