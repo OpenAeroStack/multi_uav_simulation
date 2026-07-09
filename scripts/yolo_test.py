@@ -37,7 +37,7 @@ frames_with_person = 0
 
 for fname in frames:
     fpath = os.path.join(folder, fname)
-    results = model(fpath, conf=0.15, verbose=False)
+    results = model(fpath, conf=0.15, classes=[0], verbose=False)
     boxes = results[0].boxes
 
     found_person = False
