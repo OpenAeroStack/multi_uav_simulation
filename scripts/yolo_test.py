@@ -1,48 +1,83 @@
 """
 yolo_test.py
 ------------
-Test YOLO detection across a folder of altitude test frames.
+Test YOLO detection across ALL frames in an altitude folder.
+Reports per-frame results plus a summary (detection rate, avg confidence).
 
 Usage:
     python3 yolo_test.py ~/FYP/multi_uav_sim/yolo_test_frames/10
-    python3 yolo_test.py ~/FYP/multi_uav_sim/yolo_test_frames/20
-    ... etc for each altitude folder
+    python3 yolo_test.py ~/FYP/multi_uav_sim/yolo_test_frames/40
 """
 
 import sys
 import os
+import cv2
 from ultralytics import YOLO
 
 model = YOLO('yolov8n.pt')
 
 folder = sys.argv[1]
-frames = sorted([f for f in os.listdir(folder) if f.endswith('.jpg')])
+frames = sorted([f for f in os.listdir(folder)
+                  if f.endswith('.jpg') and not f.startswith('yolo_result')])
 
 if not frames:
     print(f"No jpg frames found in {folder}")
     sys.exit(1)
 
-# Use the last frame (most stable, drone settled by then)
-last_frame = os.path.join(folder, frames[-1])
-print(f"\nTesting: {last_frame}")
+print(f"\n{'='*60}")
+print(f"Testing {len(frames)} frames in: {folder}")
+print(f"{'='*60}\n")
 
-results = model(last_frame, conf=0.15)  # lower conf threshold to see borderline detections
-boxes = results[0].boxes
+# Make an output subfolder for annotated results
+out_dir = os.path.join(folder, 'yolo_annotated')
+os.makedirs(out_dir, exist_ok=True)
 
-print(f"Total detections: {len(boxes)}")
-if len(boxes) == 0:
-    print("  → NO DETECTIONS at this altitude")
-else:
+person_detections = []   # confidence values where "person" was found
+frames_with_person = 0
+
+for fname in frames:
+    fpath = os.path.join(folder, fname)
+    results = model(fpath, conf=0.15, verbose=False)
+    boxes = results[0].boxes
+
+    found_person = False
+    frame_persons = []
+
     for box in boxes:
         cls = model.names[int(box.cls)]
         conf = float(box.conf)
-        x1, y1, x2, y2 = box.xyxy[0].tolist()
-        w, h = x2-x1, y2-y1
-        print(f"  {cls}: conf={conf:.2f}  box_size={w:.0f}x{h:.0f}px")
+        if cls == 'person':
+            found_person = True
+            frame_persons.append(conf)
+            person_detections.append(conf)
 
-# Save annotated image for visual inspection
-annotated = results[0].plot()
-out_path = os.path.join(folder, 'yolo_result.jpg')
-import cv2
-cv2.imwrite(out_path, annotated)
-print(f"Annotated image saved: {out_path}")
+    if found_person:
+        frames_with_person += 1
+        confs_str = ', '.join(f'{c:.2f}' for c in frame_persons)
+        print(f"  {fname:<20} person DETECTED  (conf: {confs_str})")
+    else:
+        # show what else (if anything) was detected, for context
+        other = [model.names[int(b.cls)] for b in boxes]
+        other_str = f"  (found: {other})" if other else ""
+        print(f"  {fname:<20} no person{other_str}")
+
+    # save annotated frame
+    annotated = results[0].plot()
+    cv2.imwrite(os.path.join(out_dir, fname), annotated)
+
+# ── Summary ────────────────────────────────────────────────────────────────
+print(f"\n{'='*60}")
+print(f"SUMMARY — {folder}")
+print(f"{'='*60}")
+print(f"  Frames tested:        {len(frames)}")
+print(f"  Frames with person:   {frames_with_person}")
+print(f"  Detection rate:       {100*frames_with_person/len(frames):.0f}%")
+if person_detections:
+    avg_conf = sum(person_detections) / len(person_detections)
+    print(f"  Avg confidence:       {avg_conf:.2f}")
+    print(f"  Min / Max confidence: {min(person_detections):.2f} / "
+          f"{max(person_detections):.2f}")
+else:
+    print(f"  Avg confidence:       N/A (no detections)")
+print(f"  Annotated frames:     {out_dir}")
+print(f"{'='*60}\n")
