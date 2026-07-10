@@ -604,7 +604,7 @@
         </inertia>
       </inertial>
       <sensor name="iris1_camera" type="camera">
-        <pose>0 0 0 0 1.5707963 0</pose>
+        <pose>0 0 0 0 1 0</pose>
         <camera>
           <horizontal_fov>1.2</horizontal_fov>
           <image>
@@ -626,7 +626,6 @@
           </ros>
           <camera_name>camera</camera_name>
           <frame_name>camera_optical_frame</frame_name>
-          <hack_baseline>0.07</hack_baseline>
         </plugin>
       </sensor>
     </link>
