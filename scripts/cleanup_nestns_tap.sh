@@ -1,4 +1,3 @@
-cat > ~/finaly_year_project/multi_uav_simulation/scripts/cleanup_nestns_tap.sh << 'EOF'
 #!/bin/bash
 set -euo pipefail
 
@@ -22,7 +21,3 @@ for ns in gcsns uav1ns uav2ns uav3ns; do
 done
 
 echo "[cleanup] Done — all processes and network plumbing removed."
-EOF
-
-chmod +x ~/finaly_year_project/multi_uav_simulation/scripts/cleanup_nestns_tap.sh
-echo "Done — cleanup script updated"

@@ -8,7 +8,10 @@
 #   export ARDUPILOT_HOME="$HOME/ardupilot"
 #   export ARDUPILOT_HOME="/opt/ardupilot"
 #   export ARDUPILOT_HOME="/media/user/drive-uuid/ardupilot"
-export ARDUPILOT_HOME="$HOME/ardu_ws/src/ardupilot"
+# REMOVED: pointed at a directory that does not exist on this machine:
+# export ARDUPILOT_HOME="$HOME/ardu_ws/src/ardupilot"
+# ADDED: the built ArduPilot tree actually lives here:
+export ARDUPILOT_HOME="$HOME/ardupilot"
 # ============================================================
 
 export PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
