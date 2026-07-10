@@ -7,6 +7,10 @@
 # 4) Build/run:
 #      ./ns3 build three-uav
 #      sudo ./ns3 run --enable-sudo "three-uav --tap0=tap-gcs --tap1=tap-uav1 --tap2=tap-uav2 --tap3=tap-uav3 --simDurationSec=60 --animFile=/tmp/three_uav_anim.xml"
+# in scenario we using the nakamiPropogation model and the LongdistancePropogation model we hace to use libpropagation.
+# here libcsma is not using.
+ 
+
 
 build_exec(
   EXECNAME three-uav
@@ -22,5 +26,6 @@ build_exec(
     ${libflow-monitor}
     ${libmobility}
     ${libwifi}
-  EXECUTABLE_DIRECTORY_PATH ${CMAKE_OUTPUT_DIRECTORY}/scratch/three-uav
+    ${libpropagation}
+    EXECUTABLE_DIRECTORY_PATH ${CMAKE_OUTPUT_DIRECTORY}/scratch/three-uav
 )

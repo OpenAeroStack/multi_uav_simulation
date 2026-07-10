@@ -138,7 +138,6 @@ for i in $(seq 1 "${UAV_COUNT}"); do
   NS="uav${i}"
   TAP="tap-uav${i}"
   VETH_A_ROOT="veth-uav${i}"
-  VETH_B_ROOT="veth-host${i}"
   MAC_SUFFIX=$(printf "%02x" "${i}")
   SHARED_MAC="02:00:00:00:00:${MAC_SUFFIX}"
 
@@ -149,14 +148,11 @@ for i in $(seq 1 "${UAV_COUNT}"); do
   ETH0_ROOT_IP="10.42.0.$((200 + i))"    # 10.42.0.201 / .202 / .203
   ETH0_NS_IP="10.42.0.$((10 + i))"       # 10.42.0.11  / .12  / .13
   ETH0_GW="10.42.0.1"                    # default gw inside ns (stays same)
-  ETH1_ROOT_IP="10.42.${i}.1"            # 10.42.1.1   / 2.1  / 3.1
-  ETH1_NS_IP="10.42.${i}.2"             # 10.42.1.2   / 2.2  / 3.2
 
   info "────────────── UAV${i} ──────────────"
   info "  Namespace : ${NS}"
   info "  TAP       : ${TAP}  (standalone, MAC=${SHARED_MAC})"
   info "  veth-A    : ${VETH_A_ROOT} (${ETH0_ROOT_IP}/24) ↔ eth0 (${ETH0_NS_IP}/24)"
-  info "  veth-B    : ${VETH_B_ROOT} (${ETH1_ROOT_IP}/24) ↔ eth1 (${ETH1_NS_IP}/24)"
   info "  default gw: ${ETH0_GW} via eth0"
 
   # 1. Create namespace
@@ -192,18 +188,7 @@ for i in $(seq 1 "${UAV_COUNT}"); do
   ip netns exec "${NS}" ip link set eth0 up
   ip netns exec "${NS}" ethtool -K eth0 tx off 2>/dev/null || true
 
-  # 4. Veth pair B (direct DDS path)
-  ip link add "${VETH_B_ROOT}" type veth peer name "eth1-tmp"
-  ip link set "eth1-tmp" netns "${NS}"
-  ip netns exec "${NS}" ip link set "eth1-tmp" name eth1
 
-  ip addr add "${ETH1_ROOT_IP}/24" dev "${VETH_B_ROOT}"
-  ip link set "${VETH_B_ROOT}" up
-  ethtool -K "${VETH_B_ROOT}" tx off 2>/dev/null || true
-
-  ip netns exec "${NS}" ip addr add "${ETH1_NS_IP}/24" dev eth1
-  ip netns exec "${NS}" ip link set eth1 up
-  ip netns exec "${NS}" ethtool -K eth1 tx off 2>/dev/null || true
 
   # 5. Default route: via NS-3 path (eth0)
   ip netns exec "${NS}" ip route replace default via "${ETH0_GW}" dev eth0
@@ -245,15 +230,7 @@ for i in $(seq 1 "${UAV_COUNT}"); do
     FAIL_ITEMS+=("UAV${i}: ping veth-A ${VETH_A_IP}")
   fi
 
-  # Test 2: ping veth-B gateway (direct DDS path)
-  VETH_B_GW="10.42.${i}.1"
-  if ip netns exec "${NS}" ping -c2 -W2 "${VETH_B_GW}" >/dev/null 2>&1; then
-    pass "UAV${i}: ping ${VETH_B_GW} (veth-B gateway, DDS path) — OK"
-    (( PASS_COUNT++ )) || true
-  else
-    fail "UAV${i}: ping ${VETH_B_GW} (veth-B gateway) — FAILED"
-    FAIL_ITEMS+=("UAV${i}: ping veth-B ${VETH_B_GW}")
-  fi
+
 
   # Test 3: default route is via eth0
   DEF_ROUTE=$(ip netns exec "${NS}" ip route show default | head -1)
@@ -278,8 +255,8 @@ fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 step "Summary"
-# 1 TAP check + 3 connectivity per UAV (=4 each) + 1 GCS TAP + 1 GCS ping = UAV_COUNT*4 + 2
-TOTAL=$((UAV_COUNT * 4 + 2))
+# 1 TAP check + 2 connectivity per UAV (=3 each) + 1 GCS TAP + 1 GCS ping = UAV_COUNT*3 + 2
+TOTAL=$((UAV_COUNT * 3 + 2))
 echo ""
 if [[ ${#FAIL_ITEMS[@]} -eq 0 ]]; then
   pass "All checks passed (${PASS_COUNT}/${TOTAL})"

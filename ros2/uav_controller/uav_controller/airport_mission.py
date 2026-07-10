@@ -108,6 +108,7 @@ class DroneState:
         self.mode    = '---'
         self.armed   = False
         self.gps_ok  = False
+        self.snr     = None
 
 
 # ── Mission node ──────────────────────────────────────────────────────────────
@@ -135,7 +136,8 @@ class AirportMission(Node):
                 self._make_mode_cb(uid), 10)
             self.create_subscription(Bool, f'{ns}/armed',
                 self._make_armed_cb(uid), 10)
-
+            self.create_subscription(Float32, f'{ns}/snr',
+                self._make_snr_cb(uid), 10)
             self.takeoff_clients[uid] = self.create_client(
                 Trigger, f'{ns}/takeoff')
             self.rtl_clients[uid] = self.create_client(
@@ -167,6 +169,9 @@ class AirportMission(Node):
 
     def _make_armed_cb(self, uid):
         def cb(msg): self.states[uid].armed = msg.data
+        return cb
+    def _make_snr_cb(self, uid):
+        def cb(msg): self.states[uid].snr = msg.data
         return cb
 
     # ── helpers ───────────────────────────────────────────────────────────────

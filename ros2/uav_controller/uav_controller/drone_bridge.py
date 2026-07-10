@@ -72,10 +72,38 @@ class DroneBridge(Node):
         # ── MAVLink connection ────────────────────────────────────────────────
         self.get_logger().info(
             f'[UAV{self.uav_id}] Connecting MAVLink → tcp:{host}:{port}')
-        self.mav = mavutil.mavlink_connection(
-            f'tcp:{host}:{port}', source_system=255)
-        self.mav.wait_heartbeat()
-        self.get_logger().info(f'[UAV{self.uav_id}] MAVLink heartbeat OK')
+
+        self.mav = None
+        connect_deadline = time.time() + 60.0   # allow for SITL's post-param-load reboot
+        attempt = 0
+        while self.mav is None and time.time() < connect_deadline:
+            attempt += 1
+            try:
+                conn = mavutil.mavlink_connection(f'tcp:{host}:{port}', source_system=255)
+                if conn.wait_heartbeat(timeout=8):
+                    self.mav = conn
+                else:
+                    conn.close()
+                    raise TimeoutError('no heartbeat within 8s')
+            except Exception as e:
+                self.get_logger().warn(
+                    f'[UAV{self.uav_id}] MAVLink connect attempt {attempt} failed: {e} — retrying')
+                time.sleep(2.0)
+
+        if self.mav is None:
+            self.get_logger().error(f'[UAV{self.uav_id}] Could not establish MAVLink connection — giving up')
+            raise RuntimeError(f'UAV{self.uav_id}: MAVLink connect failed after {attempt} attempts')
+
+        self.get_logger().info(f'[UAV{self.uav_id}] MAVLink heartbeat OK (attempt {attempt})')
+
+        # Listen briefly for STATUSTEXT messages (DDS init happens at boot, but
+        # bridge connects after SITL starts, so we may still catch retries/repeats)
+        import time as _time
+        _deadline = _time.time() + 3.0
+        while _time.time() < _deadline:
+            stmsg = self.mav.recv_match(type='STATUSTEXT', blocking=True, timeout=1)
+            if stmsg and 'DDS' in stmsg.text:
+                self.get_logger().warn(f'[UAV{self.uav_id}] STATUSTEXT: {stmsg.text}')
 
         # ArduPilot only streams HEARTBEAT until a GCS requests more.
         # Request GLOBAL_POSITION_INT (for rel_alt) and basic status.
@@ -88,12 +116,15 @@ class DroneBridge(Node):
                 stream_id, rate_hz, 1)
         self.get_logger().info(f'[UAV{self.uav_id}] Telemetry streams requested')
 
+    
+
+
         # ── DDS subscribers (telemetry) ───────────────────────────────────────
         self.create_subscription(
-            NavSatFix,    '/ap/navsat',
+            NavSatFix,    f'{ns}/ap/navsat',
             self._cb_navsat,  AP_DDS_QOS)
         self.create_subscription(
-            BatteryState, '/ap/battery',
+            BatteryState, f'{ns}/ap/battery',
             self._cb_battery, AP_DDS_QOS)
 
         # ── publishers ────────────────────────────────────────────────────────
@@ -126,7 +157,7 @@ class DroneBridge(Node):
 
         self.get_logger().info(
             f'[UAV{self.uav_id}] Bridge ready'
-            f' | waiting for DDS GPS from /ap/navsat ...')
+            f' | waiting for DDS GPS from {ns}/ap/navsat ...')
         self.get_logger().info(
             f'[UAV{self.uav_id}] Services: '
             f'{ns}/arm  {ns}/takeoff  {ns}/land  {ns}/rtl')

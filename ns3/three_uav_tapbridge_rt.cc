@@ -1,5 +1,5 @@
 // =============================================================================
-//  three_uav_realistic.cc
+//  three_uav_tapbridge_rt.cc
 //
 //  Three-UAV TapBridge simulation with realistic channel modelling:
 //    - Log-distance path loss     (primary path loss)
@@ -14,15 +14,15 @@
 //  and IP addressing are identical to the original script.
 //
 //  Build:
-//    cp three_uav_realistic.cc <ns3-root>/scratch/
+//    cp three_uav_tapbridge_rt.cc <ns3-root>/scratch/
 //    cd <ns3-root>
 //    ./ns3 build
 //
 //  Run (basic):
-//    ./ns3 run "scratch/three_uav_realistic --simDurationSec=60"
+//    ./ns3 run "scratch/three_uav_tapbridge_rt --simDurationSec=60"
 //
 //  Run (full options):
-//    ./ns3 run "scratch/three_uav_realistic \
+//    ./ns3 run "scratch/three_uav_tapbridge_rt \
 //      --simDurationSec=120 \
 //      --delayMs=20 \
 //      --lossRate=0.05 \
@@ -504,8 +504,18 @@ int main(int argc, char* argv[])
     Simulator::Stop(Seconds(simDurationSec));
 
   // ── NetAnim ───────────────────────────────────────────────────────────────
+  // Only enable detailed packet metadata for bounded/short test runs.
+  // For live missions (simDurationSec=0) this would grow unbounded.
   AnimationInterface anim(animFile);
-  anim.EnablePacketMetadata(true);
+  if (simDurationSec > 0.0 && simDurationSec <= 300.0)
+    {
+      anim.EnablePacketMetadata(true);
+    }
+  else
+    {
+      NS_LOG_UNCOND("NetAnim packet metadata disabled (unbounded/long run) "
+                    "to avoid unbounded memory/file growth.");
+    }
 
   // GCS node (index 0) — white
   anim.UpdateNodeDescription(nodes.Get(0), "GCS " + tapNames[0]);
