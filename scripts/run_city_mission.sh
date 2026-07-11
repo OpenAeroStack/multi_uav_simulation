@@ -1,3 +1,4 @@
+#!/bin/bash
 # run_city_mission.sh
 # --------------------
 # Run this in "terminal 2" instead of `ros2 run uav_controller city_mission`

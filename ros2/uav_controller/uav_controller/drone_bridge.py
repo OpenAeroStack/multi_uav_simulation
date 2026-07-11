@@ -58,6 +58,9 @@ class DroneBridge(Node):
         port        = self.get_parameter('mavlink_port').value
         self.alt    = self.get_parameter('takeoff_altitude').value
         ns          = f'/uav{self.uav_id}'
+        ap_ns       = f'/ap/v{self.uav_id}'
+        self.ap_navsat_topic = f'{ap_ns}/navsat'
+        self.ap_battery_topic = f'{ap_ns}/battery'
 
         # ── internal state ────────────────────────────────────────────────────
         self.lat     = 0.0
@@ -90,10 +93,10 @@ class DroneBridge(Node):
 
         # ── DDS subscribers (telemetry) ───────────────────────────────────────
         self.create_subscription(
-            NavSatFix,    '/ap/navsat',
+            NavSatFix,    self.ap_navsat_topic,
             self._cb_navsat,  AP_DDS_QOS)
         self.create_subscription(
-            BatteryState, '/ap/battery',
+            BatteryState, self.ap_battery_topic,
             self._cb_battery, AP_DDS_QOS)
 
         # ── publishers ────────────────────────────────────────────────────────
@@ -126,7 +129,7 @@ class DroneBridge(Node):
 
         self.get_logger().info(
             f'[UAV{self.uav_id}] Bridge ready'
-            f' | waiting for DDS GPS from /ap/navsat ...')
+            f' | waiting for DDS GPS from {self.ap_navsat_topic} ...')
         self.get_logger().info(
             f'[UAV{self.uav_id}] Services: '
             f'{ns}/arm  {ns}/takeoff  {ns}/land  {ns}/rtl')
@@ -238,7 +241,9 @@ class DroneBridge(Node):
     # ── service handlers ──────────────────────────────────────────────────────
 
     def _srv_arm(self, req, res):
-        self.get_logger().info(f'[UAV{self.uav_id}] Waiting for DDS GPS...')
+        self.get_logger().info(
+            f'[UAV{self.uav_id}] Waiting for DDS GPS from '
+            f'{self.ap_navsat_topic} ...')
         if not self._wait_for(lambda: self.gps_ok, timeout=50.0):
             res.success = False
             res.message = 'GPS not ready — is micro_ros_agent running?'

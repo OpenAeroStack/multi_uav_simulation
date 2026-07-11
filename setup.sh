@@ -27,8 +27,8 @@ fi
 
 export GAZEBO_RESOURCE_PATH="/usr/share/gazebo-11:${GAZEBO_RESOURCE_PATH:-}"
 export GAZEBO_MODEL_DATABASE_URI=""
-export GAZEBO_MODEL_PATH=~/simulation/small_city_gazebo/models:$GAZEBO_MODEL_PATH
-export GAZEBO_RESOURCE_PATH=~/simulation/small_city_gazebo:$GAZEBO_RESOURCE_PATH
+export GAZEBO_MODEL_PATH="$HOME/simulation/small_city_gazebo/models:${GAZEBO_MODEL_PATH:-}"
+export GAZEBO_RESOURCE_PATH="$HOME/simulation/small_city_gazebo:${GAZEBO_RESOURCE_PATH:-}"
 if [[ ! -d "$ARDUPILOT_HOME" ]]; then
   echo "ERROR: ARDUPILOT_HOME not found at: $ARDUPILOT_HOME"
   echo "Set ARDUPILOT_HOME to your ArduPilot checkout path (e.g. export ARDUPILOT_HOME=\"$HOME/ardupilot\")"

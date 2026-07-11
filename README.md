@@ -1,553 +1,582 @@
-# multi_uav_sim
+# Multi-UAV city simulation with ns-3
 
-A standalone Gazebo + ArduPilot SITL simulation for multi-UAV research.
-All Gazebo models are bundled in the repo.
+This repository integrates Gazebo Classic, three ArduPilot SITL vehicles, ROS 2
+Humble, AP_DDS, MAVLink, and an ns-3 Wi-Fi channel. Linux network namespaces
+ensure that command and telemetry traffic cannot silently bypass ns-3 through
+the host loopback interface.
 
-The stack integrates:
-- **Gazebo Classic 11** — 3D physics simulation
-- **ArduPilot SITL** — flight controller simulation
-- **AP_DDS + micro_ros_agent** — ROS2 telemetry bridge
-- **ROS2 Humble** — mission control and research layer
-- **Camera feeds** — downward-facing cameras on each drone, published as ROS2 image topics
+The primary entry point is:
 
----
+```bash
+./scripts/launch_city_dds.sh
+```
 
-## System Requirements
+The launcher creates the topology, builds and starts ns-3, starts Gazebo and
+the three SITL instances, validates AP_DDS telemetry, starts the bridge nodes,
+and finally starts `city_mission`.
 
-- Ubuntu 22.04
-- Gazebo Classic 11 (**not** Gazebo Garden/Harmonic/Fortress)
-- ArduPilot built from source (with `--enable-DDS`)
-- ArduPilot Gazebo plugin (`khancyr/ardupilot_gazebo`)
-- ROS2 Humble
-- MAVProxy
-- Python 3
-
----
+> The complete runtime still requires local sudo access for namespace and TAP
+> creation. Run `sudo -v` before launching so setup and cleanup do not stop at
+> an interactive password prompt.
 
 ## Architecture
 
+```text
+ROOT NETWORK NAMESPACE
+────────────────────────────────────────────────────────────────────────────
+  scripts/launch_city_dds.sh
+  Gazebo Classic 11
+  ns-3 real-time simulation
+
+                  ns-3 802.11a ad-hoc Wi-Fi
+          LogDistance + Nakagami + optional random loss
+
+ tap-gcs         tap-uav1         tap-uav2         tap-uav3
+    │                │                │                │
+ br-gcs           br-uav1          br-uav2          br-uav3
+    │                │                │                │
+ veth-gcs-host    veth-uav1-host   veth-uav2-host   veth-uav3-host
+    │                │                │                │
+    ▼                ▼                ▼                ▼
+
+  gcsns             uav1             uav2             uav3
+  ─────             ────             ────             ────
+  wifi0 .10         wifi0 .11        wifi0 .12        wifi0 .13
+  city_mission      SITL I0          SITL I1          SITL I2
+  3 drone_bridge    SYSID 1          SYSID 2          SYSID 3
+  3 DDS agents      TCP 5760         TCP 5770         TCP 5780
+                    DDS→.10:2019     DDS→.10:2020     DDS→.10:2021
+
+GAZEBO/SITL MANAGEMENT LINKS — do not pass through ns-3
+────────────────────────────────────────────────────────────────────────────
+  sim-uav1-host 172.31.1.1/30 ─── sim0 172.31.1.2/30 in uav1
+  sim-uav2-host 172.31.2.1/30 ─── sim0 172.31.2.2/30 in uav2
+  sim-uav3-host 172.31.3.1/30 ─── sim0 172.31.3.2/30 in uav3
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        YOUR LAPTOP                          │
-│                                                             │
-│  ┌──────────┐   UDP    ┌─────────────┐   DDS    ┌───────┐  │
-│  │  Gazebo  │◄────────►│  ArduPilot  │◄────────►│ ROS2  │  │
-│  │  (3D)    │  FDM     │    SITL     │  MAVLink  │       │  │
-│  └──────────┘          └─────────────┘◄────────►└───────┘  │
-│       │                                          TCP        │
-│  Camera feed                                               │
-│  (libgazebo_ros_camera.so)                                  │
-│  → /uavN/camera/image_raw                                  │
-└─────────────────────────────────────────────────────────────┘
 
-Communication layers:
-  Gazebo ↔ ArduPilot       UDP FDM sockets (libArduPilotPlugin.so)
-  ArduPilot → ROS2         AP_DDS via micro_ros_agent (telemetry)
-  ROS2 → ArduPilot         MAVLink TCP via drone_bridge (commands)
-  Gazebo camera → ROS2     libgazebo_ros_camera.so → /uavN/camera/image_raw
+### Traffic paths
+
+Mission commands are forced through ns-3:
+
+```text
+city_mission
+  → ROS 2 service/topic inside gcsns
+  → drone_bridge
+  → MAVLink TCP over gcsns/wifi0
+  → ns-3
+  → uavN/wifi0
+  → ArduPilot SITL
 ```
 
----
+AP_DDS telemetry is also forced through ns-3:
 
-## Part 1 — Base Simulation Setup
+```text
+ArduPilot AP_DDS in uavN
+  → XRCE-DDS UDP to 10.42.0.10:2019/2020/2021
+  → uavN/wifi0
+  → ns-3
+  → gcsns/wifi0
+  → micro_ros_agent
+  → /ap/vN/* inside gcsns
+  → drone_bridge
+  → /uavN/*
+  → city_mission
+```
 
-### Step 1 — Install Gazebo 11
+Gazebo physics deliberately bypasses ns-3 and uses isolated management veths:
+
+```text
+Gazebo FDM state → SITL sim0
+SITL servo output → Gazebo ArduPilot plugin
+```
+
+Root-side TAPs, bridges, and wireless veths have no IP addresses. There is no
+wireless default route, fake gateway, `/32` route, or MASQUERADE rule.
+
+## Address and port reference
+
+### Wireless interfaces
+
+| Endpoint | Namespace/interface | Address | MAC |
+|---|---|---|---|
+| GCS | `gcsns/wifi0` | `10.42.0.10/24` | `02:00:00:00:00:00` |
+| UAV1 | `uav1/wifi0` | `10.42.0.11/24` | `02:00:00:00:00:01` |
+| UAV2 | `uav2/wifi0` | `10.42.0.12/24` | `02:00:00:00:00:02` |
+| UAV3 | `uav3/wifi0` | `10.42.0.13/24` | `02:00:00:00:00:03` |
+
+### Vehicle ports
+
+| UAV | MAVLink TCP | AP_DDS UDP destination | Gazebo servo input | SITL FDM input |
+|---|---|---|---|---|
+| UAV1 | `10.42.0.11:5760` | `10.42.0.10:2019` | `172.31.1.1:9002` | `172.31.1.2:9003` |
+| UAV2 | `10.42.0.12:5770` | `10.42.0.10:2020` | `172.31.2.1:9012` | `172.31.2.2:9013` |
+| UAV3 | `10.42.0.13:5780` | `10.42.0.10:2021` | `172.31.3.1:9022` | `172.31.3.2:9023` |
+
+The Gazebo/SITL ports use UDP. No TCP or `socat` relay is used for physics.
+
+## Requirements
+
+- Ubuntu 22.04
+- Bash
+- Gazebo Classic 11
+- ROS 2 Humble
+- `ros-humble-gazebo-ros-pkgs`
+- ArduPilot built for SITL with DDS enabled
+- `ardupilot_msgs` and `micro_ros_agent` installed in `~/ardu_ws`
+- ArduPilot Gazebo plugin providing `libArduPilotPlugin.so`
+- ns-3 3.38 or a compatible CMake-based ns-3 release
+- `rmw_cyclonedds_cpp` if CycloneDDS is selected for other experiments
+- Linux tools: `iproute2`, `bridge`, `ethtool`, `ping`, `sudo`
+- Python packages required by the ROS package, including `pymavlink`
+
+Install the common Ubuntu packages:
 
 ```bash
 sudo apt update
-sudo apt install gazebo11 libgazebo11-dev
+sudo apt install \
+  gazebo11 libgazebo11-dev \
+  ros-humble-gazebo-ros-pkgs \
+  python3-colcon-common-extensions \
+  iproute2 ethtool iputils-ping
 ```
 
-Verify:
-```bash
-gazebo --version
-# Should print: Gazebo multi-robot simulator, version 11.x.x
+## ArduPilot and ROS workspace
+
+The default configuration expects:
+
+```text
+~/ardu_ws/src/ardupilot
+~/ardu_ws/install/setup.bash
 ```
 
----
-
-### Step 2 — Install ROS2 Humble
-
-Follow the official guide: https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debians.html
-
-Then install colcon and gazebo ROS packages:
-```bash
-sudo apt install python3-colcon-common-extensions
-sudo apt install ros-humble-gazebo-ros-pkgs
-```
-
----
-
-### Step 3 — Build ArduPilot with DDS support
-
-> **Important:** This repo uses a specific ArduPilot workspace (`ardu_ws`) that includes
-> `micro_ros_agent` and is built with `--enable-DDS`. Do NOT use a plain `~/ardupilot` clone.
+Build ArduPilot with DDS support:
 
 ```bash
-# Create the workspace
-mkdir -p ~/ardu_ws/src
-cd ~/ardu_ws/src
-
-# Clone ArduPilot
-git clone https://github.com/ArduPilot/ardupilot.git
-cd ardupilot
+cd ~/ardu_ws/src/ardupilot
 git submodule update --init --recursive
-
-# Build with DDS enabled (capital DDS)
 ./waf configure --board sitl --enable-dds
 ./waf copter
 ```
 
-Verify DDS is compiled in:
+Verify the binary:
+
 ```bash
-./waf configure --board sitl --enable-DDS 2>&1 | grep -i dds
-# Should show: DDS client : enabled
+test -x ~/ardu_ws/src/ardupilot/build/sitl/bin/arducopter
 ```
 
----
+The three parameter files configure unique clients:
 
-### Step 4 — Build micro_ros_agent
+```text
+params/uav1_dds.parm: SYSID_THISMAV=1, DDS_UDP_PORT=2019
+params/uav2_dds.parm: SYSID_THISMAV=2, DDS_UDP_PORT=2020
+params/uav3_dds.parm: SYSID_THISMAV=3, DDS_UDP_PORT=2021
+```
+
+All three enable `DDS_USE_NS=1`, producing `/ap/v1`, `/ap/v2`, and `/ap/v3`.
+
+## Build the ROS 2 package
 
 ```bash
-cd ~/ardu_ws/src
-git clone https://github.com/microROS/micro-ROS-Agent
-cd ~/ardu_ws
+cd /path/to/multi_uav_simulation/ros2
 source /opt/ros/humble/setup.bash
-colcon build --packages-select micro_ros_agent ardupilot_msgs
-```
-
----
-
-### Step 5 — Install ArduPilot Gazebo Plugin
-
-```bash
-cd ~
-git clone https://github.com/khancyr/ardupilot_gazebo.git
-cd ardupilot_gazebo
-mkdir build && cd build
-cmake ..
-make -j4
-sudo make install
-```
-
-Verify:
-```bash
-ls /usr/lib/x86_64-linux-gnu/gazebo-11/plugins/ | grep ArduPilot
-# Should show: libArduPilotPlugin.so
-```
-
----
-
-### Step 6 — Install MAVProxy and pymavlink
-
-```bash
-pip3 install MAVProxy pymavlink
-```
-
----
-
-### Step 7 — Clone This Repo
-
-```bash
-git clone <your-repo-url> ~/FYP/multi_uav_sim
-cd ~/FYP/multi_uav_sim
-```
-
----
-
-### Step 8 — Configure setup.sh
-
-Open `setup.sh` and set `ARDUPILOT_HOME` to the ardu_ws ArduPilot:
-
-```bash
-export ARDUPILOT_HOME="$HOME/ardu_ws/src/ardupilot"
-```
-
-The following plugin paths must also be set in `setup.sh` for camera and physics plugins to load:
-```bash
-export GAZEBO_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/gazebo-11/plugins:/opt/ros/humble/lib:${GAZEBO_PLUGIN_PATH}
-export LD_LIBRARY_PATH=/opt/ros/humble/lib:${LD_LIBRARY_PATH}
-```
-
----
-
-### Step 9 — Configure ~/.bashrc
-
-Add these lines to the bottom of `~/.bashrc`:
-
-```bash
-source /opt/ros/humble/setup.bash
-export PATH=$PATH:~/.local/bin
-export PATH=$PATH:~/ardu_ws/Micro-XRCE-DDS-Gen/scripts
 source ~/ardu_ws/install/setup.bash
-source ~/FYP/multi_uav_sim/ros2/install/setup.bash
+colcon build --packages-select uav_controller
+source install/setup.bash
 ```
 
-Then reload:
-```bash
-source ~/.bashrc
-```
-
-> **Important:** Do NOT add `export COLCON_TRACE` to bashrc — this breaks ROS2 package sourcing.
-
----
-
-### Step 10 — Build the ROS2 package
+Verify the important executables:
 
 ```bash
-cd ~/FYP/multi_uav_sim
-bash build_ros2.sh
+ros2 pkg executables uav_controller | grep -E \
+  'drone_bridge|city_mission|gazebo_ns3_position_sender'
 ```
 
----
+## Install the ns-3 target
 
-## Part 2 — Running the Simulation
-
-### Terminal 1 — Launch simulation
-
-For single UAV with DDS/ROS2:
-```bash
-cd ~/FYP/multi_uav_sim
-bash launch/launch_single_dds.sh
-```
-
-For 3 UAVs with DDS/ROS2 (required for `multi_mission`):
-```bash
-bash launch/launch_multi_dds.sh
-```
-
-This starts everything in one step: Gazebo, 3 SITL instances, 3 `micro_ros_agent` instances,
-and 3 `drone_bridge` nodes.
-
-Wait until you see:
-```
-[UAV1] ✓ DDS GPS flowing ...
-[UAV2] ✓ DDS GPS flowing ...
-[UAV3] ✓ DDS GPS flowing ...
-```
-
----
-
-### Terminal 2 — Run drone_bridge (single UAV)
+The repository keeps its ns-3 source under `ns3/`. Place it in the ns-3 scratch
+tree before the first launch:
 
 ```bash
-ros2 run uav_controller drone_bridge
+export NS3_ROOT="$HOME/ns-allinone-3.38/ns-3.38"
+mkdir -p "$NS3_ROOT/scratch/three-uav"
+cp ns3/three_uav_tapbridge_rt.cc \
+  "$NS3_ROOT/scratch/three-uav/three_uav_tapbridge_rt.cc"
+cp ns3/CMakeLists.txt "$NS3_ROOT/scratch/three-uav/CMakeLists.txt"
+
+cd "$NS3_ROOT"
+./ns3 build three-uav
 ```
 
-Wait until you see:
-```
-[UAV1] MAVLink heartbeat OK
-[UAV1] Bridge ready | waiting for DDS GPS from /ap/navsat ...
-[UAV1] ✓ DDS GPS flowing (-35.363262, 149.165237) — safe to call /uav1/takeoff now
-```
+The launcher resolves `$NS3_ROOT`, then known locations such as
+`~/ns-allinone-3.38/ns-3.38` and `~/ns-3-dev`. It runs an incremental
+`./ns3 build three-uav` before startup.
 
----
+## Run the complete simulation
 
-### Terminal 3 — Verify topics
+From the repository root:
 
 ```bash
-ros2 topic list
+sudo -v
+./scripts/launch_city_dds.sh
 ```
 
-Expected topics include both `/ap/*` (DDS direct), `/uav1/*` (bridge), and camera:
-```
-/ap/navsat
-/ap/pose/filtered
-/ap/battery
-/uav1/gps
-/uav1/rel_alt
-/uav1/mode
-/uav1/armed
-/uav1/battery
-/uav1/camera/image_raw
-/uav1/camera/camera_info
-```
-
----
-
-### Terminal 4 — Control via ROS2 services
+For a non-default ns-3 checkout:
 
 ```bash
-ros2 service call /uav1/takeoff std_srvs/srv/Trigger {}
-ros2 service call /uav1/rtl     std_srvs/srv/Trigger {}
-ros2 service call /uav1/land    std_srvs/srv/Trigger {}
-ros2 service call /uav1/arm     std_srvs/srv/Trigger {}
-ros2 service call /uav1/disarm  std_srvs/srv/Trigger {}
+sudo -v
+NS3_ROOT=/path/to/ns-3 ./scripts/launch_city_dds.sh
 ```
 
----
+The mission starts automatically only after all readiness checks pass.
 
-## Part 3 — Camera Feeds
+### Startup order
 
-Each drone has a downward-facing camera attached to its gimbal. The camera feed is published
-as a ROS2 image topic via `libgazebo_ros_camera.so`.
+1. Remove stale topology.
+2. Create namespaces, TAPs, bridges, wireless veths, and management veths.
+3. Verify addresses, bridge membership, STP, routes, and management isolation.
+4. Resolve and build the ns-3 `three-uav` target.
+5. Start ns-3 in real-time mode and log to `/tmp/ns3_stdout.log`.
+6. Wait for carrier/`LOWER_UP` on all four TAPs.
+7. Start Gazebo with `worlds/city_3uav.world`.
+8. Start three namespaced SITL processes.
+9. Start three `micro_ros_agent` processes inside `gcsns`.
+10. Wait for UDP ports 2019, 2020, and 2021.
+11. Require active publishers and valid GPS messages on all `/ap/vN/navsat` topics.
+12. Require MAVLink TCP reachability from `gcsns`.
+13. Start the three `drone_bridge` nodes inside `gcsns`.
+14. Recheck every prerequisite process.
+15. Start `city_mission` inside `gcsns`.
 
-### Camera topics
+Press Ctrl+C to stop. Cleanup uses saved PIDs and removes all topology objects.
 
-| Drone | Image topic | Camera info topic |
-|-------|-------------|-------------------|
-| UAV1 | `/uav1/camera/image_raw` | `/uav1/camera/camera_info` |
-| UAV2 | `/uav2/camera/image_raw` | `/uav2/camera/camera_info` |
-| UAV3 | `/uav3/camera/image_raw` | `/uav3/camera/camera_info` |
+## Network-only verification
 
-### How it works
-
-The camera plugin (`libgazebo_ros_camera.so`) is embedded directly in each drone's model SDF
-(`models/iris_N/model.sdf`). When Gazebo launches with the `-s libgazebo_ros_init.so` and
-`-s libgazebo_ros_factory.so` server plugins, the camera automatically publishes to ROS2 —
-no extra nodes or scripts needed.
-
-The launch scripts already include these flags.
-
-### View camera feed — single drone
-
-After launching `launch_single_dds.sh`:
+Verify wireless connectivity without starting Gazebo, SITL, or ROS nodes:
 
 ```bash
-# Verify camera topic is publishing
-ros2 topic list | grep camera
-ros2 topic hz /uav1/camera/image_raw
-
-# View live feed
-ros2 run rqt_image_view rqt_image_view
+sudo -v
+./scripts/launch_city_dds.sh --verify-network-only
 ```
 
-In `rqt_image_view`, select `/uav1/camera/image_raw` from the dropdown.
-
-Install rqt_image_view if not present:
-```bash
-sudo apt install ros-humble-rqt-image-view
-```
-
-### View camera feed — 3 drones simultaneously
-
-After launching `launch_multi_dds.sh`, open three separate `rqt_image_view` windows:
+Prove that connectivity depends on ns-3:
 
 ```bash
-# Terminal A
-ros2 run rqt_image_view rqt_image_view
-
-# Terminal B
-ros2 run rqt_image_view rqt_image_view
-
-# Terminal C
-ros2 run rqt_image_view rqt_image_view
+sudo -v
+./scripts/launch_city_dds.sh \
+  --verify-network-only \
+  --prove-ns3-path
 ```
 
-Set each window to a different topic: `/uav1/camera/image_raw`, `/uav2/camera/image_raw`,
-`/uav3/camera/image_raw`.
+The second mode first verifies these paths:
 
-Or use a single rqt window with multiple image panels:
-```bash
-rqt
+```text
+gcsns → 10.42.0.11
+gcsns → 10.42.0.12
+gcsns → 10.42.0.13
 ```
-Go to **Plugins → Visualization → Image View** and add three panels.
 
-### Save camera frames from ROS2
+It then stops ns-3 and requires all three pings to fail. It also prints TAP
+counters, namespace routes and addresses, and bridge membership.
+
+Validate cleanup without changing the system:
 
 ```bash
-# Save a single frame
-ros2 run image_transport republish raw --ros-args \
-    -r in:=/uav1/camera/image_raw \
-    -r out:=/uav1/camera/compressed
-
-# Or use cv_bridge in Python to process frames
+./scripts/launch_city_dds.sh --cleanup-dry-run
 ```
 
-### Camera specifications
+## Inspect the running system
 
-| Property | Value |
-|----------|-------|
-| Resolution | 640 × 480 |
-| Format | RGB8 |
-| Field of view | 2.0 rad (~115°) |
-| Update rate | 10 Hz |
-| Orientation | Downward-facing |
-| Mount | gimbal_small_2d tilt_link |
-
----
-
-## Part 4 — 3-Drone Coordinated Mission
-
-`multi_mission` runs all three UAVs through a barrier-synchronised mission over ROS2.
-
-**Mission phases:**
-
-| Phase | Action |
-|-------|--------|
-| 0 | All 3 wait for GPS from their `drone_bridge` |
-| 1 | All 3 takeoff to 20m — barrier sync |
-| 2 | UAV1 → Left 50m, UAV2 → Right 50m, UAV3 → Forward 50m — barrier sync |
-| 3 | All 3 hold 5 seconds — barrier sync |
-| 4 | All 3 RTL simultaneously |
-
-**Terminal 1:**
-```bash
-bash launch/launch_multi_dds.sh
-```
-
-Wait for all 3 `✓ DDS GPS flowing` messages.
-
-**Terminal 2:**
-```bash
-ros2 run uav_controller multi_mission
-```
-
----
-
-## Part 5 — MAVProxy / Python Script Control (no ROS2)
+### Namespaces and interfaces
 
 ```bash
-# Single UAV
-cd ~ && mavproxy.py --master=tcp:127.0.0.1:5760
+sudo ip netns list
+sudo ip netns exec gcsns ip -brief address
+sudo ip netns exec uav1 ip -brief address
+sudo ip netns exec uav2 ip -brief address
+sudo ip netns exec uav3 ip -brief address
 
-# Automated missions
-python3 scripts/single_drone_takeoff.py
-python3 scripts/single_drone_mission.py
-python3 scripts/multi_drone_mission.py
+bridge link show master br-gcs
+bridge link show master br-uav1
+bridge link show master br-uav2
+bridge link show master br-uav3
 ```
 
-> Do not run MAVProxy and drone_bridge on the same TCP port simultaneously.
-
----
-
-## ROS2 Package — uav_controller
-
-Located at `ros2/uav_controller/`.
-
-### Nodes
-
-| Node | Command | Purpose |
-|------|---------|---------|
-| `drone_bridge` | `ros2 run uav_controller drone_bridge` | MAVLink+DDS ↔ ROS2 bridge |
-| `takeoff_mission` | `ros2 run uav_controller takeoff_mission` | Auto arm+takeoff+RTL (single UAV) |
-| `l_mission` | `ros2 run uav_controller l_mission` | L-shaped autonomous mission |
-| `multi_mission` | `ros2 run uav_controller multi_mission` | Barrier-synchronised 3-drone mission |
-
-### Topics published by drone_bridge
-
-| Topic | Type | Source |
-|-------|------|--------|
-| `/uavN/gps` | `sensor_msgs/NavSatFix` | DDS `/ap/navsat` |
-| `/uavN/rel_alt` | `std_msgs/Float32` | MAVLink GLOBAL_POSITION_INT |
-| `/uavN/battery` | `std_msgs/Float32` | DDS `/ap/battery` |
-| `/uavN/mode` | `std_msgs/String` | MAVLink heartbeat |
-| `/uavN/armed` | `std_msgs/Bool` | MAVLink heartbeat |
-| `/uavN/camera/image_raw` | `sensor_msgs/Image` | Gazebo camera plugin |
-| `/uavN/camera/camera_info` | `sensor_msgs/CameraInfo` | Gazebo camera plugin |
-
-### Services
-
-| Service | Type | Action |
-|---------|------|--------|
-| `/uavN/arm` | `std_srvs/Trigger` | Arm motors |
-| `/uavN/disarm` | `std_srvs/Trigger` | Disarm motors |
-| `/uavN/takeoff` | `std_srvs/Trigger` | Arm + takeoff |
-| `/uavN/land` | `std_srvs/Trigger` | Switch to LAND mode |
-| `/uavN/rtl` | `std_srvs/Trigger` | Return to launch |
-
-### drone_bridge parameters
+### TAP attachment
 
 ```bash
-ros2 run uav_controller drone_bridge --ros-args \
-    -p uav_id:=1 \
-    -p mavlink_port:=5760 \
-    -p takeoff_altitude:=10.0
+ip -brief link show tap-gcs
+ip -brief link show tap-uav1
+ip -brief link show tap-uav2
+ip -brief link show tap-uav3
+
+cat /sys/class/net/tap-gcs/carrier
 ```
 
----
+Attached TAPs should show carrier `1` or the `LOWER_UP` flag.
 
-## Port Reference
+### MAVLink listeners
 
-| UAV | MAVLink TCP | FDM UDP in | FDM UDP out | DDS UDP |
-|-----|-------------|------------|-------------|---------|
-| UAV 1 | 5760 | 9002 | 9003 | 2019 |
-| UAV 2 | 5770 | 9012 | 9013 | 2020 |
-| UAV 3 | 5780 | 9022 | 9023 | 2021 |
-
----
-
-## Project Structure
-
-```
-multi_uav_sim/
-├── launch/
-│   ├── launch_multi_uav.sh       # 3 UAV simulation (MAVLink only)
-│   ├── launch_multi_dds.sh       # 3 UAV simulation (DDS + ROS2, all-in-one)
-│   ├── launch_single.sh          # single UAV (MAVLink only)
-│   └── launch_single_dds.sh      # single UAV with DDS + ROS2
-├── models/
-│   ├── iris_1/model.sdf          # UAV1: ports 9002/9003, camera /uav1/camera/
-│   ├── iris_2/model.sdf          # UAV2: ports 9012/9013, camera /uav2/camera/
-│   ├── iris_3/model.sdf          # UAV3: ports 9022/9023, camera /uav3/camera/
-│   ├── iris_with_standoffs/      # base iris mesh
-│   └── gimbal_small_2d/          # 2D gimbal (camera mounted on tilt_link)
-├── params/
-│   ├── uav1_dds.parm             # DDS_ENABLE=1, DDS_UDP_PORT=2019
-│   ├── uav2_dds.parm             # DDS_ENABLE=1, DDS_UDP_PORT=2020
-│   └── uav3_dds.parm             # DDS_ENABLE=1, DDS_UDP_PORT=2021
-├── ros2/
-│   └── uav_controller/
-│       └── uav_controller/
-│           ├── drone_bridge.py    # MAVLink+DDS ↔ ROS2 bridge
-│           ├── takeoff_mission.py # single-drone auto mission
-│           ├── l_mission.py       # L-shaped waypoint mission
-│           └── multi_mission.py   # barrier-synchronised 3-drone mission
-├── scripts/                      # pymavlink scripts (no ROS2 needed)
-│   ├── single_drone_takeoff.py
-│   ├── single_drone_mission.py
-│   └── multi_drone_mission.py
-├── worlds/
-│   ├── multi_uav.world
-│   └── single_uav.world
-├── setup.sh
-├── build_ros2.sh
-└── README.md
+```bash
+sudo ip netns exec uav1 ss -ltn 'sport = :5760'
+sudo ip netns exec uav2 ss -ltn 'sport = :5770'
+sudo ip netns exec uav3 ss -ltn 'sport = :5780'
 ```
 
----
+### AP_DDS agent sockets
+
+```bash
+sudo ip netns exec gcsns ss -lunp \
+  '( sport = :2019 or sport = :2020 or sport = :2021 )'
+```
+
+## Inspect ROS 2 and DDS
+
+ROS commands must run inside `gcsns` using domain 0. A convenient shell is:
+
+```bash
+sudo ip netns exec gcsns sudo -H -u "$USER" bash
+source /opt/ros/humble/setup.bash
+source ~/ardu_ws/install/setup.bash
+source /path/to/multi_uav_simulation/ros2/install/setup.bash
+export ROS_DOMAIN_ID=0
+export ROS2CLI_NO_DAEMON=1
+```
+
+Then inspect the namespaced AP_DDS topics:
+
+```bash
+ros2 topic info /ap/v1/navsat --verbose
+ros2 topic info /ap/v2/navsat --verbose
+ros2 topic info /ap/v3/navsat --verbose
+
+ros2 topic echo /ap/v1/navsat sensor_msgs/msg/NavSatFix --once
+ros2 topic echo /ap/v2/navsat sensor_msgs/msg/NavSatFix --once
+ros2 topic echo /ap/v3/navsat sensor_msgs/msg/NavSatFix --once
+```
+
+Bridge application topics:
+
+```text
+/uavN/gps
+/uavN/rel_alt
+/uavN/battery
+/uavN/mode
+/uavN/armed
+/uavN/goto
+```
+
+Bridge services:
+
+```text
+/uavN/arm
+/uavN/disarm
+/uavN/takeoff
+/uavN/land
+/uavN/rtl
+```
+
+## Logs
+
+| Component | Log |
+|---|---|
+| ns-3 | `/tmp/ns3_stdout.log` |
+| Gazebo | `/tmp/gazebo_city.log` |
+| UAV1 SITL | `/tmp/multi_uav_sitl/uav1/arducopter.log` |
+| UAV2 SITL | `/tmp/multi_uav_sitl/uav2/arducopter.log` |
+| UAV3 SITL | `/tmp/multi_uav_sitl/uav3/arducopter.log` |
+| UAV1 agent | `/tmp/micro_ros_agent_uav1.log` |
+| UAV2 agent | `/tmp/micro_ros_agent_uav2.log` |
+| UAV3 agent | `/tmp/micro_ros_agent_uav3.log` |
+| UAV1 bridge | `/tmp/drone_bridge_uav1.log` |
+| UAV2 bridge | `/tmp/drone_bridge_uav2.log` |
+| UAV3 bridge | `/tmp/drone_bridge_uav3.log` |
+| Mission | `/tmp/city_mission.log` |
+
+Logs are preserved during cleanup.
+
+## ns-3 metrics
+
+Wi-Fi MAC/PHY traces are authoritative for TapBridge traffic. FlowMonitor is
+retained only as supplementary simulated-IPv4 output because it may not observe
+all externally injected frames.
+
+### RSSI and SNR
+
+```text
+/tmp/snr_log.csv
+time_s,rx_node,node_label,rssi_dbm,noise_dbm,snr_db
+```
+
+### Frame events
+
+```text
+/tmp/wifi_frame_metrics.csv
+time_s,node_id,node_label,event,frame_bytes,rssi_dbm,snr_db
+```
+
+Events include `PHY_TX_FRAME`, `PHY_RX_SIGNAL`, `MAC_TX_OFFERED`, `MAC_RX_OK`,
+and available MAC/PHY drop events.
+
+### Throughput
+
+```text
+/tmp/wifi_throughput.csv
+```
+
+The file contains interval and cumulative frame counts, byte counts, drop
+counts, and TX/RX throughput in Mbit/s for GCS and UAV1–UAV3.
+
+Inspect live output:
+
+```bash
+tail -f /tmp/snr_log.csv
+tail -f /tmp/wifi_frame_metrics.csv
+tail -f /tmp/wifi_throughput.csv
+```
+
+## Gazebo-to-ns-3 position synchronization
+
+The repository contains:
+
+- `gazebo_ns3_position_sender`: reads `/gazebo/model_states` and sends ENU
+  positions to `127.0.0.1:5555` at 10 Hz.
+- An ns-3 host UDP receiver that schedules position updates on the simulator
+  event loop.
+
+Receiver options include:
+
+```text
+--enableExternalMobilitySync=true
+--positionSyncAddress=127.0.0.1
+--positionSyncPort=5555
+--positionSyncPollMs=100
+--positionSyncStaleMs=1000
+```
+
+Current limitation: the unified launcher does not yet start the sender or pass
+`--enableExternalMobilitySync=true`. Normal integrated runs therefore use the
+fixed ns-3 fallback positions:
+
+```text
+GCS  (0, 0, 0)
+UAV1 (0, 0, 60)
+UAV2 (50, 0, 40)
+UAV3 (-50, 0, 50)
+```
+
+Standalone sender test mode:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ros2/install/setup.bash
+ros2 run uav_controller gazebo_ns3_position_sender \
+  --test --test-count 3 --test-rate-hz 10
+```
+
+## Cleanup
+
+Cleanup runs on `EXIT`, `INT`, and `TERM`. It stops saved process trees in this
+order:
+
+1. `city_mission`
+2. All bridge nodes
+3. All agents
+4. All SITL instances
+5. Gazebo and its children
+6. ns-3
+7. Any launcher-owned `socat` relays
+
+It then removes namespaces, bridges, TAPs, wireless veths, and management
+veths. Missing objects are ignored, so repeated cleanup is safe.
 
 ## Troubleshooting
 
-**`Package 'uav_controller' not found`**
+### Launcher stops at a sudo password prompt
+
 ```bash
-source ~/.bashrc
-cd ~/FYP/multi_uav_sim && bash build_ros2.sh
-source ~/FYP/multi_uav_sim/ros2/install/setup.bash
+sudo -v
+./scripts/launch_city_dds.sh
 ```
 
-**Camera topic not appearing (`/uavN/camera/image_raw` missing)**
-- Make sure `launch_single_dds.sh` or `launch_multi_dds.sh` includes `-s libgazebo_ros_init.so -s libgazebo_ros_factory.so` in the Gazebo launch line
-- Check `setup.sh` has both `GAZEBO_PLUGIN_PATH` and `LD_LIBRARY_PATH` set to include `/opt/ros/humble/lib`
-- Verify `ros-humble-gazebo-ros-pkgs` is installed: `sudo apt install ros-humble-gazebo-ros-pkgs`
+For long runs, the sudo timestamp may expire before cleanup. Refresh it from a
+second terminal with `sudo -v` before stopping the simulation.
 
-**DDS GPS not flowing**
+### ns-3 target is missing
+
+Copy `ns3/three_uav_tapbridge_rt.cc` and `ns3/CMakeLists.txt` into
+`$NS3_ROOT/scratch/three-uav/`, then run:
+
 ```bash
-ros2 topic list | grep /ap
-# If empty, micro_ros_agent is not connected — check launch script output
+cd "$NS3_ROOT"
+./ns3 build three-uav
 ```
 
-**Arm timed out**
-Wait for `✓ DDS GPS flowing` message before calling takeoff.
+### TAP readiness times out
 
-**Ports already in use**
 ```bash
-pkill -f arducopter && pkill -f gzserver && pkill -f gzclient && pkill -f micro_ros_agent
-sleep 5
+cat /tmp/ns3_stdout.log
+ip -details link show tap-gcs
+ip -details link show tap-uav1
 ```
 
-**Cannot connect both MAVProxy and drone_bridge**
+Confirm TAP ownership matches the normal user running ns-3.
+
+### Gazebo exits during startup
+
 ```bash
-mavproxy.py --master=tcp:127.0.0.1:5760 --out=udp:127.0.0.1:14550 --out=udp:127.0.0.1:14551
+cat /tmp/gazebo_city.log
+ldconfig -p | grep ArduPilotPlugin
 ```
 
----
+Verify `GAZEBO_PLUGIN_PATH`, `GAZEBO_MODEL_PATH`, and the Gazebo ROS packages.
 
-## Notes
+### AP_DDS GPS readiness fails
 
-- Requires **Gazebo Classic 11** — not compatible with Gazebo Harmonic/Garden
-- `ARDUPILOT_HOME` must point to `~/ardu_ws/src/ardupilot` (DDS-enabled build)
-- Do NOT set `COLCON_TRACE` in bashrc — it breaks ROS2 package sourcing
-- All Gazebo models are bundled — no internet needed to run the simulation
-- Camera feeds are published automatically when Gazebo launches — no extra nodes needed
-- MAVProxy and drone_bridge cannot share the same TCP port simultaneously
+The launcher automatically prints the relevant SITL log, agent log, UDP socket
+state, namespace routes, and namespace interfaces. Also inspect:
+
+```bash
+cat /tmp/micro_ros_agent_uav1.log
+cat /tmp/multi_uav_sitl/uav1/arducopter.log
+sudo ip netns exec gcsns ss -lunp
+```
+
+### MAVLink bridge cannot connect
+
+```bash
+sudo ip netns exec gcsns ping -c 2 10.42.0.11
+sudo ip netns exec uav1 ss -ltn 'sport = :5760'
+cat /tmp/drone_bridge_uav1.log
+```
+
+Do not connect MAVProxy to the same SITL TCP listener while `drone_bridge` owns
+the connection.
+
+## Known limitations
+
+- A complete live integration run has not yet been completed in this execution
+  environment because sudo authentication is interactive.
+- Live Gazebo-to-ns-3 mobility synchronization exists in code but is not wired
+  into the unified launcher.
+- The optional random loss term is temporally independent, not spatially
+  correlated building shadowing.
+- The channel does not yet use city geometry, terrain blockage, antenna
+  orientation, or UAV attitude.
+- Camera ROS traffic is not routed through the simulated wireless link.
+- FlowMonitor is not authoritative for TapBridge traffic; use the Wi-Fi CSVs.
+- Cleanup needs a valid sudo credential to remove namespaces and interfaces.
+- Paths assume ROS Humble and the default `~/ardu_ws` layout unless edited.
+
+## Important files
+
+| File | Responsibility |
+|---|---|
+| `scripts/launch_city_dds.sh` | Unified startup, readiness, mission, cleanup, verification |
+| `scripts/setup_ns3_wireless_topology.sh` | Namespaces, TAPs, bridges, wireless and management veths |
+| `ns3/three_uav_tapbridge_rt.cc` | Wi-Fi, channel, TapBridge, mobility, metrics |
+| `worlds/city_3uav.world` | City world, WGS84 origin, vehicle inclusion |
+| `models/iris_N/model.sdf` | Gazebo plugin, FDM ports, cameras |
+| `params/uavN_dds.parm` | AP_DDS namespace, port, and vehicle ID |
+| `ros2/uav_controller/uav_controller/drone_bridge.py` | Namespaced AP_DDS and MAVLink bridge |
+| `ros2/uav_controller/uav_controller/city_mission.py` | Three-UAV city mission |
+| `ros2/uav_controller/uav_controller/gazebo_ns3_position_sender.py` | Optional Gazebo ENU sender |

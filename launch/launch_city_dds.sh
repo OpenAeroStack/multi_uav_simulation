@@ -30,9 +30,9 @@ source "$PROJECT_DIR/ros2/install/setup.bash" 2>/dev/null || {
 }
 
 # ── Small city world model and resource paths ─────────────────────────────────
-export GAZEBO_MODEL_PATH=~/simulation/small_city_gazebo_world/models:$GAZEBO_MODEL_PATH
+export GAZEBO_MODEL_PATH="$HOME/simulation/small_city_gazebo_world/models:${GAZEBO_MODEL_PATH:-}"
 export GAZEBO_MODEL_DATABASE_URI=""
-export GAZEBO_RESOURCE_PATH=~/simulation/small_city_gazebo_world:$GAZEBO_RESOURCE_PATH
+export GAZEBO_RESOURCE_PATH="$HOME/simulation/small_city_gazebo_world:${GAZEBO_RESOURCE_PATH:-}"
 
 echo "=== Killing previous instances ==="
 pkill -f arducopter      2>/dev/null || true
@@ -60,7 +60,7 @@ echo "=== [0/5] Setting up TAP devices for ns-3 wireless channel ==="
 sudo "$PROJECT_DIR/scripts/setup_tap_only.sh"
 
 echo "=== Starting ns-3 realistic wifi channel ==="
-pushd ~/ns-3-dev >/dev/null   # <-- your actual ns-3 root
+pushd "$HOME/ns-3-dev" >/dev/null   # <-- your actual ns-3 root
 sudo ./ns3 run --enable-sudo "three-uav \
   --tap0=tap-gcs --tap1=tap-uav1 --tap2=tap-uav2 --tap3=tap-uav3 \
   --simDurationSec=0 \
@@ -94,21 +94,21 @@ echo "micro_ros_agents running on ports 2019-2021"
 # ── 3. ArduPilot SITL × 3 ────────────────────────────────────────────────────
 echo ""
 echo "=== [3/4] Launching 3 SITL instances ==="
-cd ~/
+cd "$HOME"
 
-$BINARY --model gazebo-iris --speedup 1 --sysid 1 \
-    --defaults $UAV1_DEFAULTS --sim-address=127.0.0.1 -I0 \
-    --home $HOME_GPS \ --out udp:127.0.0.1:14550  &
+"$BINARY" --model gazebo-iris --speedup 1 --sysid 1 \
+    --defaults "$UAV1_DEFAULTS" --sim-address=127.0.0.1 -I0 \
+    --home "$HOME_GPS" --out udp:127.0.0.1:14550 &
 sleep 2
 
-$BINARY --model gazebo-iris --speedup 1 --sysid 2 \
-    --defaults $UAV2_DEFAULTS --sim-address=127.0.0.1 -I1 \
-    --home $HOME_GPS &
+"$BINARY" --model gazebo-iris --speedup 1 --sysid 2 \
+    --defaults "$UAV2_DEFAULTS" --sim-address=127.0.0.1 -I1 \
+    --home "$HOME_GPS" &
 sleep 2
 
-$BINARY --model gazebo-iris --speedup 1 --sysid 3 \
-    --defaults $UAV3_DEFAULTS --sim-address=127.0.0.1 -I2 \
-    --home $HOME_GPS &
+"$BINARY" --model gazebo-iris --speedup 1 --sysid 3 \
+    --defaults "$UAV3_DEFAULTS" --sim-address=127.0.0.1 -I2 \
+    --home "$HOME_GPS" &
 
 sleep 3
 echo "Waiting for SITL instances to boot (15s)..."

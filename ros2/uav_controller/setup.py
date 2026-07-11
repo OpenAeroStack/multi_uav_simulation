@@ -31,6 +31,7 @@ setup(
             'position_accuracy_test = uav_controller.position_accuracy_test:main',
             'single_uav_mission = uav_controller.single_uav_mission:main',
             'city_mission = uav_controller.city_mission:main',
+            'gazebo_ns3_position_sender = uav_controller.gazebo_ns3_position_sender:main',
         ],
     },
 )
