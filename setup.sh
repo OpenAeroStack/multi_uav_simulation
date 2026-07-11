@@ -20,6 +20,7 @@ fi
 export ARDUPILOT_HOME="${ARDUPILOT_HOME:-$HOME/ardu_ws/src/ardupilot}"
 
 export PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export SMALL_CITY_GAZEBO_DIR="${SMALL_CITY_GAZEBO_DIR:-$(cd "$PROJECT_DIR/../small_city_gazebo_world" 2>/dev/null && pwd)}"
 
 if [[ ":${GAZEBO_MODEL_PATH:-}:" != *":$PROJECT_DIR/models:"* ]]; then
   export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:/usr/share/gazebo-11/models:${GAZEBO_MODEL_PATH:-}"
@@ -27,8 +28,10 @@ fi
 
 export GAZEBO_RESOURCE_PATH="/usr/share/gazebo-11:${GAZEBO_RESOURCE_PATH:-}"
 export GAZEBO_MODEL_DATABASE_URI=""
-export GAZEBO_MODEL_PATH="$HOME/simulation/small_city_gazebo/models:${GAZEBO_MODEL_PATH:-}"
-export GAZEBO_RESOURCE_PATH="$HOME/simulation/small_city_gazebo:${GAZEBO_RESOURCE_PATH:-}"
+if [[ -n "$SMALL_CITY_GAZEBO_DIR" ]]; then
+  export GAZEBO_MODEL_PATH="$SMALL_CITY_GAZEBO_DIR/models:${GAZEBO_MODEL_PATH:-}"
+  export GAZEBO_RESOURCE_PATH="$SMALL_CITY_GAZEBO_DIR:${GAZEBO_RESOURCE_PATH:-}"
+fi
 if [[ ! -d "$ARDUPILOT_HOME" ]]; then
   echo "ERROR: ARDUPILOT_HOME not found at: $ARDUPILOT_HOME"
   echo "Set ARDUPILOT_HOME to your ArduPilot checkout path (e.g. export ARDUPILOT_HOME=\"$HOME/ardupilot\")"

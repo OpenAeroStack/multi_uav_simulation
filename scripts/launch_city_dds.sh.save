@@ -514,95 +514,32 @@ launch_sitl() {
     local instance="$2"
     local sysid="$3"
     local mavlink_port="$4"
-    local gazebo_ip="$5"
-    local defaults="$6"
-
+    
+    local gazebo_ip="$6"
+    local defaults="$7"
     local work_dir="/tmp/multi_uav_sitl/$namespace"
     local log_file="$work_dir/arducopter.log"
 
     mkdir -p "$work_dir"
     chown "$RUN_USER":"$(id -gn "$RUN_USER")" "$work_dir"
-
     sudo ip netns exec "$namespace" \
         sudo -H -u "$RUN_USER" \
         bash -c 'cd "$1" && shift && exec "$@"' sitl-shell \
-        "$work_dir" \
-        "$BINARY" \
+        "$work_dir" "$BINARY" \
         --wipe \
-        --model gazebo-iris \
-        --speedup 1 \
-        --sysid "$sysid" \
-        --instance "$instance" \
-        --defaults "$defaults" \
-        --sim-address "$gazebo_ip" \
-        --home "$HOME_GPS" \
+        --model gazebo-iris --speedup 1 --sysid "$sysid" \
+        --instance "$instance" --defaults "$defaults" \
+        --sim-address "$gazebo_ip" --home "$HOME_GPS" \
         --serial0="tcp:0.0.0.0:$mavlink_port" \
         >"$log_file" 2>&1 &
-
     SITL_PIDS+=("$!")
     echo "Started $namespace SITL: PID=$! log=$log_file"
 }
-wait_for_sitl_ready() {
-    local namespace="$1"
-    local udp_port="$2"
-    local process_pid="$3"
-    local log_file="$4"
-    local deadline=$((SECONDS + 15))
-    local exit_code
 
-    echo "Waiting for $namespace SITL UDP port $udp_port..."
-
-    while (( SECONDS < deadline )); do
-        # The saved PID is the sudo/netns wrapper. It remains alive while
-        # the ArduPilot process is running.
-        if ! kill -0 "$process_pid" 2>/dev/null; then
-            set +e
-            wait "$process_pid"
-            exit_code=$?
-            set -e
-
-            echo "ERROR: $namespace SITL exited during startup." >&2
-            echo "Wrapper exit code: $exit_code" >&2
-            echo "----- $log_file -----" >&2
-            cat "$log_file" >&2 || true
-            echo "---------------------" >&2
-            return 1
-        fi
-
-        if sudo ip netns exec "$namespace" \
-            ss -H -lun "sport = :$udp_port" |
-            grep -q .; then
-
-            echo "✓ $namespace SITL is alive; UDP port $udp_port is open"
-            return 0
-        fi
-
-        sleep 0.25
-    done
-
-    echo "ERROR: $namespace process is alive, but UDP port $udp_port did not open." >&2
-
-    echo "----- Processes inside $namespace -----" >&2
-    local pids
-    pids="$(sudo ip netns pids "$namespace" | paste -sd, -)"
-
-    if [[ -n "$pids" ]]; then
-        ps -o pid,ppid,stat,etime,cmd -p "$pids" >&2 || true
-    else
-        echo "No processes found." >&2
-    fi
-
-    echo "----- Network sockets inside $namespace -----" >&2
-    sudo ip netns exec "$namespace" ss -lntup >&2 || true
-
-    echo "----- $log_file -----" >&2
-    cat "$log_file" >&2 || true
-    echo "---------------------" >&2
-
-    return 1
-}
-
-
+echo "=== Starting namespaced SITL instances ==="
+launch_sitl uav1 0 1 5760 2019 172.31.1.1 "$UAV1_DEFAULTS"
+launch_sitl uav2 1 2 5770 2020 172.31.2.1 "$UAV2_DEFAULTS"
+launch_sitl uav3 2 3 5780 2021 172.31.3.1 "$UAV3_DEFAULTS"
 
 
 
@@ -674,25 +611,6 @@ done
 echo "micro_ros_agent ports ready inside gcsns:"
 sudo ip netns exec gcsns ss -lunp \
     '( sport = :2019 or sport = :2020 or sport = :2021 )'
-echo "=== Starting namespaced SITL instances ==="
-
-
-launch_sitl uav1 0 1 5760 172.31.1.1 "$UAV1_DEFAULTS"
-launch_sitl uav2 1 2 5770 172.31.2.1 "$UAV2_DEFAULTS"
-launch_sitl uav3 2 3 5780 172.31.3.1 "$UAV3_DEFAULTS"
-
-
-wait_for_sitl_ready \
-    uav1 9003 "${SITL_PIDS[0]}" \
-    /tmp/multi_uav_sitl/uav1/arducopter.log
-
-wait_for_sitl_ready \
-    uav2 9013 "${SITL_PIDS[1]}" \
-    /tmp/multi_uav_sitl/uav2/arducopter.log
-
-wait_for_sitl_ready \
-    uav3 9023 "${SITL_PIDS[2]}" \
-    /tmp/multi_uav_sitl/uav3/arducopter.log
 
 run_ros_in_gcsns() {
     sudo ip netns exec gcsns \

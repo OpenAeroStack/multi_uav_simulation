@@ -29,11 +29,6 @@ source "$PROJECT_DIR/ros2/install/setup.bash" 2>/dev/null || {
     exit 1
 }
 
-# ── Small city world model and resource paths ─────────────────────────────────
-export GAZEBO_MODEL_PATH="$HOME/simulation/small_city_gazebo_world/models:${GAZEBO_MODEL_PATH:-}"
-export GAZEBO_MODEL_DATABASE_URI=""
-export GAZEBO_RESOURCE_PATH="$HOME/simulation/small_city_gazebo_world:${GAZEBO_RESOURCE_PATH:-}"
-
 echo "=== Killing previous instances ==="
 pkill -f arducopter      2>/dev/null || true
 pkill -f gzserver        2>/dev/null || true
@@ -73,6 +68,9 @@ sleep 5   # let ns-3 attach the TAPs before anything tries to use them
 # ── 1. Gazebo ─────────────────────────────────────────────────────────────────
 echo ""
 echo "=== [1/4] Launching Gazebo with city world ==="
+export GAZEBO_MODEL_PATH=~/FYP/small_city_gazebo/models:$GAZEBO_MODEL_PATH
+export GAZEBO_MODEL_DATABASE_URI=""
+export GAZEBO_RESOURCE_PATH=~/FYP/small_city_gazebo:$GAZEBO_RESOURCE_PATH
 gazebo --verbose "$PROJECT_DIR/worlds/city_3uav.world" \
     -s libgazebo_ros_init.so \
     -s libgazebo_ros_factory.so &
