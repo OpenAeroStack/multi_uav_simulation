@@ -80,40 +80,14 @@ sudo apt install ros-humble-gazebo-ros-pkgs
 
 ### Step 3 — Build ArduPilot with DDS support
 
-> **Important:** This repo uses a specific ArduPilot workspace (`ardu_ws`) that includes
-> `micro_ros_agent` and is built with `--enable-DDS`. Do NOT use a plain `~/ardupilot` clone.
-
-```bash
-# Create the workspace
-mkdir -p ~/ardu_ws/src
-cd ~/ardu_ws/src
-
-# Clone ArduPilot
-git clone https://github.com/ArduPilot/ardupilot.git
-cd ardupilot
-git submodule update --init --recursive
-
-# Build with DDS enabled (capital DDS)
-./waf configure --board sitl --enable-DDS
-./waf copter
-```
-
-Verify DDS is compiled in:
-```bash
-./waf configure --board sitl --enable-DDS 2>&1 | grep -i dds
-# Should show: DDS client : enabled
-```
-
----
 
 ### Step 4 — Build micro_ros_agent
+for this step 3 and step 4 follow exactly below instrcution otherwise it won't work
+clone this repo and follow the readme in the build section exactly as it is!
 
-```bash
-cd ~/ardu_ws/src
-git clone https://github.com/microROS/micro-ROS-Agent
-cd ~/ardu_ws
-source /opt/ros/humble/setup.bash
-colcon build --packages-select micro_ros_agent ardupilot_msgs
+git clone https://github.com/OpenAeroStack/ardu_ws.git
+
+
 ```
 
 ---
