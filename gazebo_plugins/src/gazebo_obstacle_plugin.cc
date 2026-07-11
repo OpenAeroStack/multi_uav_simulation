@@ -2,8 +2,9 @@
 // Gazebo Ray-Cast Plugin (Full, Scalable to N drones)
 //////////////////////////////////////////////////////
 
-//#include "gazebo_obstacle_plugin.hh"
-#include "/home/ubuntu/multi-uav-workspace/src/multi_uav_simulation/gazebo_plugins/include/gazebo_plugins/gazebo_obstacle_plugin.hh"
+// Relative include: CMakeLists adds gazebo_plugins/include to the include path,
+// so this resolves on any machine/checkout (was a hardcoded /home/ubuntu/... path).
+#include "gazebo_plugins/gazebo_obstacle_plugin.hh"
 
 
 namespace gazebo
@@ -129,8 +130,12 @@ double ObstacleRaycastPlugin::CastRay(const ignition::math::Vector3d & start,
 
     // Ground plane and UAV models (own body or a fellow fleet member's
     // body/rotors) are never real obstacles -- step past and re-cast.
+    // "noloss"-tagged props (thin street furniture: poles, signs, hydrants,
+    // dumpster, postbox) are treated the same way: they contribute zero loss
+    // and must not mask a real obstacle behind them.
     if(hit_entity.find("ground_plane") != std::string::npos ||
-       hit_entity.find(uav_prefix_)   != std::string::npos) {
+       hit_entity.find(uav_prefix_)   != std::string::npos ||
+       hit_entity.find("noloss")      != std::string::npos) {
       traveled = dist_from_start + 0.1;
       continue;
     }
@@ -168,20 +173,86 @@ void ObstacleRaycastPlugin::PublishRayMarker(int id_a, int id_b,
   ign_node_.Request("/marker", marker);
 }
 
+// Finds how much of the obstacle the ray actually passes through, by casting
+// a second ray backwards from the destination towards the source. The first
+// real hit on the SAME entity is the obstacle's far (exit) face; the gap
+// between entry and exit faces along the link is the true material thickness.
+double ObstacleRaycastPlugin::ObstacleThickness(const ignition::math::Vector3d & start,
+                                                 const ignition::math::Vector3d & end,
+                                                 const std::string & entity_name,
+                                                 double entry_dist_from_start)
+{
+  auto ray = boost::dynamic_pointer_cast<physics::RayShape>(
+    world_->Physics()->CreateShape("ray", physics::CollisionPtr()));
+  if (!ray) return 0.0;
+
+  double link_len = (end - start).Length();
+  auto dir = (end - start).Normalized();
+  double traveled = 0.5;  // skip past the destination drone's own body
+
+  for (int hop = 0; hop < 5; hop++) {
+    ray->SetPoints(end - dir * traveled, start);   // backward: destination -> source
+    ray->Update();
+
+    std::string hit_entity;
+    double hit_dist;
+    ray->GetIntersection(hit_dist, hit_entity);
+    if (hit_entity.empty()) break;
+
+    double dist_from_end     = traveled + hit_dist;
+    double exit_dist_from_start = link_len - dist_from_end;
+
+    // step past filtered entities (ground / UAV bodies / noloss props), same
+    // as the forward cast
+    if (hit_entity.find("ground_plane") != std::string::npos ||
+        hit_entity.find(uav_prefix_)   != std::string::npos ||
+        hit_entity.find("noloss")      != std::string::npos) {
+      traveled = dist_from_end + 0.1;
+      continue;
+    }
+
+    // Only trust it if the far face is the SAME obstacle the forward ray hit
+    if (hit_entity == entity_name) {
+      double thickness = exit_dist_from_start - entry_dist_from_start;
+      if (thickness > 0.0) return thickness;
+    }
+    break;  // different obstacle, or geometry inverted -> let caller fall back
+  }
+  return 0.0;
+}
+
 double ObstacleRaycastPlugin::ComputeObstacleLoss(const std::string & entity_name,
                                                     double hit_dist,
                                                     const ignition::math::Vector3d & start,
                                                     const ignition::math::Vector3d & end)
 {
-  double link_len = (end - start).Length();
-  double L_e = 15.0;
+  double L_e = 15.0;   // default: unknown solid ~ masonry / concrete
   if (entity_name.find("glass")    != std::string::npos) L_e = 4.0;
   if (entity_name.find("wood")     != std::string::npos) L_e = 8.0;
   if (entity_name.find("concrete") != std::string::npos) L_e = 15.0;
   if (entity_name.find("metal")    != std::string::npos) L_e = 20.0;
+  // ADDED material classes for the small-city props. A model is tagged by
+  // putting one of these keywords in its <name> in the world file, so the
+  // material lives with the world (author-controlled) and the plugin stays
+  // generic:
+  if (entity_name.find("foliage")  != std::string::npos) L_e = 5.0;   // trees: scattering, not a solid wall
+  if (entity_name.find("vehicle")  != std::string::npos) L_e = 12.0;  // cars: hollow metal shell, ground level
 
-  double penetration_depth = std::min((link_len - 0.5) - hit_dist, 20.0);
-  return L_e + 0.5 * penetration_depth;
+  // REMOVED: "penetration_depth" was the free-space distance from the wall to
+  // the destination drone, not the depth of material traversed -- so a drone
+  // far behind a wall was penalised more than one just behind it, which is
+  // physically backwards:
+  // double link_len = (end - start).Length();
+  // double penetration_depth = std::min((link_len - 0.5) - hit_dist, 20.0);
+  // return L_e + 0.5 * penetration_depth;
+  // ADDED: use the TRUE material thickness (entry face -> exit face) found by
+  // a backward ray. Model: fixed entry/exit penetration loss L_e plus a bulk
+  // attenuation term proportional to how much material the signal crosses
+  // (0.5 dB per metre of material, clamped). If the exit face can't be
+  // resolved, fall back to the base material loss alone.
+  double thickness = ObstacleThickness(start, end, entity_name, hit_dist);
+  thickness = std::min(thickness, 20.0);
+  return L_e + 0.5 * thickness;
 }
 
 GZ_REGISTER_WORLD_PLUGIN(ObstacleRaycastPlugin)

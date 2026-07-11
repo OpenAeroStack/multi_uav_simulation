@@ -19,8 +19,10 @@ from collections import deque
 UAV_IDS   = [1, 2, 3]
 TRACE_FILE = "/tmp/ns3_wifi_trace.tr"
 
-# Nakagami model params (mirror your .cc)
-PATH_LOSS_EXP   = 2.7
+# Path loss params (mirror your .cc)
+# REMOVED: PATH_LOSS_EXP = 2.7  (urban ground-level exponent)
+# ADDED: matches the air-to-air exponent now used in the NS-3 scenario
+PATH_LOSS_EXP   = 2.0
 REF_DISTANCE    = 1.0
 REF_LOSS_DB     = 46.67
 TX_POWER_DBM    = 20.0

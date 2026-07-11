@@ -12,10 +12,18 @@ source "$PROJECT_DIR/setup.sh"
 WS_INSTALL="$(cd "$PROJECT_DIR/../.." && pwd)/install"
 export GAZEBO_PLUGIN_PATH="$WS_INSTALL/multi_uav_gazebo_plugins/lib:$GAZEBO_PLUGIN_PATH"
 
+# ADDED: small_city_base.world pulls in city assets (terrain, ocean, buildings,
+# trees, vehicles) that live in the small_city_gazebo_world repo, so Gazebo
+# needs that models/ dir on the model path. $PROJECT_DIR/models (from setup.sh)
+# still supplies the iris_1/2/3 drone models.
+SMALL_CITY_DIR="$HOME/small_city_gazebo_world"
+export GAZEBO_MODEL_PATH="$SMALL_CITY_DIR/models:${GAZEBO_MODEL_PATH:-}"
+
 echo "=== Killing any previous SITL/Gazebo instances ==="
 pkill -f arducopter 2>/dev/null || true
 pkill -f gzserver  2>/dev/null || true
 pkill -f gzclient  2>/dev/null || true
+pkill -f world_pos_publisher 2>/dev/null || true
 sleep 5
 echo "=== Cleanup done ==="
 
@@ -27,8 +35,12 @@ fi
 
 # REMOVED: plain world without the obstacle raycast plugin / wall:
 # WORLD_PATH="$PROJECT_DIR/worlds/multi_uav.world"
-# ADDED: world with the obstacle raycast plugin and the wall obstacle
-WORLD_PATH="$PROJECT_DIR/worlds/multi_uav_plugin.world"
+# REMOVED: simple single-wall obstacle world:
+# WORLD_PATH="$PROJECT_DIR/worlds/multi_uav_plugin.world"
+# ADDED: full small-city world. It already contains the 3 iris drones, the
+# obstacle raycast plugin (n_uavs=3, prefix iris_), and the gazebo_ros_state
+# plugin -- same plugin block as multi_uav_plugin.world, just a richer scene.
+WORLD_PATH="$SMALL_CITY_DIR/worlds/small_city_base.world"
 BINARY="$ARDUPILOT_HOME/build/sitl/bin/arducopter"
 DEFAULTS="$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm"
 
@@ -58,6 +70,21 @@ GAZEBO_PID=$!
 
 echo "=== Waiting for Gazebo to fully load (20 seconds) ==="
 sleep 20
+
+# ── Position feed for NS-3 ────────────────────────────────────────────────
+# Relay Gazebo ground-truth poses (/gazebo/model_states, from the
+# libgazebo_ros_state plugin now in the world) to /uav_world_positions, which
+# the NS-3 obstacle-loss scenario reads to move its UAV nodes. Without this,
+# NS-3 stays frozen at its initial formation while the drones fly, so its
+# distance path-loss never tracks the real separation.
+echo "=== Starting UAV world-position publisher (feeds NS-3) ==="
+# ROS's setup.bash references unbound vars, so relax `set -u` around it.
+set +u
+source /opt/ros/humble/setup.bash
+set -u
+setsid python3 "$PROJECT_DIR/scripts/world_pos_publisher.py" \
+  > /tmp/world_pos_publisher.log 2>&1 < /dev/null &
+echo "world_pos_publisher started (log: /tmp/world_pos_publisher.log)"
 
 # REMOVED: all 3 SITL instances ran from the same directory (~), fighting
 # over a single eeprom.bin — which is also root-owned on this machine —

@@ -75,7 +75,7 @@
       </link>
     </model>
     
-    <!-- Wall obstacle: 1m thick, 4m wide, 8m tall, so it blocks the
+    <!-- Wall obstacle: 1m thick, 3m wide, 8m tall, so it blocks the
          UAV0<->UAV1 link at flight altitude. "concrete" in the name
          selects the 15 dB material loss in the raycast plugin. -->
     <model name="glass_wall">
@@ -129,6 +129,17 @@
     <plugin name="obstacle_raycast" filename="libgazebo_obstacle_plugin.so">
         <n_uavs>3</n_uavs>
         <uav_prefix>iris_</uav_prefix>
+    </plugin>
+
+    <!-- Publishes ground-truth model poses on /gazebo/model_states so that
+         world_pos_publisher.py can relay them to /uav_world_positions. This
+         is what lets NS-3's UAV nodes track the drones as they fly (without
+         it, NS-3 stays frozen at its initial formation). -->
+    <plugin name="gazebo_ros_state" filename="libgazebo_ros_state.so">
+        <ros>
+            <namespace>/gazebo</namespace>
+        </ros>
+        <update_rate>20.0</update_rate>
     </plugin>
 
 

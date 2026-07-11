@@ -37,6 +37,13 @@ private:
                               double hit_dist,
                               const ignition::math::Vector3d & start,
                               const ignition::math::Vector3d & end);
+  // ADDED: true material thickness of the obstacle along the link, found by
+  // casting a ray backwards from the destination to locate the far face.
+  // Returns 0.0 if the exit face can't be resolved (caller uses a fallback).
+  double ObstacleThickness(const ignition::math::Vector3d & start,
+                           const ignition::math::Vector3d & end,
+                           const std::string & entity_name,
+                           double entry_dist_from_start);
   void PublishRayMarker(int id_a, int id_b,
                         const ignition::math::Vector3d & start,
                         const ignition::math::Vector3d & end,

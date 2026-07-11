@@ -22,7 +22,7 @@
 #include "ns3/internet-module.h"
 #include "ns3/stats-module.h"
 
-#include "dynamic_obstacle_loss_model.h"
+#include "dynamic_obstacle_loss_model.hh"
 
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
@@ -183,26 +183,35 @@ int main(int argc, char *argv[])
     NodeContainer nodes;
     nodes.Create(3);
 
-    // ── Channel: Obstacle loss -> LogDistance + Nakagami fading ─────────────
+    // ── Channel: Obstacle loss (incl. LoS-aware fading) -> LogDistance ──────
     Ptr<DynamicObstacleLossModel> obstacleLoss =
         CreateObject<DynamicObstacleLossModel>();
 
     Ptr<LogDistancePropagationLossModel> logDist =
         CreateObject<LogDistancePropagationLossModel>();
-    logDist->SetAttribute("Exponent",         DoubleValue(2.7));
+    // REMOVED: exponent 2.7 models urban ground-level propagation; these are
+    // UAV-to-UAV air-to-air links, which are close to free space (n = 2.0):
+    // logDist->SetAttribute("Exponent",         DoubleValue(2.7));
+    // ADDED:
+    logDist->SetAttribute("Exponent",         DoubleValue(2.0));
     logDist->SetAttribute("ReferenceDistance", DoubleValue(1.0));
     logDist->SetAttribute("ReferenceLoss",     DoubleValue(46.67));
 
-    Ptr<NakagamiPropagationLossModel> nakagami =
-        CreateObject<NakagamiPropagationLossModel>();
-    nakagami->SetAttribute("m0", DoubleValue(1.5));
-    nakagami->SetAttribute("m1", DoubleValue(1.0));
-    nakagami->SetAttribute("m2", DoubleValue(1.0));
-    nakagami->SetAttribute("Distance1", DoubleValue(80.0));
-    nakagami->SetAttribute("Distance2", DoubleValue(200.0));
+    // REMOVED: static Nakagami with distance-selected m (m = 1.0 past 80 m
+    // assumed NLoS Rayleigh scattering from distance alone, double-penalising
+    // links that Gazebo already flagged as blocked). Fading now lives inside
+    // DynamicObstacleLossModel, with m driven by the ray-caster's LoS state
+    // (attributes MLos / MNlos / EmaAlpha / Block~ / ClearThresholdDb):
+    // Ptr<NakagamiPropagationLossModel> nakagami =
+    //     CreateObject<NakagamiPropagationLossModel>();
+    // nakagami->SetAttribute("m0", DoubleValue(1.5));
+    // nakagami->SetAttribute("m1", DoubleValue(1.0));
+    // nakagami->SetAttribute("m2", DoubleValue(1.0));
+    // nakagami->SetAttribute("Distance1", DoubleValue(80.0));
+    // nakagami->SetAttribute("Distance2", DoubleValue(200.0));
 
     obstacleLoss->SetNext(logDist);
-    logDist->SetNext(nakagami);
+    // REMOVED: logDist->SetNext(nakagami);
 
     Ptr<ConstantSpeedPropagationDelayModel> delay =
         CreateObject<ConstantSpeedPropagationDelayModel>();

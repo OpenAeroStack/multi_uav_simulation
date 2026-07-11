@@ -145,11 +145,25 @@ mav.parm.*
 
 # Backup files
 *.bak
-EOF
 
-*.tlog
-*.tlog.raw
-*.parm
-__pycache__/
-*.pyc
-*.bak
+# ── ROS 2 / colcon build outputs ──
+# (colcon build creates these; never commit them)
+install/
+log/
+COLCON_IGNORE
+
+# ── CMake in-source artifacts (Gazebo plugin / NS-3 scratch builds) ──
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+*.cmake.stamp
+
+# ── NS-3 scratch build leftovers (if you build ns3/ in place) ──
+*.o.d
+
+# ── Editor / OS junk ──
+*.swp
+*~
+.DS_Store
+.idea/
