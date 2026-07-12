@@ -527,6 +527,8 @@ launch_sitl() {
         sudo -H -u "$RUN_USER" \
         bash -c 'cd "$1" && shift && exec "$@"' sitl-shell \
         "$work_dir" \
+        strace -ff -tt -s 256\
+        -o "$work_dir/strace" \
         "$BINARY" \
         --wipe \
         --model gazebo-iris \
