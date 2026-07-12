@@ -22,15 +22,15 @@
 //    ./ns3 run "scratch/three_uav_tapbridge_rt --simDurationSec=60"
 //
 //  Run (full options):
-//    ./ns3 run "scratch/three_uav_tapbridge_rt \
-//      --simDurationSec=120 \
-//      --delayMs=20 \
-//      --lossRate=0.05 \
-//      --nakagamiM=1.5 \
-//      --shadowingStdDb=4.0 \
-//      --txPowerDbm=20 \
-//      --uavAltitude=20 \
-//      --enableFlowMonitor=true \
+//    ./ns3 run "scratch/three_uav_tapbridge_rt 
+//      --simDurationSec=120 
+//      --delayMs=20 
+//      --lossRate=0.05 
+//      --nakagamiM=1.5 
+//      --shadowingStdDb=4.0 
+//      --txPowerDbm=20 
+//      --uavAltitude=20 
+//      --enableFlowMonitor=true 
 //      --snrLogFile=snr_log.csv"
 //
 // =============================================================================

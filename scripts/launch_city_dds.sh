@@ -6,7 +6,7 @@
 set -euo pipefail
 
 
-SMALL_CITY_DIR="$HOME/FYP/small_city_gazebo_world"
+SMALL_CITY_DIR="$HOME/FYP/small_city_gazebo"
 
 if [[ ! -d "$SMALL_CITY_DIR" ]]; then
     echo "ERROR: Small city Gazebo directory not found: $SMALL_CITY_DIR" >&2
