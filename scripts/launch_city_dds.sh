@@ -1,10 +1,10 @@
 #!/bin/bash
-# Set up the isolated host topology and start the real-time ns-3 wireless link.
-# Starts the complete city simulation in dependency order and gates mission
-# startup on verified process, transport, and namespaced GPS readiness.
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+RUN_USER="${SUDO_USER:-$USER}"
 
 SMALL_CITY_DIR="$HOME/simulation/small_city_gazebo_world"
 
@@ -12,6 +12,17 @@ if [[ ! -d "$SMALL_CITY_DIR" ]]; then
     echo "ERROR: Small city Gazebo directory not found: $SMALL_CITY_DIR" >&2
     exit 1
 fi
+
+# NetAnim output variables
+RUN_TIMESTAMP="$(date +'%Y%m%d_%H%M%S')_$$"
+
+NETANIM_DIR="$PROJECT_DIR/results/netanim"
+NETANIM_FILE="$NETANIM_DIR/three_uav_${RUN_TIMESTAMP}.xml"
+NETANIM_LATEST="$NETANIM_DIR/latest.xml"
+NETANIM_RECOVERY_LOG="/tmp/netanim_recovery_${RUN_TIMESTAMP}.log"
+NETANIM_STARTED=0
+
+## Gazebo required variables
 
 export GAZEBO_MODEL_PATH="$SMALL_CITY_DIR/models:${GAZEBO_MODEL_PATH:-}"
 export GAZEBO_MODEL_DATABASE_URI=""
@@ -54,6 +65,238 @@ CLEANUP_COMPLETE=0
 CLEANUP_DRY_RUN=0
 VERIFY_NETWORK_ONLY=0
 PROVE_NS3_PATH=0
+PID_FILE="/tmp/multi_uav_city_launcher.pid"
+
+stop_previous_launcher() {
+    local old_pid=""
+
+    if [[ -f "$PID_FILE" ]]; then
+        old_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    fi
+
+    if [[ "$old_pid" =~ ^[0-9]+$ ]] &&
+       [[ "$old_pid" != "$$" ]] &&
+       kill -0 "$old_pid" 2>/dev/null; then
+
+        echo "Stopping previous launcher: PID=$old_pid"
+
+        sudo kill -TERM "$old_pid" 2>/dev/null || true
+
+        for _ in {1..30}; do
+            if ! kill -0 "$old_pid" 2>/dev/null; then
+                break
+            fi
+            sleep 0.1
+        done
+
+        if kill -0 "$old_pid" 2>/dev/null; then
+            echo "Previous launcher did not stop; forcing termination."
+            sudo kill -KILL "$old_pid" 2>/dev/null || true
+        fi
+    fi
+
+    rm -f "$PID_FILE"
+}
+## fiinalize the netanim file
+
+
+finalize_netanim_xml() {
+    local xml_file="${1:-}"
+    local incomplete_backup
+    local recovered_file
+
+    (( NETANIM_STARTED )) || return 0
+    [[ -n "$xml_file" ]] || return 0
+
+    if [[ ! -s "$xml_file" ]]; then
+        echo "WARNING: NetAnim XML was not created or is empty: $xml_file" >&2
+        return 0
+    fi
+
+    if ! command -v xmllint >/dev/null 2>&1; then
+        echo "WARNING: xmllint is unavailable; cannot validate NetAnim XML." >&2
+        echo "Install it with: sudo apt install libxml2-utils" >&2
+        return 0
+    fi
+
+    if xmllint --noout "$xml_file" >/dev/null 2>&1; then
+        ln -sfn "$(basename "$xml_file")" "$NETANIM_LATEST"
+
+        echo "NetAnim XML finalized successfully: $xml_file"
+        echo "Latest NetAnim link: $NETANIM_LATEST"
+        return 0
+    fi
+
+    echo "NetAnim XML is incomplete; attempting automatic recovery..."
+
+    incomplete_backup="${xml_file%.xml}_incomplete.xml"
+    recovered_file="${xml_file%.xml}_recovered.tmp.xml"
+
+    cp -f "$xml_file" "$incomplete_backup"
+    : >"$NETANIM_RECOVERY_LOG"
+
+    if xmllint \
+        --recover \
+        --output "$recovered_file" \
+        "$xml_file" \
+        >"$NETANIM_RECOVERY_LOG" 2>&1 &&
+       xmllint --noout "$recovered_file" >/dev/null 2>&1; then
+
+        mv -f "$recovered_file" "$xml_file"
+
+        ln -sfn "$(basename "$xml_file")" "$NETANIM_LATEST"
+
+        echo "NetAnim XML recovered successfully: $xml_file"
+        echo "Original incomplete copy: $incomplete_backup"
+        echo "Latest NetAnim link: $NETANIM_LATEST"
+        return 0
+    fi
+
+    rm -f "$recovered_file"
+
+    echo "WARNING: NetAnim XML recovery failed." >&2
+    echo "Incomplete file preserved at: $incomplete_backup" >&2
+    echo "Recovery log: $NETANIM_RECOVERY_LOG" >&2
+
+    return 0
+}
+
+cleanup_previous_instances() {
+    echo "=== Cleaning previous simulation instances ==="
+
+    local patterns=(
+        'city_mission'
+        'drone_bridge'
+        '/build/sitl/bin/arducopter'
+        'micro_ros_agent.*udp4.*--port (2019|2020|2021)'
+        'scratch_three-uav_three-uav'
+        'three_uav_tapbridge_rt'
+        'gzserver.*city_3uav\.world'
+        'gzclient'
+    )
+
+    local pattern
+    local pid
+    local -a stale_pids=()
+    local -a remaining_pids=()
+
+    for pattern in "${patterns[@]}"; do
+        while read -r pid; do
+            [[ -n "$pid" ]] || continue
+            [[ "$pid" == "$$" ]] && continue
+            [[ "$pid" == "$PPID" ]] && continue
+            stale_pids+=("$pid")
+        done < <(pgrep -f -- "$pattern" 2>/dev/null || true)
+    done
+
+    # Remove duplicate PIDs.
+    if [[ ${#stale_pids[@]} -gt 0 ]]; then
+        mapfile -t stale_pids < <(
+            printf '%s\n' "${stale_pids[@]}" |
+            sort -nu
+        )
+    fi
+
+    if [[ ${#stale_pids[@]} -gt 0 ]]; then
+        echo "Stopping stale processes: ${stale_pids[*]}"
+
+        sudo kill -TERM "${stale_pids[@]}" 2>/dev/null || true
+        sleep 2
+
+        remaining_pids=()
+
+        for pid in "${stale_pids[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                remaining_pids+=("$pid")
+            fi
+        done
+
+        if [[ ${#remaining_pids[@]} -gt 0 ]]; then
+            echo "Force-stopping remaining processes: ${remaining_pids[*]}"
+            sudo kill -KILL "${remaining_pids[@]}" 2>/dev/null || true
+        fi
+    else
+        echo "No stale simulation processes found."
+    fi
+
+    cleanup_previous_namespaces
+    cleanup_previous_links
+
+    echo "Previous simulation cleanup complete."
+}
+cleanup_previous_namespaces() {
+    local namespace
+    local pid
+    local -a namespace_pids=()
+
+    for namespace in gcsns uav1 uav2 uav3; do
+        if ! sudo ip netns list |
+            awk '{print $1}' |
+            grep -qx "$namespace"; then
+            continue
+        fi
+
+        echo "Cleaning namespace: $namespace"
+
+        mapfile -t namespace_pids < <(
+            sudo ip netns pids "$namespace" 2>/dev/null || true
+        )
+
+        if [[ ${#namespace_pids[@]} -gt 0 ]]; then
+            sudo kill -TERM "${namespace_pids[@]}" 2>/dev/null || true
+            sleep 0.5
+
+            for pid in "${namespace_pids[@]}"; do
+                if kill -0 "$pid" 2>/dev/null; then
+                    sudo kill -KILL "$pid" 2>/dev/null || true
+                fi
+            done
+        fi
+
+        sudo ip netns delete "$namespace" 2>/dev/null || true
+    done
+}
+cleanup_previous_links() {
+    local link
+
+    local links=(
+        tap-gcs
+        tap-uav1
+        tap-uav2
+        tap-uav3
+
+        veth-gcs-host
+        veth-uav1-host
+        veth-uav2-host
+        veth-uav3-host
+
+        sim-uav1-host
+        sim-uav2-host
+        sim-uav3-host
+
+        br-gcs
+        br-uav1
+        br-uav2
+        br-uav3
+    )
+
+    for link in "${links[@]}"; do
+        if ip link show "$link" >/dev/null 2>&1; then
+            echo "Deleting stale interface: $link"
+            sudo ip link delete "$link" 2>/dev/null || true
+        fi
+    done
+}
+prepare_netanim_output() {
+    mkdir -p "$NETANIM_DIR"
+
+    rm -f "$NETANIM_FILE"
+
+    NETANIM_STARTED=1
+
+    echo "NetAnim output file: $NETANIM_FILE"
+}
+
 verify_bidirectional_wireless() {
     local namespace
     local uav_ip
@@ -213,6 +456,7 @@ cleanup() {
         done
         wait "$root" 2>/dev/null || true
     done
+    finalize_netanim_xml "${NETANIM_FILE:-}"
 
     # Namespace deletion removes namespace-side wifi0/sim0 peers. Explicit
     # root-side deletion below also makes partial and repeated cleanup safe.
@@ -231,9 +475,26 @@ cleanup() {
     CLEANUP_RUNNING=0
     CLEANUP_COMPLETE=1
 }
-trap cleanup EXIT
-trap 'cleanup; trap - EXIT; exit 130' INT
-trap 'cleanup; trap - EXIT; exit 143' TERM
+final_cleanup() {
+    cleanup
+
+    if [[ -f "$PID_FILE" ]] &&
+       [[ "$(cat "$PID_FILE" 2>/dev/null)" == "$$" ]]; then
+        rm -f "$PID_FILE"
+    fi
+}
+
+handle_signal() {
+    local status="$1"
+
+    trap - EXIT INT TERM
+    final_cleanup
+    exit "$status"
+}
+
+trap final_cleanup EXIT
+trap 'handle_signal 130' INT
+trap 'handle_signal 143' TERM
 
 if (( CLEANUP_DRY_RUN )); then
     cleanup
@@ -300,6 +561,15 @@ validate_dds_param_file "$PROJECT_DIR/params/uav1_dds.parm" 2019
 validate_dds_param_file "$PROJECT_DIR/params/uav2_dds.parm" 2020
 validate_dds_param_file "$PROJECT_DIR/params/uav3_dds.parm" 2021
 
+## cleanupt process
+sudo -v
+
+stop_previous_launcher
+cleanup_previous_instances
+
+echo "$$" > "$PID_FILE"
+
+
 echo "=== Setting up isolated ns-3 wireless topology ==="
 sudo NS3_USER="$RUN_USER" "$SCRIPT_DIR/setup_ns3_wireless_topology.sh"
 
@@ -310,6 +580,10 @@ echo "=== Building ns-3 target: three-uav ==="
 (cd "$NS3_ROOT" && ./ns3 build three-uav)
 
 : >"$NS3_LOG"
+
+## prepared the netanim file
+prepare_netanim_output
+
 echo "=== Starting real-time ns-3 wireless simulation ==="
 (
     cd "$NS3_ROOT"
@@ -319,7 +593,7 @@ echo "=== Starting real-time ns-3 wireless simulation ==="
         --simDurationSec=0 \
         --nakagamiM=10.0 --shadowingStdDb=0.0 --txPowerDbm=20 --uavAltitude=20 \
         --enableFlowMonitor=false --snrLogFile=/tmp/snr_log.csv \
-        --animFile=/tmp/three_uav_anim.xml"
+        --animFile=${NETANIM_FILE}"
 ) >"$NS3_LOG" 2>&1 &
 NS3_PID=$!
 echo "ns-3 PID: $NS3_PID"
@@ -527,8 +801,6 @@ launch_sitl() {
         sudo -H -u "$RUN_USER" \
         bash -c 'cd "$1" && shift && exec "$@"' sitl-shell \
         "$work_dir" \
-        strace -ff -tt -s 256\
-        -o "$work_dir/strace" \
         "$BINARY" \
         --wipe \
         --model gazebo-iris \
