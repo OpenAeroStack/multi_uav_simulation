@@ -226,17 +226,27 @@ double ObstacleRaycastPlugin::ComputeObstacleLoss(const std::string & entity_nam
                                                     const ignition::math::Vector3d & start,
                                                     const ignition::math::Vector3d & end)
 {
-  double L_e = 15.0;   // default: unknown solid ~ masonry / concrete
-  if (entity_name.find("glass")    != std::string::npos) L_e = 4.0;
-  if (entity_name.find("wood")     != std::string::npos) L_e = 8.0;
-  if (entity_name.find("concrete") != std::string::npos) L_e = 15.0;
-  if (entity_name.find("metal")    != std::string::npos) L_e = 20.0;
+  // CHANGED: an obstacle whose <name> carries NO recognised material keyword
+  // now contributes ZERO loss instead of a default 15 dB. Only explicitly
+  // tagged materials attenuate the link; anything untagged is treated as
+  // RF-transparent (same net effect as a "noloss" prop). Track whether a
+  // keyword actually matched so we can bail out below.
+  // REMOVED: double L_e = 15.0;  // default: unknown solid ~ masonry / concrete
+  double L_e = 0.0;
+  bool   material_known = false;
+  if (entity_name.find("glass")    != std::string::npos) { L_e = 4.0;  material_known = true; }
+  if (entity_name.find("wood")     != std::string::npos) { L_e = 8.0;  material_known = true; }
+  if (entity_name.find("concrete") != std::string::npos) { L_e = 15.0; material_known = true; }
+  if (entity_name.find("metal")    != std::string::npos) { L_e = 20.0; material_known = true; }
   // ADDED material classes for the small-city props. A model is tagged by
   // putting one of these keywords in its <name> in the world file, so the
   // material lives with the world (author-controlled) and the plugin stays
   // generic:
-  if (entity_name.find("foliage")  != std::string::npos) L_e = 5.0;   // trees: scattering, not a solid wall
-  if (entity_name.find("vehicle")  != std::string::npos) L_e = 12.0;  // cars: hollow metal shell, ground level
+  if (entity_name.find("foliage")  != std::string::npos) { L_e = 5.0;  material_known = true; }  // trees: scattering, not a solid wall
+  if (entity_name.find("vehicle")  != std::string::npos) { L_e = 12.0; material_known = true; }  // cars: hollow metal shell, ground level
+
+  // No recognised material keyword -> zero loss (skip the thickness term too).
+  if (!material_known) return 0.0;
 
   // REMOVED: "penetration_depth" was the free-space distance from the wall to
   // the destination drone, not the depth of material traversed -- so a drone

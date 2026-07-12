@@ -41,7 +41,7 @@ DRONES = [
     {"name": "UAV3", "port": 5780, "sysid": 3, "direction": "forward"},
 ]
 
-TAKEOFF_ALT   = 20      # metres
+TAKEOFF_ALT   = 10      # metres
 MOVE_DISTANCE = 50      # metres
 HOLD_TIME     = 5       # seconds
 WAYPOINT_RADIUS = 2.0   # metres — how close = "arrived"

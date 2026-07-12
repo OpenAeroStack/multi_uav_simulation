@@ -12,12 +12,11 @@ source "$PROJECT_DIR/setup.sh"
 WS_INSTALL="$(cd "$PROJECT_DIR/../.." && pwd)/install"
 export GAZEBO_PLUGIN_PATH="$WS_INSTALL/multi_uav_gazebo_plugins/lib:$GAZEBO_PLUGIN_PATH"
 
-# ADDED: small_city_base.world pulls in city assets (terrain, ocean, buildings,
-# trees, vehicles) that live in the small_city_gazebo_world repo, so Gazebo
-# needs that models/ dir on the model path. $PROJECT_DIR/models (from setup.sh)
-# still supplies the iris_1/2/3 drone models.
-SMALL_CITY_DIR="$HOME/small_city_gazebo_world"
-export GAZEBO_MODEL_PATH="$SMALL_CITY_DIR/models:${GAZEBO_MODEL_PATH:-}"
+# CHANGED: small_city_base.world's city assets (terrain, ocean, buildings,
+# trees, vehicles, the garden pavilion + stop_light) are now vendored into this
+# package's models/ dir, so the sim no longer depends on the external
+# small_city_gazebo_world repo (or ~/.gazebo/models). $PROJECT_DIR/models
+# (added by setup.sh) supplies all of them plus the iris_1/2/3 drone models.
 
 echo "=== Killing any previous SITL/Gazebo instances ==="
 pkill -f arducopter 2>/dev/null || true
@@ -40,7 +39,11 @@ fi
 # ADDED: full small-city world. It already contains the 3 iris drones, the
 # obstacle raycast plugin (n_uavs=3, prefix iris_), and the gazebo_ros_state
 # plugin -- same plugin block as multi_uav_plugin.world, just a richer scene.
-WORLD_PATH="$SMALL_CITY_DIR/worlds/small_city_base.world"
+# CHANGED: launch the in-tree copy under this package's worlds/ dir (lockstep
+# physics, material-tagged model names for the obstacle-loss plugin, and the 3
+# iris drones). Its city scenery + iris models are all vendored under
+# $PROJECT_DIR/models, so nothing outside this package is needed anymore.
+WORLD_PATH="$PROJECT_DIR/worlds/small_city_base.world"
 BINARY="$ARDUPILOT_HOME/build/sitl/bin/arducopter"
 DEFAULTS="$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm"
 

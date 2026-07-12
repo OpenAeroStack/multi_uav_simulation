@@ -21,9 +21,19 @@
     </scene>
 
     <physics name='default_physics' default='0' type='ode'>
-      <max_step_size>0.005</max_step_size>
+      <!-- CHANGED for ArduPilot SITL lockstep. Original values (max_step_size
+           0.005 = 200 Hz physics, real_time_update_rate 200) are too coarse for
+           ArduCopter attitude control and make Gazebo self-throttle instead of
+           stepping in lockstep with SITL, which stalls EKF/GPS and hangs the
+           mission at "waiting for EKF". These match the working
+           multi_uav_plugin.world and the standard ArduPilot iris worlds:
+           real_time_update_rate = -1 (free-run, stepped by SITL lockstep),
+           max_step_size = 0.001 (1 kHz physics).
+           REMOVED: <max_step_size>0.005</max_step_size>
+                    <real_time_update_rate>200</real_time_update_rate> -->
+      <max_step_size>0.001</max_step_size>
       <real_time_factor>1</real_time_factor>
-      <real_time_update_rate>200</real_time_update_rate>
+      <real_time_update_rate>-1</real_time_update_rate>
     </physics>
 
     <!-- A global light source -->
@@ -1883,7 +1893,7 @@
     <!-- North block -->
 
     <include>
-      <name>fountain_41</name>
+      <name>concrete_fountain_41</name>
       <pose>
       153.17
       -32.42
@@ -1909,7 +1919,7 @@
     </include>
 
     <include>
-      <name>pier_43</name>
+      <name>wood_pier_43</name>
       <pose>
       199.63
       -17.32
@@ -1923,7 +1933,7 @@
 
 
     <include>
-      <name>oak_tree_44</name>
+      <name>foliage_oak_tree_44</name>
       <pose>
       129
       -16.3
@@ -1936,7 +1946,7 @@
     </include>
 
     <include>
-      <name>oak_tree_45</name>
+      <name>foliage_oak_tree_45</name>
       <pose>
       149.3
       -15.6
@@ -1949,7 +1959,7 @@
     </include>
 
     <include>
-      <name>oak_tree_46</name>
+      <name>foliage_oak_tree_46</name>
       <pose>
       128.11
       -7.09
@@ -1962,7 +1972,7 @@
     </include>
 
     <include>
-      <name>oak_tree_47</name>
+      <name>foliage_oak_tree_47</name>
       <pose>
       128.5
       9.7
@@ -1975,7 +1985,7 @@
     </include>
 
     <include>
-      <name>oak_tree_48</name>
+      <name>foliage_oak_tree_48</name>
       <pose>
       152
       10.9
@@ -1988,7 +1998,7 @@
     </include>
 
     <include>
-      <name>oak_tree_49</name>
+      <name>foliage_oak_tree_49</name>
       <pose>
       139.5
       5.01
@@ -2001,7 +2011,7 @@
     </include>
 
     <include>
-      <name>oak_tree_50</name>
+      <name>foliage_oak_tree_50</name>
       <pose>
       133.59
       -34.94
@@ -2014,7 +2024,7 @@
     </include>
 
     <include>
-      <name>oak_tree_51</name>
+      <name>foliage_oak_tree_51</name>
       <pose>
       130.211
       -49.55
@@ -2027,7 +2037,7 @@
     </include>
 
     <include>
-      <name>oak_tree_52</name>
+      <name>foliage_oak_tree_52</name>
       <pose>
       142.37
       -60.3
@@ -2040,7 +2050,7 @@
     </include>
 
     <include>
-      <name>oak_tree_53</name>
+      <name>foliage_oak_tree_53</name>
       <pose>
       152.151
       -43.59
@@ -2053,7 +2063,7 @@
     </include>
 
     <include>
-      <name>oak_tree_54</name>
+      <name>foliage_oak_tree_54</name>
       <pose>
       173.19
       -34.8
@@ -2066,7 +2076,7 @@
     </include>
 
     <include>
-      <name>oak_tree_55</name>
+      <name>foliage_oak_tree_55</name>
       <pose>
       177.91
       -7.7
@@ -2083,7 +2093,7 @@
 
 
         <include>
-      <name>pine_tree_56</name>
+      <name>foliage_pine_tree_56</name>
       <pose>
       115.0
       -37.0
@@ -2097,7 +2107,7 @@
 
 
         <include>
-      <name>pine_tree_57</name>
+      <name>foliage_pine_tree_57</name>
       <pose>
       115.0
       -30.25
@@ -2111,7 +2121,7 @@
 
 
         <include>
-      <name>pine_tree_58</name>
+      <name>foliage_pine_tree_58</name>
       <pose>
       115.0
       -23.5
@@ -2125,7 +2135,7 @@
 
 
         <include>
-      <name>pine_tree_59</name>
+      <name>foliage_pine_tree_59</name>
       <pose>
       115.0
       -16.75
@@ -2139,7 +2149,7 @@
 
 
         <include>
-      <name>pine_tree_60</name>
+      <name>foliage_pine_tree_60</name>
       <pose>
       115.0
       -10.0
@@ -2154,7 +2164,7 @@
 
 
         <include>
-      <name>pine_tree_61</name>
+      <name>foliage_pine_tree_61</name>
       <pose>
       115.0
       8.0
@@ -2168,7 +2178,7 @@
 
 
         <include>
-      <name>pine_tree_62</name>
+      <name>foliage_pine_tree_62</name>
       <pose>
       115.0
       14.75
@@ -2182,7 +2192,7 @@
 
 
         <include>
-      <name>pine_tree_63</name>
+      <name>foliage_pine_tree_63</name>
       <pose>
       115.0
       21.5
@@ -2196,7 +2206,7 @@
 
 
         <include>
-      <name>pine_tree_64</name>
+      <name>foliage_pine_tree_64</name>
       <pose>
       115.0
       28.25
@@ -2210,7 +2220,7 @@
 
 
         <include>
-      <name>pine_tree_65</name>
+      <name>foliage_pine_tree_65</name>
       <pose>
       115.0
       35.0
@@ -2230,7 +2240,7 @@
     <!-- Block 0 1 -->
 
     <include>
-      <name>house_1_66</name>
+      <name>concrete_house_1_66</name>
       <pose>
       61.74
       22.76
@@ -2243,7 +2253,7 @@
     </include>
 
     <include>
-      <name>house_1_67</name>
+      <name>concrete_house_1_67</name>
       <pose>
       86.62
       27.93
@@ -2256,7 +2266,7 @@
     </include>
 
     <include>
-      <name>house_3_68</name>
+      <name>concrete_house_3_68</name>
       <pose>
       96.43
       14.14
@@ -2269,7 +2279,7 @@
     </include>
 
     <include>
-      <name>oak_tree_69</name>
+      <name>foliage_oak_tree_69</name>
       <pose>
       57.97
       10.72
@@ -2282,7 +2292,7 @@
     </include>
 
     <include>
-      <name>oak_tree_70</name>
+      <name>foliage_oak_tree_70</name>
       <pose>
       53.56
       34.08
@@ -2295,7 +2305,7 @@
     </include>
 
     <include>
-      <name>house_2_71</name>
+      <name>concrete_house_2_71</name>
       <pose>
       76.71
       13.4
@@ -2308,7 +2318,7 @@
     </include>
 
     <include>
-      <name>ambulance_72</name>
+      <name>vehicle_ambulance_72</name>
       <pose>
       63.99
       7.06
@@ -2388,7 +2398,7 @@
 </model>
 
     <include>
-      <name>hatchback_red_75</name>
+      <name>vehicle_hatchback_red_75</name>
       <pose>
       61.9
       -12.36
@@ -2402,7 +2412,7 @@
 
 
     <include>
-      <name>apartment_76</name>
+      <name>concrete_apartment_76</name>
       <pose>
       87.36
       -21.48
@@ -2415,7 +2425,7 @@
     </include>
 
     <include>
-      <name>oak_tree_77</name>
+      <name>foliage_oak_tree_77</name>
       <pose>
       74.95
       -8.29
@@ -2428,7 +2438,7 @@
     </include>
 
     <include>
-      <name>oak_tree_78</name>
+      <name>foliage_oak_tree_78</name>
       <pose>
       79.06
       -35.8
@@ -2441,7 +2451,7 @@
     </include>
 
     <include>
-      <name>oak_tree_79</name>
+      <name>foliage_oak_tree_79</name>
       <pose>
       100.33
       -33.7
@@ -2454,7 +2464,7 @@
     </include>
 
     <include>
-      <name>oak_tree_80</name>
+      <name>foliage_oak_tree_80</name>
       <pose>
       100.15
       -8.67
@@ -2467,7 +2477,7 @@
     </include>
 
     <include>
-      <name>fire_hydrant_81</name>
+      <name>noloss_fire_hydrant_81</name>
       <pose>
       103.0
       -4.386
@@ -2487,7 +2497,7 @@
     <!-- Block 1 1 -->
 
     <include>
-      <name>law_office_82</name>
+      <name>concrete_law_office_82</name>
       <pose>
       8.47
       9.356
@@ -2500,7 +2510,7 @@
     </include>
 
     <include>
-      <name>thrift_shop_83</name>
+      <name>concrete_thrift_shop_83</name>
       <pose>
       1.35
       9.356
@@ -2513,7 +2523,7 @@
     </include>
 
     <include>
-      <name>salon_84</name>
+      <name>concrete_salon_84</name>
       <pose>
       15.7
       9.356
@@ -2526,7 +2536,7 @@
     </include>
 
     <include>
-      <name>oak_tree_85</name>
+      <name>foliage_oak_tree_85</name>
       <pose>
       -6.418
       10.37
@@ -2539,7 +2549,7 @@
     </include>
 
     <include>
-      <name>apartment_86</name>
+      <name>concrete_apartment_86</name>
       <pose>
       1.573
       27.565
@@ -2552,7 +2562,7 @@
     </include>
 
     <include>
-      <name>osrf_first_office_87</name>
+      <name>concrete_osrf_first_office_87</name>
       <pose>
       27.003
       20.15
@@ -2565,7 +2575,7 @@
     </include>
 
     <include>
-      <name>pine_tree_88</name>
+      <name>foliage_pine_tree_88</name>
       <pose>
       16.096
       34.82
@@ -2578,7 +2588,7 @@
     </include>
 
     <include>
-      <name>pine_tree_89</name>
+      <name>foliage_pine_tree_89</name>
       <pose>
       18.7
       29.33
@@ -2591,7 +2601,7 @@
     </include>
 
     <include>
-      <name>pine_tree_90</name>
+      <name>foliage_pine_tree_90</name>
       <pose>
       22.56
       34.58
@@ -2604,7 +2614,7 @@
     </include>
 
     <include>
-      <name>oak_tree_91</name>
+      <name>foliage_oak_tree_91</name>
       <pose>
       31.49
       35.89
@@ -2617,7 +2627,7 @@
     </include>
 
     <include>
-      <name>postbox_92</name>
+      <name>noloss_postbox_92</name>
       <pose>
       24.0
       4.33
@@ -2633,7 +2643,7 @@
     <!-- Block 1 2 -->
 
     <include>
-      <name>fast_food_93</name>
+      <name>concrete_fast_food_93</name>
       <pose>
       28.25
       -13.93
@@ -2646,7 +2656,7 @@
     </include>
 
     <include>
-      <name>dumpster_94</name>
+      <name>noloss_dumpster_94</name>
       <pose>
       15.94
       -13.63
@@ -2659,7 +2669,7 @@
     </include>
 
     <include>
-      <name>fire_hydrant_95</name>
+      <name>noloss_fire_hydrant_95</name>
       <pose>
       38.5
       -4.38
@@ -2675,7 +2685,7 @@
 
 
     <include>
-      <name>radio_tower_124</name>
+      <name>metal_radio_tower_124</name>
       <pose>
       14.0
       -22.5
@@ -2688,7 +2698,7 @@
     </include>
 
     <include>
-      <name>house_2_125</name>
+      <name>concrete_house_2_125</name>
       <pose>
       1.61
       -14.15
@@ -2701,7 +2711,7 @@
     </include>
 
     <include>
-      <name>house_2_126</name>
+      <name>concrete_house_2_126</name>
       <pose>
       -0.59
       -26.6
@@ -2716,7 +2726,7 @@
 
 
       <include>
-      <name>pine_tree_127</name>
+      <name>foliage_pine_tree_127</name>
       <pose>
       -7
       -37
@@ -2730,7 +2740,7 @@
 
 
       <include>
-      <name>pine_tree_128</name>
+      <name>foliage_pine_tree_128</name>
       <pose>
       -2
       -37
@@ -2744,7 +2754,7 @@
 
 
       <include>
-      <name>pine_tree_129</name>
+      <name>foliage_pine_tree_129</name>
       <pose>
       3
       -37
@@ -2758,7 +2768,7 @@
 
 
       <include>
-      <name>pine_tree_130</name>
+      <name>foliage_pine_tree_130</name>
       <pose>
       8
       -37
@@ -2772,7 +2782,7 @@
 
 
       <include>
-      <name>pine_tree_131</name>
+      <name>foliage_pine_tree_131</name>
       <pose>
       13
       -37
@@ -2788,7 +2798,7 @@
 
 
       <include>
-      <name>pine_tree_132</name>
+      <name>foliage_pine_tree_132</name>
       <pose>
       -7
       -32
@@ -2802,7 +2812,7 @@
 
 
       <include>
-      <name>pine_tree_133</name>
+      <name>foliage_pine_tree_133</name>
       <pose>
       -7
       -27
@@ -2816,7 +2826,7 @@
 
 
       <include>
-      <name>pine_tree_134</name>
+      <name>foliage_pine_tree_134</name>
       <pose>
       -7
       -22
@@ -2830,7 +2840,7 @@
 
 
       <include>
-      <name>pine_tree_135</name>
+      <name>foliage_pine_tree_135</name>
       <pose>
       -7
       -17
@@ -2844,7 +2854,7 @@
 
 
       <include>
-      <name>pine_tree_136</name>
+      <name>foliage_pine_tree_136</name>
       <pose>
       -7
       -12
@@ -2858,7 +2868,7 @@
 
 
       <include>
-      <name>pine_tree_137</name>
+      <name>foliage_pine_tree_137</name>
       <pose>
       -7
       -7
@@ -2874,7 +2884,7 @@
 
 
       <include>
-      <name>pine_tree_138</name>
+      <name>foliage_pine_tree_138</name>
       <pose>
       -2
       -8
@@ -2888,7 +2898,7 @@
 
 
       <include>
-      <name>pine_tree_139</name>
+      <name>foliage_pine_tree_139</name>
       <pose>
       3
       -8
@@ -2902,7 +2912,7 @@
 
 
       <include>
-      <name>pine_tree_140</name>
+      <name>foliage_pine_tree_140</name>
       <pose>
       8
       -8
@@ -2916,7 +2926,7 @@
 
 
       <include>
-      <name>pine_tree_141</name>
+      <name>foliage_pine_tree_141</name>
       <pose>
       13
       -8
@@ -2930,7 +2940,7 @@
 
 
       <include>
-      <name>pine_tree_142</name>
+      <name>foliage_pine_tree_142</name>
       <pose>
       18
       -8
@@ -2951,7 +2961,7 @@
     <!-- Block 2 1 -->
 
     <include>
-      <name>post_office_143</name>
+      <name>concrete_post_office_143</name>
       <pose>
       -26.686
       11.119
@@ -2964,7 +2974,7 @@
     </include>
 
     <include>
-      <name>postbox_144</name>
+      <name>noloss_postbox_144</name>
       <pose>
       -28.58
       4.33
@@ -2977,7 +2987,7 @@
     </include>
 
     <include>
-      <name>pine_tree_145</name>
+      <name>foliage_pine_tree_145</name>
       <pose>
       -30.709
       7.15
@@ -2990,7 +3000,7 @@
     </include>
 
     <include>
-      <name>house_1_146</name>
+      <name>concrete_house_1_146</name>
       <pose>
       -27.49
       25.344
@@ -3003,7 +3013,7 @@
     </include>
 
     <include>
-      <name>pickup_147</name>
+      <name>vehicle_pickup_147</name>
       <pose>
       -36.72
       21.02
@@ -3016,7 +3026,7 @@
     </include>
 
     <include>
-      <name>oak_tree_148</name>
+      <name>foliage_oak_tree_148</name>
       <pose>
       -35.811
       11.78
@@ -3029,7 +3039,7 @@
     </include>
 
     <include>
-      <name>pine_tree_149</name>
+      <name>foliage_pine_tree_149</name>
       <pose>
       -22.97
       15.87
@@ -3042,7 +3052,7 @@
     </include>
 
     <include>
-      <name>oak_tree_150</name>
+      <name>foliage_oak_tree_150</name>
       <pose>
       -36.78
       36.47
@@ -3055,7 +3065,7 @@
     </include>
 
     <include>
-      <name>pine_tree_151</name>
+      <name>foliage_pine_tree_151</name>
       <pose>
       -23.94
       34.92
@@ -3085,7 +3095,7 @@
     <!-- Block 2 2 -->
 
     <include>
-      <name>salon_154</name>
+      <name>concrete_salon_154</name>
       <pose>
       -27.65
       -9.35
@@ -3098,7 +3108,7 @@
     </include>
 
     <include>
-      <name>law_office_155</name>
+      <name>concrete_law_office_155</name>
       <pose>
       -34.886
       -9.408
@@ -3111,7 +3121,7 @@
     </include>
 
     <include>
-      <name>house_3_156</name>
+      <name>concrete_house_3_156</name>
       <pose>
       -33.39
       -21.3
@@ -3124,7 +3134,7 @@
     </include>
 
     <include>
-      <name>house_3_157</name>
+      <name>concrete_house_3_157</name>
       <pose>
       -28.126
       -32.93
@@ -3137,7 +3147,7 @@
     </include>
 
     <include>
-      <name>house_3_158</name>
+      <name>concrete_house_3_158</name>
       <pose>
       -25.739
       -19.38
@@ -3150,7 +3160,7 @@
     </include>
 
     <include>
-      <name>pine_tree_159</name>
+      <name>foliage_pine_tree_159</name>
       <pose>
       -37.48
       -13.67
@@ -3163,7 +3173,7 @@
     </include>
 
     <include>
-      <name>pine_tree_160</name>
+      <name>foliage_pine_tree_160</name>
       <pose>
       -22.26
       -7.39
@@ -3176,7 +3186,7 @@
     </include>
 
     <include>
-      <name>pine_tree_161</name>
+      <name>foliage_pine_tree_161</name>
       <pose>
       -22.26
       -10.46
@@ -3189,7 +3199,7 @@
     </include>
 
     <include>
-      <name>pine_tree_162</name>
+      <name>foliage_pine_tree_162</name>
       <pose>
       -35.045
       -28.058
@@ -3202,7 +3212,7 @@
     </include>
 
     <include>
-      <name>pine_tree_163</name>
+      <name>foliage_pine_tree_163</name>
       <pose>
       -37.48
       -36.76
@@ -3215,7 +3225,7 @@
     </include>
 
     <include>
-      <name>pine_tree_164</name>
+      <name>foliage_pine_tree_164</name>
       <pose>
       -33.06
       -37.17
@@ -3228,7 +3238,7 @@
     </include>
 
     <include>
-      <name>pine_tree_165</name>
+      <name>foliage_pine_tree_165</name>
       <pose>
       -25.34
       -29.166
@@ -3241,7 +3251,7 @@
     </include>
 
     <include>
-      <name>fire_hydrant_166</name>
+      <name>noloss_fire_hydrant_166</name>
       <pose>
       -20.34
       -4.38
@@ -3266,7 +3276,7 @@
     <!-- South island -->
 
     <include>
-      <name>truss_bridge_167</name>
+      <name>metal_truss_bridge_167</name>
       <pose>
       -56.37
       -45
@@ -3279,7 +3289,7 @@
     </include>
 
     <include>
-      <name>truss_bridge_168</name>
+      <name>metal_truss_bridge_168</name>
       <pose>
       -56.37
       0
@@ -3308,7 +3318,7 @@
     <!-- Stop lights -->
 
     <include>
-      <name>stop_light_post_169</name>
+      <name>noloss_stop_light_post_169</name>
       <pose>
       -41.3
       -3.7
@@ -3321,7 +3331,7 @@
     </include>
 
     <include>
-      <name>stop_light_post_170</name>
+      <name>noloss_stop_light_post_170</name>
       <pose>
       -41.3
       -3.7
@@ -3334,7 +3344,7 @@
     </include>
 
     <include>
-      <name>stop_light_post_171</name>
+      <name>noloss_stop_light_post_171</name>
       <pose>
       -11.3
       -3.7
@@ -3347,7 +3357,7 @@
     </include>
 
     <include>
-      <name>stop_light_post_172</name>
+      <name>noloss_stop_light_post_172</name>
       <pose>
       48.7
       -3.7
@@ -3360,7 +3370,7 @@
     </include>
 
     <include>
-      <name>stop_light_post_173</name>
+      <name>noloss_stop_light_post_173</name>
       <pose>
       123.7
       -3.7
@@ -3373,7 +3383,7 @@
     </include>
 
     <include>
-      <name>stop_light_post_174</name>
+      <name>noloss_stop_light_post_174</name>
       <pose>
       -48.7
       3.7
@@ -3386,7 +3396,7 @@
     </include>
 
     <include>
-      <name>stop_light_post_175</name>
+      <name>noloss_stop_light_post_175</name>
       <pose>
       -18.7
       3.7
@@ -3399,7 +3409,7 @@
     </include>
 
     <include>
-      <name>stop_light_post_176</name>
+      <name>noloss_stop_light_post_176</name>
       <pose>
       41.3
       3.7
@@ -3412,7 +3422,7 @@
     </include>
 
     <include>
-      <name>stop_light_post_177</name>
+      <name>noloss_stop_light_post_177</name>
       <pose>
       -41.3
       3.7
@@ -3425,7 +3435,7 @@
     </include>
 
     <include>
-      <name>stop_light_post_178</name>
+      <name>noloss_stop_light_post_178</name>
       <pose>
       -11.3
       3.7
@@ -3438,7 +3448,7 @@
     </include>
 
     <include>
-      <name>stop_light_post_179</name>
+      <name>noloss_stop_light_post_179</name>
       <pose>
       123.7
       3.7
@@ -3451,7 +3461,7 @@
     </include>
 
     <include>
-      <name>stop_light_post_180</name>
+      <name>noloss_stop_light_post_180</name>
       <pose>
       -48.7
       -3.7
@@ -3464,7 +3474,7 @@
     </include>
 
     <include>
-      <name>stop_light_post_181</name>
+      <name>noloss_stop_light_post_181</name>
       <pose>
       41.3
       -3.7
@@ -3477,7 +3487,7 @@
     </include>
 
     <include>
-      <name>stop_light_post_182</name>
+      <name>noloss_stop_light_post_182</name>
       <pose>
       106.3
       -3.7
@@ -3493,7 +3503,7 @@
     <!-- Stop signs -->
 
     <include>
-      <name>stop_sign_183</name>
+      <name>noloss_stop_sign_183</name>
       <pose>
       -11.3
       -3.7
@@ -3506,7 +3516,7 @@
     </include>
 
     <include>
-      <name>stop_sign_184</name>
+      <name>noloss_stop_sign_184</name>
       <pose>
       41.3
       -41.3
@@ -3519,7 +3529,7 @@
     </include>
 
     <include>
-      <name>stop_sign_185</name>
+      <name>noloss_stop_sign_185</name>
       <pose>
       41.3
       3.7
@@ -3532,7 +3542,7 @@
     </include>
 
     <include>
-      <name>stop_sign_186</name>
+      <name>noloss_stop_sign_186</name>
       <pose>
       -18.7
       -3.7
@@ -3545,7 +3555,7 @@
     </include>
 
     <include>
-      <name>stop_sign_187</name>
+      <name>noloss_stop_sign_187</name>
       <pose>
       41.3
       -3.7
@@ -3558,7 +3568,7 @@
     </include>
 
     <include>
-      <name>stop_sign_188</name>
+      <name>noloss_stop_sign_188</name>
       <pose>
       106.3
       -3.7
@@ -3575,7 +3585,7 @@
 
 
     <include>
-      <name>lamp_post_189</name>
+      <name>noloss_lamp_post_189</name>
       <pose>
       -35.1
       -3.7
@@ -3588,7 +3598,7 @@
     </include>
 
     <include>
-      <name>lamp_post_190</name>
+      <name>noloss_lamp_post_190</name>
       <pose>
       -25.2
       3.7
@@ -3603,7 +3613,7 @@
 
 
     <include>
-      <name>lamp_post_191</name>
+      <name>noloss_lamp_post_191</name>
       <pose>
       -3.0
       -3.7
@@ -3616,7 +3626,7 @@
     </include>
 
     <include>
-      <name>lamp_post_192</name>
+      <name>noloss_lamp_post_192</name>
       <pose>
       9.0
       3.7
@@ -3629,7 +3639,7 @@
     </include>
 
     <include>
-      <name>lamp_post_193</name>
+      <name>noloss_lamp_post_193</name>
       <pose>
       21.0
       -3.7
@@ -3642,7 +3652,7 @@
     </include>
 
     <include>
-      <name>lamp_post_194</name>
+      <name>noloss_lamp_post_194</name>
       <pose>
       27.0
       3.7
@@ -3657,7 +3667,7 @@
 
 
     <include>
-      <name>lamp_post_195</name>
+      <name>noloss_lamp_post_195</name>
       <pose>
       58.0
       -3.7
@@ -3670,7 +3680,7 @@
     </include>
 
     <include>
-      <name>lamp_post_196</name>
+      <name>noloss_lamp_post_196</name>
       <pose>
       71.0
       3.7
@@ -3683,7 +3693,7 @@
     </include>
 
     <include>
-      <name>lamp_post_197</name>
+      <name>noloss_lamp_post_197</name>
       <pose>
       84.0
       -3.7
@@ -3696,7 +3706,7 @@
     </include>
 
     <include>
-      <name>lamp_post_198</name>
+      <name>noloss_lamp_post_198</name>
       <pose>
       90.5
       3.7
@@ -3713,7 +3723,7 @@
 
 
             <include>
-      <name>telephone_pole_199</name>
+      <name>noloss_telephone_pole_199</name>
       <pose>
       -41.3
       -30.15
@@ -3726,7 +3736,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_200</name>
+      <name>noloss_telephone_pole_200</name>
       <pose>
       -41.3
       -15.299999999999997
@@ -3740,7 +3750,7 @@
 
 
             <include>
-      <name>telephone_pole_201</name>
+      <name>noloss_telephone_pole_201</name>
       <pose>
       -11.3
       -30.15
@@ -3753,7 +3763,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_202</name>
+      <name>noloss_telephone_pole_202</name>
       <pose>
       -11.3
       -15.299999999999997
@@ -3767,7 +3777,7 @@
 
 
             <include>
-      <name>telephone_pole_203</name>
+      <name>noloss_telephone_pole_203</name>
       <pose>
       -18.7
       -30.15
@@ -3780,7 +3790,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_204</name>
+      <name>noloss_telephone_pole_204</name>
       <pose>
       -18.7
       -15.299999999999997
@@ -3794,7 +3804,7 @@
 
 
             <include>
-      <name>telephone_pole_205</name>
+      <name>noloss_telephone_pole_205</name>
       <pose>
       48.7
       -30.15
@@ -3807,7 +3817,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_206</name>
+      <name>noloss_telephone_pole_206</name>
       <pose>
       48.7
       -15.299999999999997
@@ -3821,7 +3831,7 @@
 
 
             <include>
-      <name>telephone_pole_207</name>
+      <name>noloss_telephone_pole_207</name>
       <pose>
       41.3
       -30.15
@@ -3834,7 +3844,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_208</name>
+      <name>noloss_telephone_pole_208</name>
       <pose>
       41.3
       -15.299999999999997
@@ -3848,7 +3858,7 @@
 
 
             <include>
-      <name>telephone_pole_209</name>
+      <name>noloss_telephone_pole_209</name>
       <pose>
       106.3
       -30.15
@@ -3861,7 +3871,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_210</name>
+      <name>noloss_telephone_pole_210</name>
       <pose>
       106.3
       -15.299999999999997
@@ -3875,7 +3885,7 @@
 
 
             <include>
-      <name>telephone_pole_211</name>
+      <name>noloss_telephone_pole_211</name>
       <pose>
       -41.3
       14.850000000000001
@@ -3888,7 +3898,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_212</name>
+      <name>noloss_telephone_pole_212</name>
       <pose>
       -41.3
       29.700000000000003
@@ -3902,7 +3912,7 @@
 
 
             <include>
-      <name>telephone_pole_213</name>
+      <name>noloss_telephone_pole_213</name>
       <pose>
       -11.3
       14.850000000000001
@@ -3915,7 +3925,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_214</name>
+      <name>noloss_telephone_pole_214</name>
       <pose>
       -11.3
       29.700000000000003
@@ -3929,7 +3939,7 @@
 
 
             <include>
-      <name>telephone_pole_215</name>
+      <name>noloss_telephone_pole_215</name>
       <pose>
       -18.7
       14.850000000000001
@@ -3942,7 +3952,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_216</name>
+      <name>noloss_telephone_pole_216</name>
       <pose>
       -18.7
       29.700000000000003
@@ -3956,7 +3966,7 @@
 
 
             <include>
-      <name>telephone_pole_217</name>
+      <name>noloss_telephone_pole_217</name>
       <pose>
       48.7
       14.850000000000001
@@ -3969,7 +3979,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_218</name>
+      <name>noloss_telephone_pole_218</name>
       <pose>
       48.7
       29.700000000000003
@@ -3983,7 +3993,7 @@
 
 
             <include>
-      <name>telephone_pole_219</name>
+      <name>noloss_telephone_pole_219</name>
       <pose>
       41.3
       14.850000000000001
@@ -3996,7 +4006,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_220</name>
+      <name>noloss_telephone_pole_220</name>
       <pose>
       41.3
       29.700000000000003
@@ -4010,7 +4020,7 @@
 
 
             <include>
-      <name>telephone_pole_221</name>
+      <name>noloss_telephone_pole_221</name>
       <pose>
       106.3
       14.850000000000001
@@ -4023,7 +4033,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_222</name>
+      <name>noloss_telephone_pole_222</name>
       <pose>
       106.3
       29.700000000000003
@@ -4039,7 +4049,7 @@
 
 
             <include>
-      <name>telephone_pole_223</name>
+      <name>noloss_telephone_pole_223</name>
       <pose>
       -35.1
       -41.3
@@ -4052,7 +4062,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_224</name>
+      <name>noloss_telephone_pole_224</name>
       <pose>
       -25.2
       -41.3
@@ -4066,7 +4076,7 @@
 
 
             <include>
-      <name>telephone_pole_225</name>
+      <name>noloss_telephone_pole_225</name>
       <pose>
       -35.1
       3.7
@@ -4079,7 +4089,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_226</name>
+      <name>noloss_telephone_pole_226</name>
       <pose>
       -25.2
       3.7
@@ -4093,7 +4103,7 @@
 
 
             <include>
-      <name>telephone_pole_227</name>
+      <name>noloss_telephone_pole_227</name>
       <pose>
       -35.1
       -3.7
@@ -4106,7 +4116,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_228</name>
+      <name>noloss_telephone_pole_228</name>
       <pose>
       -25.2
       -3.7
@@ -4120,7 +4130,7 @@
 
 
             <include>
-      <name>telephone_pole_229</name>
+      <name>noloss_telephone_pole_229</name>
       <pose>
       4.800000000000001
       -41.3
@@ -4133,7 +4143,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_230</name>
+      <name>noloss_telephone_pole_230</name>
       <pose>
       24.6
       -41.3
@@ -4147,7 +4157,7 @@
 
 
             <include>
-      <name>telephone_pole_231</name>
+      <name>noloss_telephone_pole_231</name>
       <pose>
       4.800000000000001
       3.7
@@ -4160,7 +4170,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_232</name>
+      <name>noloss_telephone_pole_232</name>
       <pose>
       24.6
       3.7
@@ -4174,7 +4184,7 @@
 
 
             <include>
-      <name>telephone_pole_233</name>
+      <name>noloss_telephone_pole_233</name>
       <pose>
       4.800000000000001
       -3.7
@@ -4187,7 +4197,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_234</name>
+      <name>noloss_telephone_pole_234</name>
       <pose>
       24.6
       -3.7
@@ -4201,7 +4211,7 @@
 
 
             <include>
-      <name>telephone_pole_235</name>
+      <name>noloss_telephone_pole_235</name>
       <pose>
       66.45
       -41.3
@@ -4214,7 +4224,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_236</name>
+      <name>noloss_telephone_pole_236</name>
       <pose>
       87.9
       -41.3
@@ -4228,7 +4238,7 @@
 
 
             <include>
-      <name>telephone_pole_237</name>
+      <name>noloss_telephone_pole_237</name>
       <pose>
       66.45
       3.7
@@ -4241,7 +4251,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_238</name>
+      <name>noloss_telephone_pole_238</name>
       <pose>
       87.9
       3.7
@@ -4255,7 +4265,7 @@
 
 
             <include>
-      <name>telephone_pole_239</name>
+      <name>noloss_telephone_pole_239</name>
       <pose>
       66.45
       -3.7
@@ -4268,7 +4278,7 @@
     </include>
 
             <include>
-      <name>telephone_pole_240</name>
+      <name>noloss_telephone_pole_240</name>
       <pose>
       87.9
       -3.7
@@ -4286,7 +4296,7 @@
 
 
           <include>
-      <name>hatchback_blue_241</name>
+      <name>vehicle_hatchback_blue_241</name>
       <pose>
       -17.55
       -32.5226077364148
@@ -4299,7 +4309,7 @@
     </include>
 
           <include>
-      <name>pickup_242</name>
+      <name>vehicle_pickup_242</name>
       <pose>
       -12.450000000000001
       -20.895284503516816
@@ -4313,7 +4323,7 @@
 
 
           <include>
-      <name>suv_243</name>
+      <name>vehicle_suv_243</name>
       <pose>
       42.449999999999996
       -34.740594758017295
@@ -4326,7 +4336,7 @@
     </include>
 
           <include>
-      <name>pickup_244</name>
+      <name>vehicle_pickup_244</name>
       <pose>
       47.550000000000004
       -27.542267791140933
@@ -4340,7 +4350,7 @@
 
 
           <include>
-      <name>hatchback_blue_245</name>
+      <name>vehicle_hatchback_blue_245</name>
       <pose>
       -17.55
       32.93096512811481
@@ -4353,7 +4363,7 @@
     </include>
 
           <include>
-      <name>pickup_246</name>
+      <name>vehicle_pickup_246</name>
       <pose>
       -12.450000000000001
       30.68746326605413
@@ -4367,7 +4377,7 @@
 
 
           <include>
-      <name>hatchback_247</name>
+      <name>vehicle_hatchback_247</name>
       <pose>
       42.449999999999996
       28.0591330819157
@@ -4380,7 +4390,7 @@
     </include>
 
           <include>
-      <name>pickup_248</name>
+      <name>vehicle_pickup_248</name>
       <pose>
       47.550000000000004
       13.81490462229628
@@ -4396,7 +4406,7 @@
 
 
           <include>
-      <name>pickup_249</name>
+      <name>vehicle_pickup_249</name>
       <pose>
       -24.995741773170444
       -2.5500000000000003
@@ -4409,7 +4419,7 @@
     </include>
 
           <include>
-      <name>hatchback_250</name>
+      <name>vehicle_hatchback_250</name>
       <pose>
       -21.605234819116983
       2.5500000000000003
@@ -4423,7 +4433,7 @@
 
 
           <include>
-      <name>suv_251</name>
+      <name>vehicle_suv_251</name>
       <pose>
       21.43928977325851
       -2.5500000000000003
@@ -4436,7 +4446,7 @@
     </include>
 
           <include>
-      <name>hatchback_blue_252</name>
+      <name>vehicle_hatchback_blue_252</name>
       <pose>
       7.088345356237102
       2.5500000000000003
@@ -4450,7 +4460,7 @@
 
 
           <include>
-      <name>pickup_253</name>
+      <name>vehicle_pickup_253</name>
       <pose>
       81.52668900386297
       -2.5500000000000003
@@ -4463,7 +4473,7 @@
     </include>
 
           <include>
-      <name>suv_254</name>
+      <name>vehicle_suv_254</name>
       <pose>
       91.14288982830527
       2.5500000000000003
@@ -4474,6 +4484,52 @@
       </pose>
       <uri>model://suv</uri>
     </include>
+
+    <!-- (removed the leftover 'glass_wall' test obstacle: its link body was
+         commented out and the </model> tag was left inside that comment, so
+         the model never closed and the whole world failed to parse. The small
+         city's buildings act as the real obstacles now.) -->
+
+    <!-- UAV 1 - SITL instance 0 - ports 9002/9003 -->
+    <model name="iris_1_demo">
+      <pose>-18 2 0 0 0 0</pose>
+      <include>
+        <uri>model://iris_1</uri>
+      </include>
+    </model>
+
+    <!-- UAV 2 - SITL instance 1 - ports 9012/9013 -->
+    <model name="iris_2_demo">
+      <pose>-18 -2 0 0 0 0</pose>
+      <include>
+        <uri>model://iris_2</uri>
+      </include>
+    </model>
+
+    <!-- UAV 3 - SITL instance 2 - ports 9022/9023 -->
+    <model name="iris_3_demo">
+      <pose>-14 0 0 0 0 0</pose>
+      <include>
+        <uri>model://iris_3</uri>
+      </include>
+    </model>
+
+
+    <plugin name="obstacle_raycast" filename="libgazebo_obstacle_plugin.so">
+        <n_uavs>3</n_uavs>
+        <uav_prefix>iris_</uav_prefix>
+    </plugin>
+
+    <!-- Publishes ground-truth model poses on /gazebo/model_states so that
+         world_pos_publisher.py can relay them to /uav_world_positions. This
+         is what lets NS-3's UAV nodes track the drones as they fly (without
+         it, NS-3 stays frozen at its initial formation). -->
+    <plugin name="gazebo_ros_state" filename="libgazebo_ros_state.so">
+        <ros>
+            <namespace>/gazebo</namespace>
+        </ros>
+        <update_rate>20.0</update_rate>
+    </plugin>
 
   </world>
 </sdf>
