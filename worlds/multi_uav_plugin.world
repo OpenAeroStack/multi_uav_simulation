@@ -126,7 +126,7 @@
     </model>
 
 
-    <plugin name="obstacle_raycast" filename="libgazebo_obstacle_plugin.so">
+    <plugin name="obstacle_raycast" filename="libobstacle_raycast_plugin.so">
         <n_uavs>3</n_uavs>
         <uav_prefix>iris_</uav_prefix>
     </plugin>

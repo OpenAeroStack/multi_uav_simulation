@@ -11,22 +11,22 @@ find_package(geometry_msgs REQUIRED)
 find_package(gazebo_dev REQUIRED)   # Gazebo Classic 11 ROS2 integration package
 find_package(gazebo_ros REQUIRED)
 
-add_library(gazebo_obstacle_plugin SHARED
-  src/gazebo_obstacle_plugin.cc)
+add_library(obstacle_raycast_plugin SHARED
+  src/obstacle_raycast_plugin.cc)
 
-target_include_directories(gazebo_obstacle_plugin PUBLIC
+target_include_directories(obstacle_raycast_plugin PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   ${GAZEBO_INCLUDE_DIRS})
 
-target_link_libraries(gazebo_obstacle_plugin
+target_link_libraries(obstacle_raycast_plugin
   ${GAZEBO_LIBRARIES})
 
-ament_target_dependencies(gazebo_obstacle_plugin
+ament_target_dependencies(obstacle_raycast_plugin
   rclcpp std_msgs geometry_msgs gazebo_dev gazebo_ros)
 
-install(TARGETS gazebo_obstacle_plugin
+install(TARGETS obstacle_raycast_plugin
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
 
-ament_export_libraries(gazebo_obstacle_plugin)
+ament_export_libraries(obstacle_raycast_plugin)
 ament_package()

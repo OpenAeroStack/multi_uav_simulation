@@ -4,7 +4,7 @@
 
 // Relative include: CMakeLists adds gazebo_plugins/include to the include path,
 // so this resolves on any machine/checkout (was a hardcoded /home/ubuntu/... path).
-#include "gazebo_plugins/gazebo_obstacle_plugin.hh"
+#include "gazebo_plugins/obstacle_raycast_plugin.hh"
 
 
 namespace gazebo
@@ -17,7 +17,7 @@ void ObstacleRaycastPlugin::Load(physics::WorldPtr world, sdf::ElementPtr sdf)
   uav_prefix_ = sdf->HasElement("uav_prefix") ? sdf->Get<std::string>("uav_prefix") : "iris_";
 
   if (!rclcpp::ok()) rclcpp::init(0, nullptr);
-  ros_node_ = std::make_shared<rclcpp::Node>("gazebo_raycast_plugin");
+  ros_node_ = std::make_shared<rclcpp::Node>("obstacle_raycast_plugin");
 
   pos_sub_ = ros_node_->create_subscription<std_msgs::msg::Float32MultiArray>(
     "/uav_world_positions", 10,

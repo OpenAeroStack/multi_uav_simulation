@@ -183,7 +183,7 @@ drops them.
 
 ## 5. The Gazebo obstacle raycast plugin
 
-File: `gazebo_plugins/src/gazebo_obstacle_plugin.cc`. This is the component that
+File: `gazebo_plugins/src/obstacle_raycast_plugin.cc`. This is the component that
 turns *geometry* (a wall between two drones) into a *number* (dB of extra
 signal loss). It is a Gazebo **world plugin**, so it runs inside gzserver and
 has direct access to every object's true pose and collision shape.
@@ -598,7 +598,7 @@ looks better than a real radio would deliver.
 *Generated as a living description of the stack as it stands. Key files:
 `ns3/three_uav_tapbridge_obstacle_loss.cc`,
 `ns3/dynamic_obstacle_loss_model.{hh,cc}`,
-`gazebo_plugins/src/gazebo_obstacle_plugin.cc`,
+`gazebo_plugins/src/obstacle_raycast_plugin.cc`,
 `scripts/world_pos_publisher.py`, `scripts/pin_realtime.sh`,
 `scripts/iperf3_channel_test.sh`, `launch/launch_multi_uav_new.sh`,
 `worlds/multi_uav_plugin.world`.*

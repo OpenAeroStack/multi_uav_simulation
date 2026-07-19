@@ -32,6 +32,18 @@ public:
   // Called by the bridge whenever Gazebo reports a new obstacle reading
   void SetObstacleLoss(uint32_t nodeIdA, uint32_t nodeIdB, double lossDb);
 
+  // ADDED (model validation): deterministic snapshot of a link's current
+  // shadowing/fading state. Does NOT draw fading, so it can be logged
+  // alongside CalcRxPower() to decompose the total loss into its parts.
+  struct LinkLossInfo
+  {
+    double obstacleLossDb = 0.0;   // smoothed shadowing currently applied (dB)
+    bool   blocked        = false; // LoS (false) / NLoS (true) fading regime
+    double fadingM        = 0.0;   // Nakagami m in effect (MLos or MNlos)
+    bool   known          = false; // false if no report ever seen for this pair
+  };
+  LinkLossInfo GetLinkLossInfo(uint32_t nodeIdA, uint32_t nodeIdB) const;
+
 private:
   // ADDED: per-link state (smoothed loss + hysteresis LoS/NLoS flag)
   struct LinkState

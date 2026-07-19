@@ -67,15 +67,39 @@ void DynamicObstacleLossModel::SetObstacleLoss(uint32_t nodeIdA, uint32_t nodeId
   }
 }
 
+DynamicObstacleLossModel::LinkLossInfo
+DynamicObstacleLossModel::GetLinkLossInfo(uint32_t nodeIdA, uint32_t nodeIdB) const
+{
+  // Mirrors the state read inside DoCalcRxPower Step 3, but without drawing
+  // the Gamma fading -- purely deterministic, safe to log every sample.
+  LinkLossInfo info;
+  info.fadingM = m_mLos;  // default when the link has never been reported on
+  auto key = std::make_pair(std::min(nodeIdA, nodeIdB), std::max(nodeIdA, nodeIdB));
+  std::lock_guard<std::mutex> lock(m_mutex);
+  auto it = m_links.find(key);
+  if (it != m_links.end()) {
+    info.obstacleLossDb = it->second.smoothedLossDb;
+    info.blocked        = it->second.blocked;
+    info.fadingM        = it->second.blocked ? m_mNlos : m_mLos;
+    info.known          = true;
+  }
+  return info;
+}
+
 double DynamicObstacleLossModel::DoCalcRxPower(double txPowerDbm,
                                                 Ptr<MobilityModel> a,
                                                 Ptr<MobilityModel> b) const
 {
-  // Step 1: let the NEXT model in the chain (log-distance) compute the
-  // "normal" received power based on distance.
-  // (The static Nakagami model was REMOVED from the chain -- fading is now
-  // applied here in Step 4, with m chosen by line-of-sight state.)
-  double rxPowerDbm = const_cast<DynamicObstacleLossModel*>(this)->GetNext()->CalcRxPower(txPowerDbm, a, b);
+  // Step 1: take the incoming power as-is.
+  // NOTE (bug fix): the base class PropagationLossModel::CalcRxPower ALREADY
+  // walks the chain -- after this DoCalcRxPower returns, it calls
+  // m_next->CalcRxPower(result) on the log-distance model automatically.
+  // The previous version ALSO called GetNext()->CalcRxPower() here, which
+  // applied the log-distance path loss TWICE (~80 dB extra at 50 m, dropping
+  // every link far below RxSensitivity). We now apply only our own effects
+  // (obstacle shadowing + LoS-aware fading) and let the base class chain to
+  // log-distance exactly once.
+  double rxPowerDbm = txPowerDbm;
 
   // Step 2: find out which two node IDs this call is for.
   Ptr<Node> nodeA = a->GetObject<Node>();

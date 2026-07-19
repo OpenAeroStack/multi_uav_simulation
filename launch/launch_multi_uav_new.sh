@@ -7,7 +7,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Source portable setup
 source "$PROJECT_DIR/setup.sh"
 
-# ADDED: the obstacle raycast plugin (libgazebo_obstacle_plugin.so) lives in
+# ADDED: the obstacle raycast plugin (libobstacle_raycast_plugin.so) lives in
 # the colcon install tree, so Gazebo needs it on the plugin path
 WS_INSTALL="$(cd "$PROJECT_DIR/../.." && pwd)/install"
 export GAZEBO_PLUGIN_PATH="$WS_INSTALL/multi_uav_gazebo_plugins/lib:$GAZEBO_PLUGIN_PATH"

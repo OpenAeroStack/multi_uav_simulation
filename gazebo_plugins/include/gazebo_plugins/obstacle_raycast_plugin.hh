@@ -1,4 +1,4 @@
-// multi_uav_gazebo_plugins/include/multi_uav_gazebo_plugins/obstacle_raycast_plugin.hh
+// gazebo_plugins/include/gazebo_plugins/obstacle_raycast_plugin.hh
 #ifndef MULTI_UAV_GAZEBO_PLUGINS__OBSTACLE_RAYCAST_PLUGIN_HH_
 #define MULTI_UAV_GAZEBO_PLUGINS__OBSTACLE_RAYCAST_PLUGIN_HH_
 

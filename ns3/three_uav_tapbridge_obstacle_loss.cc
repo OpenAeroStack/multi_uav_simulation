@@ -29,12 +29,17 @@
 
 #include <thread>
 #include <atomic>
+#include <fstream>
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("ThreeUavTapBridge");
 
 static std::atomic<bool> g_rosRunning{true};
+
+// Per-link metrics log for offline model validation (opened in main() if
+// --csvPath is given). Written on the NS-3 main thread from PublishStats().
+static std::ofstream g_csv;
 
 // ───────────────────────────────────────────────────────────────────────
 // Ns3RosNode: a single rclcpp::Node living inside the NS-3 process.
@@ -68,6 +73,11 @@ public:
 
     m_rssiPub = this->create_publisher<std_msgs::msg::Float32MultiArray>(
       "/ns3_link_rssi", 10);
+
+    // ADDED: headline SNR metric, so the demo can show per-link SNR live
+    // (rqt/rosbag) without changing the existing RSSI layout above.
+    m_snrPub = this->create_publisher<std_msgs::msg::Float32MultiArray>(
+      "/ns3_link_snr", 10);
   }
 
   // Called by PublishStats() on the NS-3 main thread -- this is fine
@@ -77,6 +87,14 @@ public:
     std_msgs::msg::Float32MultiArray msg;
     msg.data = flatData;
     m_rssiPub->publish(msg);
+  }
+
+  // Flat layout [node_a, node_b, snr_dB, ...] -- same convention as RSSI.
+  void PublishSnr(const std::vector<float> & flatData)
+  {
+    std_msgs::msg::Float32MultiArray msg;
+    msg.data = flatData;
+    m_snrPub->publish(msg);
   }
 
 private:
@@ -125,17 +143,35 @@ private:
   rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr m_posSub;
   rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr m_obsSub;
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr m_rssiPub;
+  rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr m_snrPub;
 };
 
 // ───────────────────────────────────────────────────────────────────────
-// RSSI export (same logic as before, now publishes via Ns3RosNode
-// instead of zmq_send)
+// Per-link metrics export + model-validation logging.
+//
+// For each UAV pair we compute and record the full loss decomposition so the
+// composite result can be traced back to each model:
+//
+//   pathloss_rx  = Tx - L_pathloss                 (log-distance model alone)
+//   obstacle_dB  = smoothed shadowing              (from /link_obstacle_loss)
+//   faded_rx     = Tx - L_pathloss - obstacle_dB + fading   (full chain, 1 draw)
+//   fading_dB    = faded_rx - (pathloss_rx - obstacle_dB)   (the fading term)
+//   snr_dB       = faded_rx - noise_floor          (headline metric)
+//
+// The fading draw here is an independent realization from what data packets
+// see -- it samples the same Nakagami distribution, which is exactly what the
+// distribution-matching validation plot needs.
 // ───────────────────────────────────────────────────────────────────────
-void PublishStats(Ptr<PropagationLossModel> lossChainHead,
+void PublishStats(Ptr<DynamicObstacleLossModel> obstacleLoss,
+                   Ptr<PropagationLossModel> pathLossOnly,
+                   double noiseFloorDbm,
                    NodeContainer nodes,
                    std::shared_ptr<Ns3RosNode> rosNode)
 {
-    std::vector<float> flat;
+    std::vector<float> rssiFlat;
+    std::vector<float> snrFlat;
+    double now = Simulator::Now().GetSeconds();
+
     for (uint32_t i = 0; i < nodes.GetN(); i++)
     {
         for (uint32_t j = i + 1; j < nodes.GetN(); j++)
@@ -145,34 +181,81 @@ void PublishStats(Ptr<PropagationLossModel> lossChainHead,
             if (!mobI || !mobJ) continue;
 
             double txPowerDbm = 20.0;
-            double rxPower = lossChainHead->CalcRxPower(txPowerDbm, mobI, mobJ);
+
+            // Deterministic path-loss-only rx (log-distance model on its own).
+            double pathLossRx = pathLossOnly->CalcRxPower(txPowerDbm, mobI, mobJ);
+            // Full chain: path loss - obstacle shadowing + one fading draw.
+            double fadedRx = obstacleLoss->CalcRxPower(txPowerDbm, mobI, mobJ);
 
             uint32_t idI = nodes.Get(i)->GetId();
             uint32_t idJ = nodes.Get(j)->GetId();
 
-            // Flat layout: [node_a, node_b, rx_power_dbm, ...]
-            flat.push_back(static_cast<float>(idI));
-            flat.push_back(static_cast<float>(idJ));
-            flat.push_back(static_cast<float>(rxPower));
+            // Deterministic link state (no fading draw) for the decomposition.
+            auto info = obstacleLoss->GetLinkLossInfo(idI, idJ);
+            double deterministicRx = pathLossRx - info.obstacleLossDb;
+            double fadingDeltaDb   = fadedRx - deterministicRx;
+            double snrDb           = fadedRx - noiseFloorDbm;
+            double distance        = mobI->GetDistanceFrom(mobJ);
+
+            // Flat layouts: [node_a, node_b, value, ...]
+            rssiFlat.push_back(static_cast<float>(idI));
+            rssiFlat.push_back(static_cast<float>(idJ));
+            rssiFlat.push_back(static_cast<float>(fadedRx));
+
+            snrFlat.push_back(static_cast<float>(idI));
+            snrFlat.push_back(static_cast<float>(idJ));
+            snrFlat.push_back(static_cast<float>(snrDb));
+
+            if (g_csv.is_open())
+            {
+                g_csv << now << ',' << idI << ',' << idJ << ','
+                      << distance << ',' << pathLossRx << ','
+                      << info.obstacleLossDb << ',' << fadedRx << ','
+                      << fadingDeltaDb << ',' << snrDb << ','
+                      << (info.blocked ? 1 : 0) << ',' << info.fadingM << ','
+                      << (info.known ? 1 : 0) << '\n';
+            }
         }
     }
-    rosNode->PublishRssi(flat);
+    if (g_csv.is_open()) g_csv.flush();
 
-    Simulator::Schedule(Seconds(0.5), &PublishStats, lossChainHead, nodes, rosNode);
+    rosNode->PublishRssi(rssiFlat);
+    rosNode->PublishSnr(snrFlat);
+
+    Simulator::Schedule(Seconds(0.5), &PublishStats, obstacleLoss, pathLossOnly,
+                        noiseFloorDbm, nodes, rosNode);
 }
 
 int main(int argc, char *argv[])
 {
     // ── Command-line overrides ──────────────────────────────────────────────
-    std::string tapBase  = "tap-uav";
-    double      simTime  = 0;
-    double      distance = 50.0;
+    std::string tapBase    = "tap-uav";
+    double      simTime    = 0;
+    double      distance   = 50.0;
+    std::string csvPath    = "";      // empty -> no CSV logging
+    // Noise floor for SNR: kTB over the 802.11n 20 MHz channel plus a ~7 dB
+    // receiver noise figure => -174 + 10log10(20e6) + 7 ≈ -94 dBm.
+    double      noiseFloor = -94.0;
 
     CommandLine cmd;
-    cmd.AddValue("tapBase",  "TAP device name prefix",        tapBase);
-    cmd.AddValue("simTime",  "Sim duration (0=unlimited)",    simTime);
-    cmd.AddValue("distance", "Initial UAV separation metres", distance);
+    cmd.AddValue("tapBase",    "TAP device name prefix",        tapBase);
+    cmd.AddValue("simTime",    "Sim duration (0=unlimited)",    simTime);
+    cmd.AddValue("distance",   "Initial UAV separation metres", distance);
+    cmd.AddValue("csvPath",    "Per-link metrics CSV path (empty=off)", csvPath);
+    cmd.AddValue("noiseFloor", "Receiver noise floor dBm for SNR",      noiseFloor);
     cmd.Parse(argc, argv);
+
+    // ── Open the validation CSV (header row: one line per link per sample) ──
+    if (!csvPath.empty())
+    {
+        g_csv.open(csvPath);
+        if (g_csv.is_open())
+        {
+            g_csv << "t_sim,node_a,node_b,distance_m,pathloss_rx_dbm,"
+                     "obstacle_loss_db,faded_rx_dbm,fading_delta_db,snr_db,"
+                     "blocked,fading_m,known\n";
+        }
+    }
 
     // ── Global config ───────────────────────────────────────────────────────
     GlobalValue::Bind("SimulatorImplementationType",
@@ -275,10 +358,14 @@ int main(int argc, char *argv[])
     std::thread rosThread([rosNode]() {
         rclcpp::spin(rosNode);
     });
-    rosThread.detach();
+    // Joined (not detached) after rclcpp::shutdown() below, so the spin thread
+    // fully unwinds before Simulator::Destroy() tears down shared state.
+    // (detach() would race teardown against a still-running spin thread; join
+    // costs nothing at runtime since both run concurrently until shutdown.)
 
     Simulator::Schedule(Seconds(0.5), &PublishStats,
-                        Ptr<PropagationLossModel>(obstacleLoss), nodes, rosNode);
+                        obstacleLoss, Ptr<PropagationLossModel>(logDist),
+                        noiseFloor, nodes, rosNode);
 
     // ── Run ────────────────────────────────────────────────────────────────
     Simulator::Stop(simTime > 0
@@ -290,7 +377,11 @@ int main(int argc, char *argv[])
     Simulator::Run();
 
     g_rosRunning = false;
-    rclcpp::shutdown();
+    rclcpp::shutdown();   // makes rclcpp::spin() return
+
+    rosThread.join();     // wait for the spin thread to finish before teardown
+
+    if (g_csv.is_open()) g_csv.close();
 
     Simulator::Destroy();
     return 0;

@@ -106,12 +106,12 @@ colcon build --packages-select multi_uav_gazebo_plugins
 
 Success produces:
 ```
-install/multi_uav_gazebo_plugins/lib/libgazebo_obstacle_plugin.so
+install/multi_uav_gazebo_plugins/lib/libobstacle_raycast_plugin.so
 ```
 
 Verify the material logic is compiled in:
 ```bash
-strings install/multi_uav_gazebo_plugins/lib/libgazebo_obstacle_plugin.so \
+strings install/multi_uav_gazebo_plugins/lib/libobstacle_raycast_plugin.so \
   | grep -E '^(noloss|foliage|vehicle|concrete)$'
 ```
 
@@ -249,7 +249,7 @@ props barely changes.
 
 The plugin picks per-obstacle loss from a **keyword in the model's `<name>`** in
 the world file, so materials are author-controlled. Current map
-(`gazebo_obstacle_plugin.cc :: ComputeObstacleLoss`):
+(`obstacle_raycast_plugin.cc :: ComputeObstacleLoss`):
 
 | Keyword in `<name>` | Entry loss `L_e` | Meaning |
 |---|---|---|
@@ -278,7 +278,7 @@ line and **rebuild the plugin** (§3).
 | NS-3: `CreateTap(): Could not allocate tap device — Operation not permitted` | TAP devices don't exist (gone after reboot) | Re-run §6 `setup_netns_tap.sh`. Check first: `ip link show tap-uav1`. |
 | Gazebo loads an **empty** world / `Falling back on worlds/empty.world` | XML parse error in the `.world` | `xmllint --noout <world>` prints the exact bad line. (Add `xmllint --noout "$WORLD_PATH" \|\| exit 1` to the launch to catch it early.) |
 | `Unable to resolve uri[model://…]` / missing buildings | Gazebo can't find the city models | Ensure `~/small_city_gazebo_world/models` is on `GAZEBO_MODEL_PATH` (the launch adds it; if you moved the repo, fix `SMALL_CITY_DIR`). |
-| Plugin build: `fatal error: gazebo_plugins/…hh: No such file` | wrong include path | Include must be relative (`#include "gazebo_plugins/gazebo_obstacle_plugin.hh"`); rebuild with `colcon build`. |
+| Plugin build: `fatal error: gazebo_plugins/…hh: No such file` | wrong include path | Include must be relative (`#include "gazebo_plugins/obstacle_raycast_plugin.hh"`); rebuild with `colcon build`. |
 | Drones spawn but mission **hangs at "waiting for EKF"** / unstable takeoff | world physics too coarse / not lockstep-friendly | World must use `real_time_update_rate=-1` and `max_step_size=0.001` (already set in `small_city_base.world`). |
 | `Ctrl-C` doesn't stop NS-3 | SIGTERM doesn't interrupt `Simulator::Run()` | Stop it with `kill -9 <pid>` (find with `pgrep -f ns3.38-three`). |
 | `ros2 topic list` shows nothing (not even `/rosout`) | stale ROS 2 CLI daemon | `ros2 daemon stop && ros2 daemon start`, or add `--no-daemon`. |
@@ -293,8 +293,8 @@ line and **rebuild the plugin** (§3).
 ```
 multi_uav_simulation/
 ├── gazebo_plugins/        # obstacle raycast plugin (build with colcon) → §3
-│   ├── src/gazebo_obstacle_plugin.cc
-│   ├── include/gazebo_plugins/gazebo_obstacle_plugin.hh
+│   ├── src/obstacle_raycast_plugin.cc
+│   ├── include/gazebo_plugins/obstacle_raycast_plugin.hh
 │   ├── CMakeLists.txt  package.xml
 ├── ns3/                   # NS-3 scenario (copy into scratch/) → §4
 │   ├── three_uav_tapbridge_obstacle_loss.cc
