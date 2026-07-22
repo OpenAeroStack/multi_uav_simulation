@@ -3,15 +3,17 @@
 # ----------------------
 # Guaranteed data-plane test of the NS-3 obstacle-loss WiFi channel.
 # Pushes real iperf3 UDP traffic from uav1ns -> uav2ns THROUGH the NS-3
-# simulated 802.11n link, and shows throughput / packet-loss degrade when an
+# simulated 802.11a link, and shows throughput / packet-loss degrade when an
 # obstacle is injected on that link and recover when it is cleared.
 #
 # Run as a NORMAL user (NOT sudo) so the ROS publishes reach the NS-3 process,
 # which runs as your user. sudo is used internally only for `ip netns exec`.
 #
-# Prereqs (already true in your current session):
-#   - tap-uav1..3 + uav1ns/uav2ns/uav3ns exist (setup_netns_tap.sh)
-#   - the FIXED NS-3 binary is running:  --tapBase=tap-uav
+# Prereqs:
+#   - tap-gcs + tap-uav1..3 and uav1ns/uav2ns/uav3ns exist (setup_netns_tap.sh)
+#   - three_uav_tapbridge_integrated is running (default tap names)
+#   - NOTE: with the GCS present, NS-3 node 1 = UAV1 = 10.42.0.11 and
+#     node 2 = UAV2 = 10.42.0.12, so the addresses below are unchanged.
 #
 # Usage:  bash iperf3_channel_test.sh      (will prompt once for sudo password)
 
@@ -27,17 +29,22 @@ PORT=5201
 RATE=500K         # offered UDP load
 DUR=6             # seconds per phase
 
-pub_positions() {   # node0 @origin, node1 50 m east, node2 in formation
+# CHANGED (GCS added): ids are now NS-3 node ids -- 0 = GCS, 1..3 = UAV1..UAV3.
+# Under the old convention id 0 was UAV1, so these payloads would now move the
+# ground station and put the obstacle on a GCS link instead of the one carrying
+# the iperf traffic.
+pub_positions() {   # GCS on the ground, UAV1 @origin, UAV2 50 m east, UAV3 in formation
   for _ in 1 2 3; do
     ros2 topic pub --once /uav_world_positions std_msgs/msg/Float32MultiArray \
-      "{data: [0,0,0,10, 1,50,0,10, 2,25,43.3,10]}" >/dev/null 2>&1
+      "{data: [0,0,6,2.9, 1,0,0,10, 2,50,0,10, 3,25,43.3,10]}" >/dev/null 2>&1
   done
 }
 
-pub_obstacle() {    # $1 = dB on link 0-1; publish 25x so the EMA converges
+pub_obstacle() {    # $1 = dB on link 1-2 (UAV1<->UAV2, the iperf path);
+                    # publish 25x so the EMA converges
   for _ in $(seq 1 25); do
     ros2 topic pub --once /link_obstacle_loss std_msgs/msg/Float32MultiArray \
-      "{data: [0,1,$1]}" >/dev/null 2>&1
+      "{data: [1,2,$1]}" >/dev/null 2>&1
   done
 }
 

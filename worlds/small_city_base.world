@@ -4515,9 +4515,56 @@
     </model>
 
 
+    <!-- ══ Ground Control Station ═══════════════════════════════════════════
+         Node 0 in the shared id convention (ROS id == NS-3 node id).
+         The obstacle_raycast plugin now casts GCS<->UAV rays in addition to
+         UAV<->UAV ones, so this link is finally modelled instead of being
+         assumed permanently clear.
+
+         The model origin is the base of the cabinet; the RF link starts at the
+         antenna on top of the mast. That offset is <gcs_antenna_height> in the
+         plugin block below (2.9 m = 0.9 m cabinet + 2.0 m mast) and must match
+         world_pos_publisher.py's gcs_antenna_height parameter.
+
+         The name must stay free of material keywords (glass/wood/concrete/
+         metal/foliage/vehicle). The plugin filters this model out of ray hits
+         by name, so a keyword here would never be read anyway, but a rename
+         that dropped "gcs" would turn the station into an obstacle that
+         blocks its own links. -->
+    <model name="gcs">
+      <static>true</static>
+      <pose>-24 0 0 0 0 0</pose>
+      <link name="cabinet">
+        <pose>0 0 0.45 0 0 0</pose>
+        <collision name="cabinet_col">
+          <geometry><box><size>1.2 1.2 0.9</size></box></geometry>
+        </collision>
+        <visual name="cabinet_vis">
+          <geometry><box><size>1.2 1.2 0.9</size></box></geometry>
+          <material><script><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+      <link name="mast">
+        <pose>0 0 1.9 0 0 0</pose>
+        <collision name="mast_col">
+          <geometry><cylinder><radius>0.05</radius><length>2.0</length></cylinder></geometry>
+        </collision>
+        <visual name="mast_vis">
+          <geometry><cylinder><radius>0.05</radius><length>2.0</length></cylinder></geometry>
+          <material><script><name>Gazebo/Yellow</name></script></material>
+        </visual>
+      </link>
+    </model>
+
     <plugin name="obstacle_raycast" filename="libobstacle_raycast_plugin.so">
         <n_uavs>3</n_uavs>
         <uav_prefix>iris_</uav_prefix>
+        <!-- ADDED: ground station becomes node 0, so the pair loop covers the
+             three GCS<->UAV links as well as the three UAV<->UAV ones.
+             gcs_antenna_height must match world_pos_publisher.py. -->
+        <gcs_enabled>true</gcs_enabled>
+        <gcs_model>gcs</gcs_model>
+        <gcs_antenna_height>2.9</gcs_antenna_height>
     </plugin>
 
     <!-- Publishes ground-truth model poses on /gazebo/model_states so that

@@ -6,19 +6,29 @@ Fixes the missing position feed: nothing was publishing /uav_world_positions,
 so NS-3's UAV nodes stayed frozen at their initial formation while the drones
 actually flew (its distance path-loss never tracked the real separation).
 
-This node is the single source of truth for UAV world positions. It reads the
-drones' GROUND-TRUTH poses from Gazebo (gazebo_msgs/ModelStates, published by
-the libgazebo_ros_state.so world plugin) and republishes them on
+This node is the single source of truth for node world positions. It reads
+GROUND-TRUTH poses from Gazebo (gazebo_msgs/ModelStates, published by the
+libgazebo_ros_state.so world plugin) and republishes them on
 /uav_world_positions in the exact frame the obstacle ray-caster uses, as:
 
-    [id, x, y, z, id, x, y, z, ...]     (id 0-based, matching NS-3 node ids)
+    [id, x, y, z, id, x, y, z, ...]
 
 Both consumers subscribe to this:
-    - NS-3  (three_uav_tapbridge_obstacle_loss) -> moves its UAV nodes
-    - the Gazebo obstacle plugin                -> ray-casts from these poses
+    - NS-3  (three_uav_tapbridge_integrated) -> moves its nodes
+    - the Gazebo obstacle plugin             -> ray-casts from these poses
 
-Model naming convention (same as the plugin): UAV id k  ->  model "<prefix><k+1>"
-i.e. id 0 -> iris_1, id 1 -> iris_2, id 2 -> iris_3.
+NODE ID CONVENTION (CHANGED when the GCS was added -- ids are now identical to
+NS-3 node ids, so nothing anywhere applies an offset):
+
+    gcs_enabled=True  (default):  id 0 -> GCS,  id k>=1 -> model "<prefix>k"
+                                  i.e. 0=gcs, 1=iris_1, 2=iris_2, 3=iris_3
+    gcs_enabled=False (legacy):   id k    -> model "<prefix>(k+1)"
+                                  i.e. 0=iris_1, 1=iris_2, 2=iris_3
+
+The GCS is static, so its z is the model pose plus gcs_antenna_height -- the
+link starts at the antenna on top of the mast, not at the base of the cabinet.
+That offset must match <gcs_antenna_height> in the world's obstacle_raycast
+plugin block, or NS-3 and the ray-caster will disagree about where the GCS is.
 
 Prereq: the world must load the state plugin so /model_states exists, e.g. add
 to your .world (inside <world>):
@@ -30,8 +40,12 @@ to your .world (inside <world>):
 Run:  source /opt/ros/humble/setup.bash ; python3 world_pos_publisher.py
 Params (ros2 --ros-args -p name:=val):
     model_states_topic (default /gazebo/model_states)
-    uav_prefix (default iris_)   n_uavs (default 3)   rate_hz (default 10.0)
+    uav_prefix (default iris_)      n_uavs (default 3)   rate_hz (default 10.0)
+    gcs_enabled (default True)      gcs_model (default gcs)
+    gcs_antenna_height (default 2.9)   stale_after (default 2.0)
 """
+
+import time
 
 import rclpy
 from rclpy.node import Node
@@ -50,23 +64,51 @@ class WorldPosPublisher(Node):
         self.declare_parameter('uav_prefix', 'iris_')
         self.declare_parameter('n_uavs', 3)
         self.declare_parameter('rate_hz', 10.0)
+        # ADDED: ground control station as node 0.
+        self.declare_parameter('gcs_enabled', True)
+        self.declare_parameter('gcs_model', 'gcs')
+        self.declare_parameter('gcs_antenna_height', 2.9)
+        # Seconds without /model_states before this node stops publishing.
+        # Gazebo's state plugin runs at 20 Hz, so 2 s is ~40 missed frames.
+        self.declare_parameter('stale_after', 2.0)
 
         topic = self.get_parameter('model_states_topic').value
         self.prefix = self.get_parameter('uav_prefix').value
         self.n_uavs = int(self.get_parameter('n_uavs').value)
         rate = float(self.get_parameter('rate_hz').value)
+        self.gcs_enabled = bool(self.get_parameter('gcs_enabled').value)
+        self.gcs_model = self.get_parameter('gcs_model').value
+        self.gcs_h = float(self.get_parameter('gcs_antenna_height').value)
+        self.stale_after = float(self.get_parameter('stale_after').value)
 
         self._latest = None          # last ModelStates msg
+        self._latest_t = 0.0         # monotonic time it arrived
+        self._stale = False
         self._warned = False
+        self._gcs_warned = False
         self.sub = self.create_subscription(ModelStates, topic, self._on_states, 10)
         self.pub = self.create_publisher(Float32MultiArray, '/uav_world_positions', 10)
         self.timer = self.create_timer(1.0 / rate, self._tick)
         self.get_logger().info(
             f"Relaying {topic} -> /uav_world_positions "
             f"({self.n_uavs} UAVs, prefix '{self.prefix}', {rate:.0f} Hz)")
+        if self.gcs_enabled:
+            self.get_logger().info(
+                f"GCS enabled: model '{self.gcs_model}' -> id 0 "
+                f"(antenna +{self.gcs_h:.2f} m); UAVs are ids 1..{self.n_uavs}")
+        else:
+            self.get_logger().warn(
+                "GCS disabled -- legacy id convention (id 0 = first UAV). "
+                "NS-3 uses ids as-is (0=GCS), so its node 0 will be given "
+                "UAV1's position and node 3 will never be fed. Only use this "
+                "with a matching NS-3 build; there is no offset flag anymore.")
 
     def _on_states(self, msg):
         self._latest = msg
+        self._latest_t = time.monotonic()
+        if self._stale:
+            self.get_logger().info("/model_states is live again — resuming.")
+            self._stale = False
 
     def _tick(self):
         if self._latest is None:
@@ -76,17 +118,70 @@ class WorldPosPublisher(Node):
                 self._warned = True
             return
 
+        # ── Staleness guard ──────────────────────────────────────────────
+        # WITHOUT THIS, killing Gazebo does not stop this node: `self._latest`
+        # is never invalidated, so it happily rebroadcasts the last frame it
+        # ever saw at `rate_hz` forever. Downstream that is indistinguishable
+        # from a fleet hovering perfectly still — NS-3 keeps computing path
+        # loss from frozen coordinates, the recorder keeps logging a healthy
+        # `pos_age_s` because the TOPIC is live, and nothing anywhere reports
+        # a problem.
+        #
+        # Observed for real on 2026-07-21: gzserver had exited but this script
+        # was still publishing small_city_base.world's start-of-run poses, and
+        # silently corrupted a live-recorder test.
+        #
+        # Going silent is the right failure mode: NS-3's ApplyFeed() simply
+        # receives nothing, its integration check reports the missing nodes,
+        # and the recorder's pos_age_s starts climbing.
+        age = time.monotonic() - self._latest_t
+        if age > self.stale_after:
+            if not self._stale:
+                self.get_logger().error(
+                    f"/model_states has been silent for {age:.1f}s "
+                    f"(> stale_after={self.stale_after}s). Gazebo has probably "
+                    f"exited. NOT publishing stale positions — downstream would "
+                    f"read them as a stationary fleet.")
+                self._stale = True
+            return
+
         # Build a name -> index lookup once per tick (model set can change).
         names = list(self._latest.name)
         out = []
         found = 0
-        for uid in range(self.n_uavs):
-            want = f"{self.prefix}{uid + 1}"   # id 0 -> iris_1
-            idx = next((k for k, nm in enumerate(names) if nm.startswith(want)), None)
+
+        # ── node 0: GCS ──────────────────────────────────────────────────
+        # Static, but relayed on the same topic as everything else so NS-3 has
+        # ONE source of truth for every node position. Publishing it here also
+        # means NS-3 can never disagree with the ray-caster about where the
+        # ground station is.
+        if self.gcs_enabled:
+            idx = next((k for k, nm in enumerate(names)
+                        if nm.startswith(self.gcs_model)), None)
+            if idx is None:
+                if not self._gcs_warned:
+                    self.get_logger().warn(
+                        f"GCS model '{self.gcs_model}' not found in {len(names)} "
+                        f"Gazebo models — GCS links will not be published. "
+                        f"Is the <model name=\"{self.gcs_model}\"> block in the world?")
+                    self._gcs_warned = True
+            else:
+                p = self._latest.pose[idx].position
+                out.extend([0.0, float(p.x), float(p.y), float(p.z) + self.gcs_h])
+                found += 1
+
+        # ── nodes 1..N: UAVs ─────────────────────────────────────────────
+        # With the GCS present, node id k maps to model "<prefix>k" (the +1
+        # that used to be here is absorbed by the shifted id).
+        base = 1 if self.gcs_enabled else 0
+        for k in range(self.n_uavs):
+            nid = base + k
+            want = f"{self.prefix}{k + 1}"     # always iris_1..iris_N
+            idx = next((j for j, nm in enumerate(names) if nm.startswith(want)), None)
             if idx is None:
                 continue
             p = self._latest.pose[idx].position
-            out.extend([float(uid), float(p.x), float(p.y), float(p.z)])
+            out.extend([float(nid), float(p.x), float(p.y), float(p.z)])
             found += 1
 
         if found:

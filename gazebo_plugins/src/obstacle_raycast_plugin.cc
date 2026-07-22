@@ -16,6 +16,18 @@ void ObstacleRaycastPlugin::Load(physics::WorldPtr world, sdf::ElementPtr sdf)
   n_uavs_     = sdf->HasElement("n_uavs") ? sdf->Get<int>("n_uavs") : 3;
   uav_prefix_ = sdf->HasElement("uav_prefix") ? sdf->Get<std::string>("uav_prefix") : "iris_";
 
+  // ADDED: ground control station as node 0.
+  gcs_enabled_ = sdf->HasElement("gcs_enabled") ? sdf->Get<bool>("gcs_enabled") : true;
+  gcs_model_   = sdf->HasElement("gcs_model")
+                 ? sdf->Get<std::string>("gcs_model") : "gcs";
+  gcs_antenna_height_ = sdf->HasElement("gcs_antenna_height")
+                        ? sdf->Get<double>("gcs_antenna_height") : 2.9;
+  gcs_fallback_pos_ = sdf->HasElement("gcs_position")
+                      ? sdf->Get<ignition::math::Vector3d>("gcs_position")
+                      : ignition::math::Vector3d(0, 0, 0);
+
+  n_nodes_ = n_uavs_ + (gcs_enabled_ ? 1 : 0);
+
   if (!rclcpp::ok()) rclcpp::init(0, nullptr);
   ros_node_ = std::make_shared<rclcpp::Node>("obstacle_raycast_plugin");
 
@@ -34,7 +46,13 @@ void ObstacleRaycastPlugin::Load(physics::WorldPtr world, sdf::ElementPtr sdf)
   update_conn_ = event::Events::ConnectWorldUpdateBegin(
     std::bind(&ObstacleRaycastPlugin::OnUpdate, this));
 
-  gzmsg << "ObstacleRaycastPlugin successfully loaded for " << n_uavs_ << " UAVs!" << std::endl;
+  gzmsg << "ObstacleRaycastPlugin loaded: " << n_uavs_ << " UAVs"
+        << (gcs_enabled_
+              ? " + GCS '" + gcs_model_ + "' (node 0, antenna +"
+                + std::to_string(gcs_antenna_height_) + " m)"
+              : " (no GCS)")
+        << " => " << n_nodes_ << " nodes, "
+        << (n_nodes_ * (n_nodes_ - 1) / 2) << " links" << std::endl;
 }
 
 ObstacleRaycastPlugin::~ObstacleRaycastPlugin() { rclcpp::shutdown(); }
@@ -57,11 +75,17 @@ void ObstacleRaycastPlugin::OnUpdate()
 
   std::lock_guard<std::mutex> lock(pos_mutex_);
 
+  // CHANGED: the loop now runs over ALL nodes, not just UAVs. With the GCS
+  // enabled node 0 is the ground station, so this covers the three GCS<->UAV
+  // links in addition to the three UAV<->UAV ones. Those GCS links matter
+  // most: the station sits at ground level in a city, so it is by far the
+  // likeliest link to be occluded -- and until now NS-3 modelled it as
+  // permanently clear line-of-sight.
   std_msgs::msg::Float32MultiArray loss_msg;
-  for (int i = 0; i < n_uavs_; i++) {
-    for (int j = i + 1; j < n_uavs_; j++) {
+  for (int i = 0; i < n_nodes_; i++) {
+    for (int j = i + 1; j < n_nodes_; j++) {
       ignition::math::Vector3d pos_i, pos_j;
-      if (!GetUavPosition(i, pos_i) || !GetUavPosition(j, pos_j)) continue;
+      if (!GetNodePosition(i, pos_i) || !GetNodePosition(j, pos_j)) continue;
 
       double extra_loss = CastRay(pos_i, pos_j, i, j);
       loss_msg.data.push_back(static_cast<float>(i));
@@ -76,9 +100,12 @@ void ObstacleRaycastPlugin::OnUpdate()
 
 // Positions received on /uav_world_positions take priority; when the topic
 // is silent (e.g. minimal bring-up without the bridge stack), fall back to
-// reading the UAV model's pose straight from the Gazebo world.
-// UAV id 0 -> model named "<uav_prefix>1..." (e.g. iris_1_demo).
-bool ObstacleRaycastPlugin::GetUavPosition(int id, ignition::math::Vector3d & out)
+// reading the model's pose straight from the Gazebo world.
+//
+// NODE ID CONVENTION (identical to NS-3 node ids -- no offset anywhere):
+//   gcs_enabled_  : id 0 -> GCS,        id k>=1 -> model "<uav_prefix>k"
+//   !gcs_enabled_ : id k    -> model "<uav_prefix>(k+1)"   (legacy behaviour)
+bool ObstacleRaycastPlugin::GetNodePosition(int id, ignition::math::Vector3d & out)
 {
   auto it = uav_positions_.find(id);
   if (it != uav_positions_.end()) {
@@ -86,7 +113,12 @@ bool ObstacleRaycastPlugin::GetUavPosition(int id, ignition::math::Vector3d & ou
     return true;
   }
 
-  std::string prefix = uav_prefix_ + std::to_string(id + 1);
+  if (gcs_enabled_ && id == 0) return GetGcsPosition(out);
+
+  // Model number for this node id: with the GCS present node 1 is "<prefix>1",
+  // so the +1 that used to be here is absorbed by the shifted id.
+  const int model_num = gcs_enabled_ ? id : id + 1;
+  std::string prefix = uav_prefix_ + std::to_string(model_num);
   for (const auto & model : world_->Models()) {
     if (model->GetName().rfind(prefix, 0) == 0) {
       out = model->WorldPose().Pos();
@@ -94,6 +126,42 @@ bool ObstacleRaycastPlugin::GetUavPosition(int id, ignition::math::Vector3d & ou
     }
   }
   return false;
+}
+
+// The GCS is static, so its pose comes straight from the world. The antenna
+// offset is added here because the model's origin is the base of the cabinet
+// while the link actually originates at the top of the mast.
+bool ObstacleRaycastPlugin::GetGcsPosition(ignition::math::Vector3d & out)
+{
+  for (const auto & model : world_->Models()) {
+    if (model->GetName().rfind(gcs_model_, 0) == 0) {
+      out = model->WorldPose().Pos();
+      out.Z() += gcs_antenna_height_;
+      return true;
+    }
+  }
+  // Model not in the world -- use the configured fallback so the GCS links are
+  // still evaluated rather than silently disappearing from the loss message.
+  out = gcs_fallback_pos_;
+  out.Z() += gcs_antenna_height_;
+  return true;
+}
+
+// Entities that are never real RF obstacles:
+//   - the ground plane
+//   - UAV bodies/rotors (own or a fellow fleet member's)
+//   - the GCS cabinet and mast (a link must not be blocked by its own antenna
+//     support; the structure is small enough that shadowing OTHER links with
+//     it is not worth the false positives)
+//   - "noloss"-tagged thin street furniture (poles, signs, hydrants, postbox)
+// Shared by the forward cast in CastRay() and the backward cast in
+// ObstacleThickness() so the two can never diverge.
+bool ObstacleRaycastPlugin::IsFilteredEntity(const std::string & name) const
+{
+  return name.find("ground_plane") != std::string::npos ||
+         name.find(uav_prefix_)    != std::string::npos ||
+         name.find("noloss")       != std::string::npos ||
+         (gcs_enabled_ && name.find(gcs_model_) != std::string::npos);
 }
 
 double ObstacleRaycastPlugin::CastRay(const ignition::math::Vector3d & start,
@@ -128,14 +196,10 @@ double ObstacleRaycastPlugin::CastRay(const ignition::math::Vector3d & start,
     // Strict Distance Bound : Ignore hits that are further away than the destination UAV
     if(dist_from_start > (link_len - 0.5)) return 0.0;
 
-    // Ground plane and UAV models (own body or a fellow fleet member's
-    // body/rotors) are never real obstacles -- step past and re-cast.
-    // "noloss"-tagged props (thin street furniture: poles, signs, hydrants,
-    // dumpster, postbox) are treated the same way: they contribute zero loss
-    // and must not mask a real obstacle behind them.
-    if(hit_entity.find("ground_plane") != std::string::npos ||
-       hit_entity.find(uav_prefix_)   != std::string::npos ||
-       hit_entity.find("noloss")      != std::string::npos) {
+    // Filtered entities (ground, UAV bodies, the GCS structure, "noloss"
+    // props) are never real obstacles -- step past and re-cast so they cannot
+    // mask a genuine obstacle behind them. See IsFilteredEntity().
+    if (IsFilteredEntity(hit_entity)) {
       traveled = dist_from_start + 0.1;
       continue;
     }
@@ -150,8 +214,11 @@ double ObstacleRaycastPlugin::CastRay(const ignition::math::Vector3d & start,
   return 0.0;
 }
 
-// Draws each UAV-pair ray as a line in gzclient via Gazebo's /marker
-// service: green = clear line-of-sight, red = blocked by an obstacle.
+// Draws each link as a line in gzclient via Gazebo's /marker service:
+//   red    = blocked by an obstacle (any link)
+//   green  = clear line-of-sight, UAV <-> UAV
+//   blue   = clear line-of-sight, GCS <-> UAV   (ADDED: so the three new
+//            ground-station links can be told apart at a glance)
 // View them in gzclient (markers render automatically, no menu needed).
 void ObstacleRaycastPlugin::PublishRayMarker(int id_a, int id_b,
                                               const ignition::math::Vector3d & start,
@@ -167,8 +234,9 @@ void ObstacleRaycastPlugin::PublishRayMarker(int id_a, int id_b,
   ignition::msgs::Set(marker.add_point(), start);
   ignition::msgs::Set(marker.add_point(), end);
 
+  const bool is_gcs_link = gcs_enabled_ && (id_a == 0 || id_b == 0);
   marker.mutable_material()->mutable_script()->set_name(
-    blocked ? "Gazebo/Red" : "Gazebo/Green");
+    blocked ? "Gazebo/Red" : (is_gcs_link ? "Gazebo/Blue" : "Gazebo/Green"));
 
   ign_node_.Request("/marker", marker);
 }
@@ -202,11 +270,8 @@ double ObstacleRaycastPlugin::ObstacleThickness(const ignition::math::Vector3d &
     double dist_from_end     = traveled + hit_dist;
     double exit_dist_from_start = link_len - dist_from_end;
 
-    // step past filtered entities (ground / UAV bodies / noloss props), same
-    // as the forward cast
-    if (hit_entity.find("ground_plane") != std::string::npos ||
-        hit_entity.find(uav_prefix_)   != std::string::npos ||
-        hit_entity.find("noloss")      != std::string::npos) {
+    // step past filtered entities, same rule as the forward cast
+    if (IsFilteredEntity(hit_entity)) {
       traveled = dist_from_end + 0.1;
       continue;
     }
