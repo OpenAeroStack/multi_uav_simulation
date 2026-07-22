@@ -31,8 +31,8 @@ Checks performed per link, per scenario
 
 Usage
   source /opt/ros/humble/setup.bash
-  python3 scripts/run_channel_validation.py            # all scenarios
-  python3 scripts/run_channel_validation.py --quick    # shorter runs
+  python3 scripts/test_scripts/run_channel_validation.py            # all scenarios
+  python3 scripts/test_scripts/run_channel_validation.py --quick    # shorter runs
 """
 
 import argparse
@@ -60,7 +60,10 @@ NOISE_FLOOR  = -94.0
 M_LOS        = 3.0
 M_NLOS       = 1.0
 
-REPO   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# This file lives in <repo>/scripts/test_scripts/, so the package root is two
+# levels up -- one level lands in scripts/ and silently scatters the evidence
+# into scripts/test_logs/.
+REPO   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUTDIR = os.path.join(REPO, "test_logs")
 NS3_BIN_DEFAULT = os.path.expanduser(
     "~/ns-3.3/build/scratch/multi_uav_simulation/"

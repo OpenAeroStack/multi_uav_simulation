@@ -41,9 +41,9 @@ Outputs (in test_logs/, timestamped so runs never overwrite each other):
 
 Usage
   source /opt/ros/humble/setup.bash
-  python3 scripts/record_live_links.py                 # until Ctrl-C
-  python3 scripts/record_live_links.py --duration 300  # 5 minutes
-  python3 scripts/record_live_links.py --tag mission1 --rate 5
+  python3 scripts/test_scripts/record_live_links.py                 # until Ctrl-C
+  python3 scripts/test_scripts/record_live_links.py --duration 300  # 5 minutes
+  python3 scripts/test_scripts/record_live_links.py --tag mission1 --rate 5
 """
 
 import argparse
@@ -59,7 +59,10 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# This file lives in <repo>/scripts/test_scripts/, so the package root is two
+# levels up -- one level lands in scripts/ and silently scatters the evidence
+# into scripts/test_logs/.
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUTDIR_DEFAULT = os.path.join(REPO, "test_logs")
 
 NODE_NAMES = {0: "GCS", 1: "UAV1", 2: "UAV2", 3: "UAV3"}

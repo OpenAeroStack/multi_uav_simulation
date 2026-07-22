@@ -29,9 +29,9 @@
 #  namespaces runs through NS-3. Phase 1 checks that this is still true.
 #
 #  Usage:
-#      bash scripts/verify_datapath.sh                 # full run
-#      bash scripts/verify_datapath.sh --skip-causal   # T0 only
-#      bash scripts/verify_datapath.sh --distance 25
+#      bash scripts/test_scripts/verify_datapath.sh                 # full run
+#      bash scripts/test_scripts/verify_datapath.sh --skip-causal   # T0 only
+#      bash scripts/test_scripts/verify_datapath.sh --distance 25
 #
 #  Requires sudo (for `ip netns exec`); prompts once up front.
 #  Do NOT have your own NS-3 running -- phase 2 needs it stopped, and this
@@ -40,7 +40,10 @@
 
 set -uo pipefail        # NOT -e: we want to collect every result, not stop
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# This script lives in <repo>/scripts/test_scripts/, so the package root is two
+# levels up -- one level lands in scripts/ and silently scatters the evidence
+# into scripts/test_logs/.
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUTDIR="$PROJECT_DIR/test_logs"
 NS3_BIN="${NS3_BIN:-$HOME/ns-3.3/build/scratch/multi_uav_simulation/ns3.38-three_uav_tapbridge_integrated-default}"
 
