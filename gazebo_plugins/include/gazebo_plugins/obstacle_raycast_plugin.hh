@@ -88,7 +88,7 @@ private:
   std::string gcs_model_;
   double      gcs_antenna_height_ = 2.9;
   ignition::math::Vector3d gcs_fallback_pos_;
-  //int         n_nodes_ = 3;
+  int         n_nodes_ = 3;
 
   // ADDED: the material equations are frequency dependent, so the carrier the
   // NS-3 side is running on has to be known here. Default matches the 802.11a
