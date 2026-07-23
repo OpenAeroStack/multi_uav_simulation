@@ -5,8 +5,75 @@
 
 set -euo pipefail
 
+# =============================================================================
+# Pre-flight cleanup: kill every process and network artifact from any
+# previous run before doing anything else. This runs unconditionally at
+# script start, independent of the trap-based cleanup() that runs on exit —
+# that one only knows about PIDs from *this* run, so anything left behind by
+# a crashed or interrupted previous run (e.g. city_mission, drone_bridge)
+# would otherwise silently block this run from starting.
+# =============================================================================
+echo "=== Pre-flight cleanup: clearing any leftover state from a previous run ==="
 
-SMALL_CITY_DIR="$HOME/simulation/small_city_gazebo_world"
+PREFLIGHT_PATTERNS=(
+    'city_mission'
+    'drone_bridge'
+    'micro_ros_agent'
+    '/build/sitl/bin/arducopter'
+    'scratch_three-uav_three-uav'
+    'three_uav_tapbridge_rt'
+    'ns3\.[0-9.]+-three-uav'
+    'gzserver'
+    'gzclient'
+)
+
+for pattern in "${PREFLIGHT_PATTERNS[@]}"; do
+    if sudo pkill -9 -f -- "$pattern" 2>/dev/null; then
+        echo "  killed: $pattern"
+    fi
+done
+
+# Also kill anything still living inside the namespaces directly, in case a
+# process was started under a name/pattern not covered above.
+for ns in gcsns uav1 uav2 uav3; do
+    if sudo ip netns list 2>/dev/null | awk '{print $1}' | grep -qx "$ns"; then
+        ns_pids="$(sudo ip netns pids "$ns" 2>/dev/null || true)"
+        if [[ -n "$ns_pids" ]]; then
+            echo "  killing leftover PIDs inside $ns: $ns_pids"
+            sudo kill -9 $ns_pids 2>/dev/null || true
+        fi
+    fi
+done
+
+# Tear down any leftover namespaces, bridges, taps, and veths from a
+# previous run's topology, so setup_ns3_wireless_topology.sh starts clean.
+for ns in gcsns uav1 uav2 uav3; do
+    sudo ip netns del "$ns" 2>/dev/null || true
+done
+for br in br-gcs br-uav1 br-uav2 br-uav3; do
+    sudo ip link set "$br" down 2>/dev/null || true
+    sudo ip link del "$br" type bridge 2>/dev/null || true
+done
+for link in tap-gcs tap-uav1 tap-uav2 tap-uav3 \
+            veth-gcs-host veth-uav1-host veth-uav2-host veth-uav3-host \
+            sim-uav1-host sim-uav2-host sim-uav3-host; do
+    sudo ip link del "$link" 2>/dev/null || true
+done
+
+# Free Gazebo's master port if something stale is still holding it.
+if sudo lsof -iTCP:11345 -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "  freeing stale Gazebo master port 11345"
+    sudo fuser -k 11345/tcp 2>/dev/null || true
+    sleep 1
+fi
+
+sleep 2
+echo "=== Pre-flight cleanup complete ==="
+echo ""
+
+
+
+SMALL_CITY_DIR="$HOME/FYP/small_city_gazebo"
 
 if [[ ! -d "$SMALL_CITY_DIR" ]]; then
     echo "ERROR: Small city Gazebo directory not found: $SMALL_CITY_DIR" >&2
@@ -453,7 +520,7 @@ fi
 
 echo "=== Starting Gazebo in the root namespace ==="
 
-SMALL_CITY_DIR="$HOME/simulation/small_city_gazebo_world"
+SMALL_CITY_DIR="$HOME/FYP/small_city_gazebo"
 WORLD_PATH="$PROJECT_DIR/worlds/city_3uav.world"
 
 if [[ ! -d "$SMALL_CITY_DIR" ]]; then
@@ -490,7 +557,7 @@ fi
 
 : >"$GAZEBO_LOG"
 
-gazebo --verbose "$WORLD_PATH" \
+gzserver --verbose "$WORLD_PATH" \
     -s libgazebo_ros_init.so \
     -s libgazebo_ros_factory.so \
     >"$GAZEBO_LOG" 2>&1 &
