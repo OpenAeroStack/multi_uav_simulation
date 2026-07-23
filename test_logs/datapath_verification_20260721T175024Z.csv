@@ -1,0 +1,17 @@
+phase,test_id,description,expected,observed,result
+0,T0.0a,"NS-3 binary present and executable","exists","/home/ubuntu/ns-3.3/build/scratch/multi_uav_simulation/ns3.38-three_uav_tapbridge_integrated-default",PASS
+0,T0.0b,"network namespaces exist","uav1ns uav2ns uav3ns","all present",PASS
+1,T0.1a,"each tap is enslaved to its own bridge","tap-X in br-X","correct",PASS
+1,T0.1b,"no unexpected members on the node bridges","tap + veth only","clean",PASS
+1,T0.1c,"host has no IP on the node bridges","none","none",PASS
+1,T0.1d,"peer is on-link, not routed","no 'via' gateway","10.42.0.12 dev veth1n src 10.42.0.11 uid 0 ",PASS
+2,T0.1,"ping fails with NS-3 stopped (no bypass path)","100% loss","100% loss",PASS
+3,T0.2a,"NS-3 attached to the TAP devices (carrier up)","carrier on tap-uav1","up",PASS
+4,T0.2,"ping succeeds with NS-3 running","<=20% loss","0% loss",PASS
+4,T0.3,"RTT above the host-loopback floor",">= 0.30 ms","min 0.671 ms, avg 2.186 ms",PASS
+4,T0.3b,"RTT distribution (informational)","-","min/avg/mdev = 0.671/2.186/3.528 ms",INFO
+5,T0.4a,"NS-3 PHY received frames (snrLogFile rows)",">0 rows","371 rows",PASS
+5,T0.4b,"host TAP carried new traffic during this test",">0 bytes","tap-uav1 +1022 B",PASS
+6,T0.5a,"60 dB obstacle kills the tested link",">=80% loss","100% loss",PASS
+6,T0.5b,"control link 1<->3 unaffected (specificity)","<=20% loss","0% -> 0%",PASS
+6,T0.5c,"link recovers when the obstacle is cleared","<=20% loss","0% loss",PASS

@@ -318,9 +318,10 @@ from m=3 to m=1.
 
 ## 9. Test and validation scripts (`scripts/test_scripts/`)
 
-All of these write to `test_logs/`, which is **git-ignored** — it is
-regenerable evidence, not source. `test_logs/README.md` documents the output
-formats and the known gaps in the current evidence.
+All of these write to `test_logs/`. Everything in there is regenerated evidence
+rather than source — delete the directory and re-run to reproduce it.
+`test_logs/README.md` documents the output formats and the known gaps in the
+current evidence.
 
 | Script | Needs Gazebo? | What it does |
 |---|---|---|
@@ -455,7 +456,7 @@ multi_uav_simulation/
 │       ├── iperf3_channel_test.sh      # data-plane test
 │       ├── sweep_test.py               # obstacle-loss sweep past a wall
 │       └── pin_realtime.sh             # CPU pinning / governor
-├── test_logs/             # generated evidence (git-ignored); see its README
+├── test_logs/             # generated validation evidence; see its README
 ├── launch/launch_multi_uav_new.sh                   # Gazebo + SITL + relay → §7
 ├── setup.sh               # env (edit ARDUPILOT_HOME) → §5
 ├── architecture.md        # how it all works
