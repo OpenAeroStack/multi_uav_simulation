@@ -12,7 +12,8 @@ sleep 2
 
 for dev in tap-gcs tap-uav1 tap-uav2 tap-uav3 \
            br-gcs  br-uav1  br-uav2  br-uav3  \
-           veth0h  veth1h   veth2h   veth3h; do
+           veth0h  veth1h   veth2h   veth3h   \
+           sim1h sim2h sim3h; do
   sudo ip link del "$dev" 2>/dev/null || true
 done
 
