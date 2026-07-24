@@ -4556,8 +4556,47 @@
       <pose>209.73 -154.73 16.60 0 0 0</pose>
     </include>
 
-    
+    <include>
+      <uri>model://human_female_2</uri>
+      <name>target_approach_1</name>
+      <static>true</static>
+      <pose>-60 -20 0 0 0 0</pose>
+    </include>
 
+    <include>
+      <uri>model://human_male_1</uri>
+      <name>target_downtown_1</name>
+      <static>true</static>
+      <pose>18 10 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://human_female_1</uri>
+      <name>target_downtown_2</name>
+      <static>true</static>
+      <pose>-30 20 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://human_male_2</uri>
+      <name>target_downtown_3</name>
+      <static>true</static>
+      <pose>70 20 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://human_female_2</uri>
+      <name>target_downtown_4</name>
+      <static>true</static>
+      <pose>92 -12 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://human_male_1</uri>
+      <name>target_mountain_3</name>
+      <static>true</static>
+      <pose>175 -60 0 0 0 0</pose>
+    </include>
 
 
   </world>

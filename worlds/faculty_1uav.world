@@ -106,5 +106,19 @@
         <uri>model://iris_1</uri>
       </include>
     </model>
+
+    <include>
+      <uri>model://human_male_1</uri>
+      <name>human_1</name>
+      <static>true</static>
+      <pose>-30 0 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://human_female_1</uri>
+      <name>human_2</name>
+      <static>true</static>
+      <pose>45 20 0 0 0 0</pose>
+    </include>
   </world>
 </sdf>

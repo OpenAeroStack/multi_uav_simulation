@@ -89,9 +89,9 @@ RUN_USER="${SUDO_USER:-$USER}"
 NS3_LOG="/tmp/ns3_stdout.log"
 TAP_READY_TIMEOUT_SEC="${TAP_READY_TIMEOUT_SEC:-30}"
 AGENT_READY_TIMEOUT_SEC="${AGENT_READY_TIMEOUT_SEC:-20}"
-DDS_TOPIC_TIMEOUT_SEC="${DDS_TOPIC_TIMEOUT_SEC:-60}"
-SITL_REACHABLE_TIMEOUT_SEC="${SITL_REACHABLE_TIMEOUT_SEC:-60}"
-GAZEBO_STARTUP_SEC="${GAZEBO_STARTUP_SEC:-20}"
+DDS_TOPIC_TIMEOUT_SEC="${DDS_TOPIC_TIMEOUT_SEC:-90}"
+SITL_REACHABLE_TIMEOUT_SEC="${SITL_REACHABLE_TIMEOUT_SEC:-90}"
+GAZEBO_STARTUP_SEC="${GAZEBO_STARTUP_SEC:-50}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
 TAPS=(tap-gcs tap-uav1 tap-uav2 tap-uav3)
 AGENT_PIDS=()
@@ -557,7 +557,7 @@ fi
 
 : >"$GAZEBO_LOG"
 
-gzserver --verbose "$WORLD_PATH" \
+gazebo --verbose "$WORLD_PATH" \
     -s libgazebo_ros_init.so \
     -s libgazebo_ros_factory.so \
     >"$GAZEBO_LOG" 2>&1 &
@@ -594,8 +594,6 @@ launch_sitl() {
         sudo -H -u "$RUN_USER" \
         bash -c 'cd "$1" && shift && exec "$@"' sitl-shell \
         "$work_dir" \
-        strace -ff -tt -s 256\
-        -o "$work_dir/strace" \
         "$BINARY" \
         --wipe \
         --model gazebo-iris \
