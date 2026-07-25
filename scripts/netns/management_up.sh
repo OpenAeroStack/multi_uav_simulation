@@ -32,6 +32,8 @@ setup_mgmt_link() {
   ip link set "$VETH_NS" netns "$NS"
   ip netns exec "$NS" ip addr add "$NS_IP" dev "$VETH_NS" 2>/dev/null || true
   ip netns exec "$NS" ip link set "$VETH_NS" up
+  ethtool -K "$VETH_HOST" rx off tx off sg off tso off gso off gro off 2>/dev/null || true
+  ip netns exec "$NS" ethtool -K "$VETH_NS" rx off tx off sg off tso off gso off gro off 2>/dev/null || true
 }
 
 # UAV1: root=172.31.1.1  <->  uav1ns=172.31.1.2
