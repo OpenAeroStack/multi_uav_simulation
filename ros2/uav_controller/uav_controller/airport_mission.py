@@ -29,12 +29,14 @@ Collision avoidance:
   They are vertically separated from liftoff — no mid-air crossing.
 
 Cluster status published to /cluster/status every 2 seconds.
-Camera feeds: /uav2/camera/image_raw, /uav3/camera/image_raw
 
-Launch script drone_bridge params required:
-  UAV1: takeoff_altitude:=40.0
-  UAV2: takeoff_altitude:=35.0   ← must be lower than UAV3
-  UAV3: takeoff_altitude:=40.0
+Camera feeds relayed through cluster head:
+  /uav1/camera/image_raw  →  /cluster/cam/uav1
+  /uav2/camera/image_raw  →  /cluster/cam/uav2
+  /uav3/camera/image_raw  →  /cluster/cam/uav3
+
+Ground station subscribes only to /cluster/* topics.
+Original /uavN/camera/image_raw topics remain available simultaneously.
 
 Usage:
     Run AFTER all 3 bridges show: ✓ DDS GPS flowing
@@ -48,7 +50,7 @@ import time
 import rclpy
 from rclpy.node import Node
 from std_srvs.srv import Trigger
-from sensor_msgs.msg import NavSatFix
+from sensor_msgs.msg import NavSatFix, Image
 from std_msgs.msg import Float32, String, Bool
 from geographic_msgs.msg import GeoPoint
 
@@ -83,7 +85,7 @@ def haversine_m(lat1, lon1, lat2, lon2):
 
 HEAD_ALT       = 50.0   # m — cluster head altitude
 PATROL_ALT     = 40.0   # m — members patrol altitude
-PATROL_DIST    = 150.0  # m — patrol radius from spawn (increased from 80m)
+PATROL_DIST    = 150.0  # m — patrol radius from spawn
 HOLD_TIME      =  5.0   # seconds — hold at final waypoint before RTL
 WP_RADIUS      =  3.0   # metres arrival threshold
 
@@ -143,7 +145,26 @@ class AirportMission(Node):
             self.goto_pubs[uid] = self.create_publisher(
                 GeoPoint, f'{ns}/goto', 10)
 
+        # ── cluster status publisher ──────────────────────────────────────────
         self.pub_cluster = self.create_publisher(String, '/cluster/status', 10)
+
+        # ── camera relay: all 3 UAV feeds through cluster head ────────────────
+        # Publishers on /cluster/cam/uavN
+        self.pub_cam = {
+            1: self.create_publisher(Image, '/cluster/cam/uav1', 10),
+            2: self.create_publisher(Image, '/cluster/cam/uav2', 10),
+            3: self.create_publisher(Image, '/cluster/cam/uav3', 10),
+        }
+        # Subscribe to each UAV camera and relay — original topics still live
+        for uid in [1, 2, 3]:
+            self.create_subscription(
+                Image,
+                f'/uav{uid}/camera/image_raw',
+                self._make_cam_cb(uid),
+                10)
+        self.get_logger().info(
+            'Camera relay active: '
+            '/uav{1,2,3}/camera/image_raw → /cluster/cam/uav{1,2,3}')
 
         threading.Thread(target=self._run_all, daemon=True).start()
 
@@ -167,6 +188,12 @@ class AirportMission(Node):
 
     def _make_armed_cb(self, uid):
         def cb(msg): self.states[uid].armed = msg.data
+        return cb
+
+    def _make_cam_cb(self, uid):
+        """Relay camera frame from /uavN to /cluster/cam/uavN."""
+        def cb(msg):
+            self.pub_cam[uid].publish(msg)
         return cb
 
     # ── helpers ───────────────────────────────────────────────────────────────
@@ -250,15 +277,13 @@ class AirportMission(Node):
             time.sleep(1.0)
             barrier_takeoff.wait()
 
-            # Climb to cluster head altitude and hover
             self.get_logger().info(f'[UAV1] Climbing to {HEAD_ALT}m cluster head position')
             self._fly_to(1, home_lat, home_lon, HEAD_ALT, 'Head Position')
 
-            # Start broadcasting cluster status
             cluster_timer = self.create_timer(2.0, self._publish_cluster_status)
             self.get_logger().info('[UAV1] ✓ Broadcasting /cluster/status every 2s')
+            self.get_logger().info('[UAV1] ✓ Camera relay active on /cluster/cam/uav{1,2,3}')
 
-            # Wait at barriers while members patrol
             barrier_patrol1.wait()
             barrier_patrol2.wait()
 
@@ -276,15 +301,6 @@ class AirportMission(Node):
             with errors_lock: errors.append((1, str(e)))
 
     def _mission_member(self, uid, bearing1, bearing2, label):
-        """
-        Member drone — takeoff (altitude set by bridge param), patrol two
-        waypoints, RTL.
-
-        Collision avoidance is handled by drone_bridge takeoff_altitude param:
-          UAV2: takeoff_altitude=35.0  → lands at 35m after takeoff
-          UAV3: takeoff_altitude=40.0  → lands at 40m after takeoff
-        They are vertically separated from liftoff with no crossing.
-        """
         s = self.states[uid]
         try:
             self.get_logger().info(f'[UAV{uid}] Member ({label}) — Waiting for GPS...')
@@ -294,23 +310,18 @@ class AirportMission(Node):
 
             home_lat, home_lon = s.lat, s.lon
 
-            # Phase 1 — takeoff to altitude defined in launch script bridge param
-            # UAV2 → 35m, UAV3 → 40m, already separated vertically
             self.get_logger().info(f'[UAV{uid}] Phase 1 — Takeoff')
             if not self._call_service(
                     self.takeoff_clients[uid], uid, '/takeoff', 90):
                 raise RuntimeError(f'UAV{uid} takeoff failed')
             time.sleep(1.0)
             barrier_takeoff.wait()
-            # UAV2 is at 35m, UAV3 is at 40m — 5m vertical gap, safe to move
 
-            # Phase 2 — fly to first patrol point at PATROL_ALT
             p1_lat, p1_lon = move_gps(home_lat, home_lon, PATROL_DIST, bearing1)
             self.get_logger().info(f'[UAV{uid}] Phase 2 — {label} patrol P1')
             self._fly_to(uid, p1_lat, p1_lon, PATROL_ALT, f'{label} P1')
             barrier_patrol1.wait()
 
-            # Phase 3 — fly to second patrol point
             p2_lat, p2_lon = move_gps(home_lat, home_lon, PATROL_DIST, bearing2)
             self.get_logger().info(f'[UAV{uid}] Phase 3 — {label} patrol P2')
             self._fly_to(uid, p2_lat, p2_lon, PATROL_ALT, f'{label} P2')
@@ -341,9 +352,15 @@ class AirportMission(Node):
         self.get_logger().info('║                                                  ║')
         self.get_logger().info('║  Collision avoidance via takeoff altitude:       ║')
         self.get_logger().info('║    UAV2 takeoff=35m, UAV3 takeoff=40m           ║')
-        self.get_logger().info('║    (set in launch script bridge params)          ║')
         self.get_logger().info('║                                                  ║')
-        self.get_logger().info('║  Monitor: ros2 topic echo /cluster/status        ║')
+        self.get_logger().info('║  Monitor telemetry:                              ║')
+        self.get_logger().info('║    ros2 topic echo /cluster/status               ║')
+        self.get_logger().info('║                                                  ║')
+        self.get_logger().info('║  Monitor cameras (via cluster head):             ║')
+        self.get_logger().info('║    ros2 run image_view image_view                ║')
+        self.get_logger().info('║      --ros-args -r image:=/cluster/cam/uav1     ║')
+        self.get_logger().info('║      --ros-args -r image:=/cluster/cam/uav2     ║')
+        self.get_logger().info('║      --ros-args -r image:=/cluster/cam/uav3     ║')
         self.get_logger().info('╚══════════════════════════════════════════════════╝')
         self.get_logger().info('')
         self.get_logger().info(
@@ -356,11 +373,11 @@ class AirportMission(Node):
                 name='UAV1-HEAD', daemon=True),
             threading.Thread(
                 target=self._mission_member,
-                args=(2, 180.0, 225.0, 'South'),   # UAV2 → South then SW
+                args=(2, 180.0, 225.0, 'South'),
                 name='UAV2-South', daemon=True),
             threading.Thread(
                 target=self._mission_member,
-                args=(3, 0.0, 45.0, 'North'),       # UAV3 → North then NE
+                args=(3, 0.0, 45.0, 'North'),
                 name='UAV3-North', daemon=True),
         ]
 
@@ -376,7 +393,7 @@ class AirportMission(Node):
             self.get_logger().error('╚══════════════════════════════════════╝')
         else:
             self.get_logger().info('╔══════════════════════════════════════╗')
-            self.get_logger().info('║  AIRPORT MISSION COMPLETE            ║')
+            self.get_logger().info('║  AIRPORT MISSION COMPLETE  ✅        ║')
             self.get_logger().info('╚══════════════════════════════════════╝')
 
 

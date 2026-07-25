@@ -513,7 +513,11 @@
       <link_name>iris::rotor_3</link_name>
     </plugin>
     <plugin name="arducopter_plugin" filename="libArduPilotPlugin.so">
-      <fdm_addr>127.0.0.1</fdm_addr>
+      <!-- UAV1 management link (UDP only):
+           SITL 172.31.1.2:9003 receives Gazebo FDM state.
+           Gazebo 172.31.1.1:9002 receives SITL servo output. -->
+      <listen_addr>172.31.1.1</listen_addr>
+      <fdm_addr>172.31.1.2</fdm_addr>
       <fdm_port_in>9002</fdm_port_in>
       <fdm_port_out>9003</fdm_port_out>
       <!--
@@ -604,12 +608,12 @@
         </inertia>
       </inertial>
       <sensor name="iris1_camera" type="camera">
-        <pose>0 0 0 0 1.5707963 0</pose>
+        <pose>0 0 0 0 1 0</pose>
         <camera>
-          <horizontal_fov>2.0</horizontal_fov>
+          <horizontal_fov>1.2</horizontal_fov>
           <image>
-            <width>640</width>
-            <height>480</height>
+            <width>1920</width>
+            <height>1080</height>
             <format>R8G8B8</format>
           </image>
           <clip>
@@ -626,7 +630,6 @@
           </ros>
           <camera_name>camera</camera_name>
           <frame_name>camera_optical_frame</frame_name>
-          <hack_baseline>0.07</hack_baseline>
         </plugin>
       </sensor>
     </link>

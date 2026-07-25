@@ -127,10 +127,14 @@
         </inertia>
       </inertial>
       <sensor name="iris4_camera" type="camera">
-        <pose>0 0 0 0 1.5707963 0</pose>
+        <pose>0 0 0 0 1 0</pose>
         <camera>
-          <horizontal_fov>2.0</horizontal_fov>
-          <image><width>640</width><height>480</height><format>R8G8B8</format></image>
+          <horizontal_fov>1.2</horizontal_fov>
+          <image>
+            <width>1920</width>
+            <height>1080</height>
+            <format>R8G8B8</format>
+          </image>
           <clip><near>0.05</near><far>15000</far></clip>
         </camera>
         <always_on>1</always_on>
@@ -140,7 +144,6 @@
           <ros><namespace>/uav4</namespace></ros>
           <camera_name>camera</camera_name>
           <frame_name>camera_optical_frame</frame_name>
-          <hack_baseline>0.07</hack_baseline>
         </plugin>
       </sensor>
     </link>

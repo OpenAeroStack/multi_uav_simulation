@@ -1,28 +1,49 @@
 """
 faculty_mission.py
 ------------------
-3-drone building sweep surveillance mission over
-Faculty of Engineering, University of Ruhuna.
+3-drone clustering surveillance mission at Faculty of Engineering,
+University of Ruhuna, Hapugala, Galle, Sri Lanka.
 
-GPS Origin: 6.07778°N, 80.20722°E (Admin Building front yard)
+GPS Origin: 6.0792673°N, 80.1921607°E
+  (Front entrance, Administration Building)
+
+Campus bounds (terrain mesh): ~382m (E-W) × 535m (N-S)
+All patrol waypoints stay within ~150m of origin — safely inside campus.
 
 Cluster roles:
-  UAV1 → Member: sweeps Dept Electrical + Mechanical area
-  UAV2 → CLUSTER HEAD: hovers over Admin Building, collects reports
-  UAV3 → Member: sweeps Dept Civil + Lecture Halls area
+  UAV1 → CLUSTER HEAD: hovers at 60m above campus center,
+                        aggregates and publishes member reports
+  UAV2 → Member North: patrols Main Gate / Guard Room area
+  UAV3 → Member South: patrols Electrical Dept / Civil Dept area
 
 Mission phases:
-  1. All 3 takeoff to 30m         ← barrier sync
-  2. UAV2 moves to cluster head position (center of campus)
-     UAV1 begins Electrical dept sweep
-     UAV3 begins Civil dept sweep   ← barrier sync (all at first WP)
-  3. UAV1 moves to Mechanical dept
-     UAV3 moves to Lecture Halls
-     UAV2 continues hovering        ← barrier sync (all at second WP)
-  4. All hold 5 seconds             ← barrier sync
-  5. All RTL simultaneously
+  1. All 3 takeoff simultaneously — vertically separated:
+       UAV1 → 45m,  UAV2 → 35m,  UAV3 → 40m
+       (set via drone_bridge takeoff_altitude param in launch script)
+
+  2. barrier_takeoff: all airborne
+     UAV1 climbs to 60m (head hover — stays here all mission)
+     UAV2 flies North ~130m @ 50m  ← toward Main Gate / Guard Room
+     UAV3 flies South ~130m @ 50m  ← toward Electrical / Civil Dept
+
+  3. barrier_patrol1: all reached first waypoints
+     UAV2 flies NW ~100m @ 50m  ← sweeps toward Library / Bo Tree
+     UAV3 flies SW ~100m @ 50m  ← sweeps toward Mech Workshop
+
+  4. barrier_patrol2: all reached second waypoints
+     All hold 5 seconds
+
+  5. barrier_hold → all RTL simultaneously
+
+Cluster status published to /cluster/status every 2 seconds.
+Camera feeds: /uav2/camera/image_raw, /uav3/camera/image_raw
+
+Campus reference (Gazebo coords):
+  North sector:  Main Gate (X=49, Y=38), Guard Room (X=37, Y=46)
+  South sector:  Electrical Dept (X=2, Y=-110), Civil Dept (X=-92, Y=-131)
 
 Usage:
+    Run AFTER all 3 bridges show: ✓ DDS GPS flowing
     ros2 run uav_controller faculty_mission
 """
 
@@ -38,70 +59,50 @@ from std_msgs.msg import Float32, String, Bool
 from geographic_msgs.msg import GeoPoint
 
 
-# ── GPS origin (world 0,0,0) ──────────────────────────────────────────────────
-# Faculty of Engineering, University of Ruhuna
-ORIGIN_LAT = 6.07778
-ORIGIN_LON = 80.20722
+# ── GPS helpers ───────────────────────────────────────────────────────────────
 
-# ── Waypoints (approximate GPS from Gazebo world coordinates) ─────────────────
-# Gazebo X = East, Y = North in ENU frame
-# 1 degree lat ≈ 111,320 m, 1 degree lon ≈ 111,320 * cos(lat) m
-# At lat 6.07778: cos(6.07778°) ≈ 0.9944
-# So 1 degree lon ≈ 110,700 m
-#
-# Conversion: gps_lat = ORIGIN_LAT + (Y_gazebo / 111320)
-#             gps_lon = ORIGIN_LON + (X_gazebo / 110700)
-
-def gazebo_to_gps(x_m, y_m):
-    """Convert Gazebo ENU metres offset to GPS coordinates."""
-    lat = ORIGIN_LAT + (y_m / 111320.0)
-    lon = ORIGIN_LON + (x_m / 110700.0)
-    return lat, lon
+def move_gps(lat, lon, distance_m, bearing_deg):
+    R       = 6_371_000.0
+    bearing = math.radians(bearing_deg)
+    lat1    = math.radians(lat)
+    lon1    = math.radians(lon)
+    lat2    = math.asin(
+        math.sin(lat1) * math.cos(distance_m / R) +
+        math.cos(lat1) * math.sin(distance_m / R) * math.cos(bearing))
+    lon2    = lon1 + math.atan2(
+        math.sin(bearing) * math.sin(distance_m / R) * math.cos(lat1),
+        math.cos(distance_m / R) - math.sin(lat1) * math.sin(lat2))
+    return math.degrees(lat2), math.degrees(lon2)
 
 
-# Campus waypoints (Gazebo X,Y offsets in metres from Admin Building)
-# These are approximate — tune after first test flight
-WP = {
-    # UAV2 cluster head — center of campus above Admin Building
-    'cluster_head':     gazebo_to_gps(  0,   30),   # central campus
+def haversine_m(lat1, lon1, lat2, lon2):
+    R    = 6_371_000.0
+    phi1 = math.radians(lat1); phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a    = (math.sin(dphi / 2) ** 2 +
+            math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2)
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-    # UAV1 sweep — Electrical + Mechanical (left/north side of campus)
-    'electrical':       gazebo_to_gps(-60,   80),   # Dept Electrical
-    'mechanical':       gazebo_to_gps(-40,  120),   # Dept Mechanical
-
-    # UAV3 sweep — Civil + Lecture Halls (right/east side of campus)
-    'civil':            gazebo_to_gps( 80,   60),   # Dept Civil
-    'lecture_halls':    gazebo_to_gps( 90,  110),   # Lecture Halls 1+2
-}
 
 # ── Mission config ────────────────────────────────────────────────────────────
-TAKEOFF_ALT   = 30.0   # m — clear building rooftops
-SWEEP_ALT     = 25.0   # m — members fly lower during sweep
-HEAD_ALT      = 35.0   # m — cluster head flies higher for comms coverage
-HOLD_TIME     = 8.0    # seconds
-WP_RADIUS     = 3.0    # metres arrival threshold
+
+HEAD_ALT      = 60.0   # m — cluster head hover altitude
+PATROL_ALT    = 50.0   # m — member patrol altitude
+PATROL_DIST_1 = 130.0  # m — first waypoint distance from origin
+PATROL_DIST_2 = 100.0  # m — second waypoint distance from first
+HOLD_TIME     =   5.0  # s  — hold at final waypoint before RTL
+WP_RADIUS     =   3.0  # m  — arrival threshold
 
 N_DRONES = 3
 
 barrier_takeoff = threading.Barrier(N_DRONES)
-barrier_sweep1  = threading.Barrier(N_DRONES)
-barrier_sweep2  = threading.Barrier(N_DRONES)
+barrier_patrol1 = threading.Barrier(N_DRONES)
+barrier_patrol2 = threading.Barrier(N_DRONES)
 barrier_hold    = threading.Barrier(N_DRONES)
 
 errors      = []
 errors_lock = threading.Lock()
-
-
-# ── GPS helpers ───────────────────────────────────────────────────────────────
-
-def haversine_m(lat1, lon1, lat2, lon2):
-    R = 6_371_000.0
-    phi1 = math.radians(lat1); phi2 = math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlam = math.radians(lon2 - lon1)
-    a = (math.sin(dphi/2)**2 +
-         math.cos(phi1)*math.cos(phi2)*math.sin(dlam/2)**2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 # ── Per-drone state ───────────────────────────────────────────────────────────
@@ -133,29 +134,23 @@ class FacultyMission(Node):
             s  = DroneState()
             self.states[uid] = s
 
-            self.create_subscription(
-                NavSatFix, f'{ns}/gps',
-                self._make_gps_cb(uid), 10)
-            self.create_subscription(
-                Float32, f'{ns}/rel_alt',
-                self._make_alt_cb(uid), 10)
-            self.create_subscription(
-                String, f'{ns}/mode',
-                self._make_mode_cb(uid), 10)
-            self.create_subscription(
-                Bool, f'{ns}/armed',
+            self.create_subscription(NavSatFix, f'{ns}/gps',
+                self._make_gps_cb(uid),   10)
+            self.create_subscription(Float32,   f'{ns}/rel_alt',
+                self._make_alt_cb(uid),   10)
+            self.create_subscription(String,    f'{ns}/mode',
+                self._make_mode_cb(uid),  10)
+            self.create_subscription(Bool,      f'{ns}/armed',
                 self._make_armed_cb(uid), 10)
 
             self.takeoff_clients[uid] = self.create_client(
                 Trigger, f'{ns}/takeoff')
-            self.rtl_clients[uid] = self.create_client(
+            self.rtl_clients[uid]     = self.create_client(
                 Trigger, f'{ns}/rtl')
-            self.goto_pubs[uid] = self.create_publisher(
+            self.goto_pubs[uid]       = self.create_publisher(
                 GeoPoint, f'{ns}/goto', 10)
 
-        # Cluster status publisher — cluster head publishes summary here
-        self.pub_cluster = self.create_publisher(
-            String, '/cluster/status', 10)
+        self.pub_cluster = self.create_publisher(String, '/cluster/status', 10)
 
         threading.Thread(target=self._run_all, daemon=True).start()
 
@@ -163,7 +158,7 @@ class FacultyMission(Node):
 
     def _make_gps_cb(self, uid):
         def cb(msg):
-            s = self.states[uid]
+            s        = self.states[uid]
             s.lat    = msg.latitude
             s.lon    = msg.longitude
             s.gps_ok = (msg.latitude != 0.0 or msg.longitude != 0.0)
@@ -184,25 +179,24 @@ class FacultyMission(Node):
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _call_service(self, client, uid, label, timeout=90.0):
-        self.get_logger().info(f'  [UAV{uid}] → {label}')
+        self.get_logger().info(f'  [UAV{uid}] -> {label}')
         if not client.wait_for_service(timeout_sec=5.0):
-            self.get_logger().error(
-                f'  [UAV{uid}] {label} not available')
+            self.get_logger().error(f'  [UAV{uid}] {label} not available')
             return False
         future = client.call_async(Trigger.Request())
         rclpy.spin_until_future_complete(self, future, timeout_sec=timeout)
         if future.result() is None:
-            self.get_logger().error(f'  [UAV{uid}] {label} no response')
+            self.get_logger().error(f'  [UAV{uid}] no response')
             return False
         result = future.result()
         if result.success:
-            self.get_logger().info(f'  [UAV{uid}] ✓ {result.message}')
+            self.get_logger().info(f'  [UAV{uid}] OK {result.message}')
         else:
-            self.get_logger().error(f'  [UAV{uid}] ✗ {result.message}')
+            self.get_logger().error(f'  [UAV{uid}] FAIL {result.message}')
         return result.success
 
     def _goto(self, uid, lat, lon, alt_m):
-        msg = GeoPoint()
+        msg           = GeoPoint()
         msg.latitude  = lat
         msg.longitude = lon
         msg.altitude  = float(alt_m)
@@ -210,10 +204,9 @@ class FacultyMission(Node):
 
     def _fly_to(self, uid, lat, lon, alt_m, label, timeout=120):
         self.get_logger().info(
-            f'  [UAV{uid}] → Flying to {label} '
-            f'({lat:.6f}, {lon:.6f}, {alt_m}m)')
+            f'  [UAV{uid}] -> {label} ({lat:.6f}, {lon:.6f}, {alt_m}m)')
         deadline  = time.time() + timeout
-        last_send = 0
+        last_send = 0.0
         while time.time() < deadline:
             if time.time() - last_send > 2.0:
                 self._goto(uid, lat, lon, alt_m)
@@ -224,66 +217,62 @@ class FacultyMission(Node):
                 alt_err = abs(s.rel_alt - alt_m)
                 if dist < WP_RADIUS and alt_err < 3.0:
                     self.get_logger().info(
-                        f'  [UAV{uid}] ✓ Reached {label} '
+                        f'  [UAV{uid}] Reached {label} '
                         f'(dist={dist:.1f}m alt={s.rel_alt:.1f}m)')
                     return True
             time.sleep(0.5)
-        self.get_logger().warn(f'  [UAV{uid}] ⚠ Timeout at {label}')
+        self.get_logger().warn(f'  [UAV{uid}] Timeout reaching {label}')
         return False
 
     def _publish_cluster_status(self):
-        """Cluster head (UAV2) publishes aggregated status."""
-        s1 = self.states[1]
-        s2 = self.states[2]
-        s3 = self.states[3]
-        msg = String()
+        s = self.states
+        if any(s[uid].lat is None for uid in [1, 2, 3]):
+            return
+        msg      = String()
         msg.data = (
             f'CLUSTER_STATUS | '
-            f'HEAD=UAV2({s2.lat:.5f},{s2.lon:.5f},{s2.rel_alt:.1f}m) | '
-            f'M1=UAV1({s1.lat:.5f},{s1.lon:.5f},{s1.rel_alt:.1f}m) | '
-            f'M2=UAV3({s3.lat:.5f},{s3.lon:.5f},{s3.rel_alt:.1f}m)'
+            f'HEAD=UAV1(alt={s[1].rel_alt:.1f}m mode={s[1].mode}) | '
+            f'M1=UAV2(lat={s[2].lat:.5f} lon={s[2].lon:.5f} alt={s[2].rel_alt:.1f}m) | '
+            f'M2=UAV3(lat={s[3].lat:.5f} lon={s[3].lon:.5f} alt={s[3].rel_alt:.1f}m)'
         )
         self.pub_cluster.publish(msg)
 
     # ── per-drone missions ────────────────────────────────────────────────────
 
     def _mission_uav1(self):
-        """UAV1 — Member: sweeps Dept Electrical then Mechanical."""
+        """UAV1 — CLUSTER HEAD. Takes off to 45m, climbs to 60m, hovers."""
         uid = 1
         s   = self.states[uid]
         try:
-            self.get_logger().info(f'[UAV1] Waiting for GPS...')
+            self.get_logger().info('[UAV1] CLUSTER HEAD — Waiting for GPS...')
             while s.lat is None: time.sleep(0.3)
-            self.get_logger().info(f'[UAV1] GPS ready. Waiting 15s for EKF...')
+            self.get_logger().info('[UAV1] GPS ready. Waiting 15s...')
             time.sleep(15.0)
 
-            # Takeoff
-            self.get_logger().info('[UAV1] Phase 1 — Takeoff to 30m')
-            if not self._call_service(
-                    self.takeoff_clients[1], 1, '/takeoff', 90):
+            home_lat, home_lon = s.lat, s.lon
+
+            self.get_logger().info('[UAV1] Phase 1 — Takeoff to 45m')
+            if not self._call_service(self.takeoff_clients[1], 1, '/takeoff', 90):
                 raise RuntimeError('UAV1 takeoff failed')
-            time.sleep(2.0)
+            time.sleep(1.0)
             barrier_takeoff.wait()
 
-            # Sweep 1 — Dept Electrical
-            self.get_logger().info('[UAV1] Phase 2 — Sweeping Dept Electrical')
-            lat, lon = WP['electrical']
-            self._fly_to(1, lat, lon, SWEEP_ALT, 'Dept Electrical')
-            barrier_sweep1.wait()
+            self.get_logger().info(f'[UAV1] Climbing to {HEAD_ALT}m cluster head position')
+            self._fly_to(1, home_lat, home_lon, HEAD_ALT, 'Head Hover (60m)')
 
-            # Sweep 2 — Dept Mechanical
-            self.get_logger().info('[UAV1] Phase 3 — Sweeping Dept Mechanical')
-            lat, lon = WP['mechanical']
-            self._fly_to(1, lat, lon, SWEEP_ALT, 'Dept Mechanical')
-            barrier_sweep2.wait()
+            cluster_timer = self.create_timer(2.0, self._publish_cluster_status)
+            self.get_logger().info('[UAV1] ✓ Broadcasting /cluster/status every 2s')
+            self.get_logger().info('[UAV1] Hovering — waiting for members to complete patrol...')
 
-            # Hold
-            self.get_logger().info(f'[UAV1] Phase 4 — Holding {HOLD_TIME}s')
+            barrier_patrol1.wait()
+            barrier_patrol2.wait()
+
+            self.get_logger().info(f'[UAV1] Holding {HOLD_TIME}s')
             time.sleep(HOLD_TIME)
             barrier_hold.wait()
 
-            # RTL
-            self.get_logger().info('[UAV1] Phase 5 — RTL')
+            cluster_timer.cancel()
+            self.get_logger().info('[UAV1] RTL')
             self._call_service(self.rtl_clients[1], 1, '/rtl')
             self.get_logger().info('[UAV1] ✅ Mission complete')
 
@@ -291,118 +280,89 @@ class FacultyMission(Node):
             self.get_logger().error(f'[UAV1] ERROR: {e}')
             with errors_lock: errors.append((1, str(e)))
 
-    def _mission_uav2(self):
-        """UAV2 — CLUSTER HEAD: hovers center, publishes cluster status."""
-        uid = 2
-        s   = self.states[uid]
+    def _mission_member(self, uid, bearing1, bearing2, label):
+        """
+        Member drone patrol.
+          bearing1: bearing from origin to P1
+          bearing2: bearing from P1 to P2
+          label:    sector name e.g. 'North'
+        Takeoff altitude set via drone_bridge param in launch script.
+        """
+        s = self.states[uid]
         try:
-            self.get_logger().info('[UAV2] CLUSTER HEAD — Waiting for GPS...')
+            self.get_logger().info(f'[UAV{uid}] Member ({label}) — Waiting for GPS...')
             while s.lat is None: time.sleep(0.3)
-            self.get_logger().info('[UAV2] GPS ready. Waiting 15s for EKF...')
+            self.get_logger().info(f'[UAV{uid}] GPS ready. Waiting 15s...')
             time.sleep(15.0)
 
-            # Takeoff
-            self.get_logger().info('[UAV2] Phase 1 — Takeoff to 30m')
-            if not self._call_service(
-                    self.takeoff_clients[2], 2, '/takeoff', 90):
-                raise RuntimeError('UAV2 takeoff failed')
-            time.sleep(2.0)
+            home_lat, home_lon = s.lat, s.lon
+
+            self.get_logger().info(f'[UAV{uid}] Phase 1 — Takeoff')
+            if not self._call_service(self.takeoff_clients[uid], uid, '/takeoff', 90):
+                raise RuntimeError(f'UAV{uid} takeoff failed')
+            time.sleep(1.0)
             barrier_takeoff.wait()
 
-            # Move to cluster head position (higher altitude for coverage)
-            self.get_logger().info(
-                '[UAV2] Phase 2 — Moving to cluster head position')
-            lat, lon = WP['cluster_head']
-            self._fly_to(2, lat, lon, HEAD_ALT, 'Cluster Head Position')
+            # Phase 2 — first patrol waypoint
+            p1_lat, p1_lon = move_gps(home_lat, home_lon, PATROL_DIST_1, bearing1)
+            self.get_logger().info(f'[UAV{uid}] Phase 2 — {label} P1 (bearing {bearing1}°)')
+            self._fly_to(uid, p1_lat, p1_lon, PATROL_ALT, f'{label} P1')
+            barrier_patrol1.wait()
 
-            # Start publishing cluster status every 2 seconds
-            self.get_logger().info(
-                '[UAV2] Publishing cluster status on /cluster/status')
-            cluster_timer = self.create_timer(2.0, self._publish_cluster_status)
+            # Phase 3 — second patrol waypoint from P1
+            p2_lat, p2_lon = move_gps(p1_lat, p1_lon, PATROL_DIST_2, bearing2)
+            self.get_logger().info(f'[UAV{uid}] Phase 3 — {label} P2 (bearing {bearing2}° from P1)')
+            self._fly_to(uid, p2_lat, p2_lon, PATROL_ALT, f'{label} P2')
+            barrier_patrol2.wait()
 
-            barrier_sweep1.wait()
-
-            # Hold at cluster head position while members do sweep 2
-            self.get_logger().info('[UAV2] Phase 3 — Holding at cluster head')
-            barrier_sweep2.wait()
-
-            # Hold
-            self.get_logger().info(f'[UAV2] Phase 4 — Holding {HOLD_TIME}s')
+            self.get_logger().info(f'[UAV{uid}] Holding {HOLD_TIME}s')
             time.sleep(HOLD_TIME)
             barrier_hold.wait()
 
-            # RTL
-            cluster_timer.cancel()
-            self.get_logger().info('[UAV2] Phase 5 — RTL')
-            self._call_service(self.rtl_clients[2], 2, '/rtl')
-            self.get_logger().info('[UAV2] ✅ Mission complete')
+            self.get_logger().info(f'[UAV{uid}] RTL')
+            self._call_service(self.rtl_clients[uid], uid, '/rtl')
+            self.get_logger().info(f'[UAV{uid}] ✅ Mission complete')
 
         except Exception as e:
-            self.get_logger().error(f'[UAV2] ERROR: {e}')
-            with errors_lock: errors.append((2, str(e)))
-
-    def _mission_uav3(self):
-        """UAV3 — Member: sweeps Dept Civil then Lecture Halls."""
-        uid = 3
-        s   = self.states[uid]
-        try:
-            self.get_logger().info('[UAV3] Waiting for GPS...')
-            while s.lat is None: time.sleep(0.3)
-            self.get_logger().info('[UAV3] GPS ready. Waiting 15s for EKF...')
-            time.sleep(15.0)
-
-            # Takeoff
-            self.get_logger().info('[UAV3] Phase 1 — Takeoff to 30m')
-            if not self._call_service(
-                    self.takeoff_clients[3], 3, '/takeoff', 90):
-                raise RuntimeError('UAV3 takeoff failed')
-            time.sleep(2.0)
-            barrier_takeoff.wait()
-
-            # Sweep 1 — Dept Civil
-            self.get_logger().info('[UAV3] Phase 2 — Sweeping Dept Civil')
-            lat, lon = WP['civil']
-            self._fly_to(3, lat, lon, SWEEP_ALT, 'Dept Civil')
-            barrier_sweep1.wait()
-
-            # Sweep 2 — Lecture Halls
-            self.get_logger().info('[UAV3] Phase 3 — Sweeping Lecture Halls')
-            lat, lon = WP['lecture_halls']
-            self._fly_to(3, lat, lon, SWEEP_ALT, 'Lecture Halls')
-            barrier_sweep2.wait()
-
-            # Hold
-            self.get_logger().info(f'[UAV3] Phase 4 — Holding {HOLD_TIME}s')
-            time.sleep(HOLD_TIME)
-            barrier_hold.wait()
-
-            # RTL
-            self.get_logger().info('[UAV3] Phase 5 — RTL')
-            self._call_service(self.rtl_clients[3], 3, '/rtl')
-            self.get_logger().info('[UAV3] ✅ Mission complete')
-
-        except Exception as e:
-            self.get_logger().error(f'[UAV3] ERROR: {e}')
-            with errors_lock: errors.append((3, str(e)))
+            self.get_logger().error(f'[UAV{uid}] ERROR: {e}')
+            with errors_lock: errors.append((uid, str(e)))
 
     # ── launch all threads ────────────────────────────────────────────────────
 
     def _run_all(self):
         self.get_logger().info('')
-        self.get_logger().info('╔══════════════════════════════════════════════════╗')
-        self.get_logger().info('║  Faculty of Engineering — UAV Surveillance Demo  ║')
-        self.get_logger().info('║  University of Ruhuna, Hapugala, Galle           ║')
-        self.get_logger().info('║                                                  ║')
-        self.get_logger().info('║  UAV1 → Member: Electrical + Mechanical sweep    ║')
-        self.get_logger().info('║  UAV2 → CLUSTER HEAD: Admin Building hover       ║')
-        self.get_logger().info('║  UAV3 → Member: Civil + Lecture Halls sweep      ║')
-        self.get_logger().info('╚══════════════════════════════════════════════════╝')
+        self.get_logger().info('╔══════════════════════════════════════════════════════════╗')
+        self.get_logger().info('║   Faculty of Engineering — Campus Surveillance Mission  ║')
+        self.get_logger().info('║   University of Ruhuna, Hapugala, Galle, Sri Lanka      ║')
+        self.get_logger().info('║                                                          ║')
+        self.get_logger().info('║  UAV1 → CLUSTER HEAD (60m hover above campus center)   ║')
+        self.get_logger().info('║  UAV2 → Member North: Main Gate / Guard Room            ║')
+        self.get_logger().info('║  UAV3 → Member South: Electrical Dept / Civil Dept      ║')
+        self.get_logger().info('║                                                          ║')
+        self.get_logger().info('║  Takeoff separation: UAV1=45m  UAV2=35m  UAV3=40m      ║')
+        self.get_logger().info('║                                                          ║')
+        self.get_logger().info('║  Monitor: ros2 topic echo /cluster/status                ║')
+        self.get_logger().info('╚══════════════════════════════════════════════════════════╝')
         self.get_logger().info('')
+        self.get_logger().info('[Mission] Waiting 15s for ROS2 subscriptions to connect...')
+        time.sleep(15.0)
 
         threads = [
-            threading.Thread(target=self._mission_uav1, name='UAV1', daemon=True),
-            threading.Thread(target=self._mission_uav2, name='UAV2', daemon=True),
-            threading.Thread(target=self._mission_uav3, name='UAV3', daemon=True),
+            threading.Thread(
+                target=self._mission_uav1,
+                name='UAV1-HEAD', daemon=True),
+            threading.Thread(
+                target=self._mission_member,
+                # UAV2 North: origin → North 130m, then NW 100m
+                # Covers: Main Gate (Y=+38), Guard Room (Y=+46)
+                args=(2, 0.0, 315.0, 'North'),
+                name='UAV2-North', daemon=True),
+            threading.Thread(
+                target=self._mission_member,
+                # UAV3 South: origin → South 130m, then SW 100m
+                # Covers: Electrical Dept (Y=-110), Civil Dept (Y=-131)
+                args=(3, 180.0, 225.0, 'South'),
+                name='UAV3-South', daemon=True),
         ]
 
         for t in threads: t.start()
@@ -410,15 +370,15 @@ class FacultyMission(Node):
 
         self.get_logger().info('')
         if errors:
-            self.get_logger().error('╔══════════════════════════════════════╗')
-            self.get_logger().error('║  MISSION FINISHED WITH ERRORS        ║')
+            self.get_logger().error('╔══════════════════════════════════════════╗')
+            self.get_logger().error('║  MISSION FINISHED WITH ERRORS            ║')
             for uid, err in errors:
                 self.get_logger().error(f'║  UAV{uid}: {err}')
-            self.get_logger().error('╚══════════════════════════════════════╝')
+            self.get_logger().error('╚══════════════════════════════════════════╝')
         else:
-            self.get_logger().info('╔══════════════════════════════════════╗')
-            self.get_logger().info('║  FACULTY SURVEILLANCE COMPLETE  ✅   ║')
-            self.get_logger().info('╚══════════════════════════════════════╝')
+            self.get_logger().info('╔══════════════════════════════════════════╗')
+            self.get_logger().info('║  FACULTY CAMPUS MISSION COMPLETE  ✅     ║')
+            self.get_logger().info('╚══════════════════════════════════════════╝')
 
 
 def main(args=None):

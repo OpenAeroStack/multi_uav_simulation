@@ -132,6 +132,8 @@
         </geometry>
      </collision>
 
+
+
     </link>
 
     <joint name='tilt_joint' type='revolute'>
