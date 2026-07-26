@@ -31,6 +31,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUN_USER="${SUDO_USER:-$USER}"
 NS3_LOG="/tmp/ns3_stdout.log"
+NS3_TX_POWER_DBM="${NS3_TX_POWER_DBM:-35.0}"
 MISSION_TIMEOUT_SEC="${MISSION_TIMEOUT_SEC:-900}"
 TAP_READY_TIMEOUT_SEC="${TAP_READY_TIMEOUT_SEC:-120}"
 AGENT_READY_TIMEOUT_SEC="${AGENT_READY_TIMEOUT_SEC:-120}"
@@ -629,7 +630,7 @@ echo "=== Starting real-time ns-3 wireless simulation ==="
     exec ./ns3 run "three_uav_tapbridge_integrated \
         --tap0=tap-gcs --tap1=tap-uav1 --tap2=tap-uav2 --tap3=tap-uav3 \
         --simTime=0 \
-        --txPowerDbm=20 --rxSensitivity=-82 --noiseFloor=-94 \
+        --txPowerDbm=${NS3_TX_POWER_DBM} --rxSensitivity=-82 --noiseFloor=-94 \
         --mLos=3.0 --mNlos=1.0 --emaAlpha=0.3 \
         --blockThreshDb=3.0 --clearThreshDb=1.0 \
         --delayMs=0.0 \
