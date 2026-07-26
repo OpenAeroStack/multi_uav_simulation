@@ -4514,6 +4514,48 @@
       </include>
     </model>
 
+    <!-- Ground control station -->
+    <!-- Node 0 in the shared id convention (ROS id == NS-3 node id).
+         The obstacle_raycast plugin now casts GCS<->UAV rays in addition to
+         UAV<->UAV ones, so this link is finally modelled instead of being
+         assumed permanently clear.
+
+         The model origin is the base of the cabinet; the RF link starts at the
+         antenna on top of the mast. That offset is <gcs_antenna_height> in the
+         plugin block below (2.9 m = 0.9 m cabinet + 2.0 m mast) and must match
+         world_pos_publisher.py's gcs_antenna_height parameter. -->
+    <model name="gcs">
+      <static>true</static>
+      <pose>-24 0 0 0 0 0</pose>
+      <link name="cabinet">
+        <pose>0 0 0.45 0 0 0</pose>
+        <collision name="cabinet_col">
+          <geometry><box><size>1.2 1.2 0.9</size></box></geometry>
+        </collision>
+        <visual name="cabinet_vis">
+          <geometry><box><size>1.2 1.2 0.9</size></box></geometry>
+          <material><script><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+      <!-- Link origin is the ANTENNA TOP (z = 2.9 = 0.9 cabinet + 2.0 mast) so
+           /gazebo/link_states reports the RF origin directly; world_pos_publisher
+           uses it for node 0 with no hardcoded height. The cylinder is offset
+           down by half its length (-1.0) so the mast still sits on the cabinet,
+           spanning 0.9 - 2.9 m. -->
+      <link name="mast">
+        <pose>0 0 2.9 0 0 0</pose>
+        <collision name="mast_col">
+          <pose>0 0 -1.0 0 0 0</pose>
+          <geometry><cylinder><radius>0.05</radius><length>2.0</length></cylinder></geometry>
+        </collision>
+        <visual name="mast_vis">
+          <pose>0 0 -1.0 0 0 0</pose>
+          <geometry><cylinder><radius>0.05</radius><length>2.0</length></cylinder></geometry>
+          <material><script><name>Gazebo/Yellow</name></script></material>
+        </visual>
+      </link>
+    </model>
+
 
     <plugin name="obstacle_raycast" filename="libobstacle_raycast_plugin.so">
         <n_uavs>3</n_uavs>

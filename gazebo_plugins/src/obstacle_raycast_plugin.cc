@@ -63,7 +63,7 @@ void ObstacleRaycastPlugin::Load(physics::WorldPtr world, sdf::ElementPtr sdf)
   // running a different band gets the right L_e/alpha without a recompile.
   freq_ghz_ = sdf->HasElement("freq_ghz") ? sdf->Get<double>("freq_ghz") : 5.18;
 
-  n_nodes_ = n_uavs_ + (gcs_enabled_ ? 1 : 0);
+  //n_nodes_ = n_uavs_ + (gcs_enabled_ ? 1 : 0);
 
   if (!rclcpp::ok()) rclcpp::init(0, nullptr);
   ros_node_ = std::make_shared<rclcpp::Node>("obstacle_raycast_plugin");
