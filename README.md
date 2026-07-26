@@ -409,6 +409,9 @@ python3 scripts/multi_drone_mission.py
 
 > Do not run MAVProxy and drone_bridge on the same TCP port simultaneously.
 
+> **Hardware-in-the-loop (RPi5 edge processing):** see
+> [README_EDGE_PROCESSING.md](README_EDGE_PROCESSING.md).
+
 ---
 
 ## ROS2 Package — uav_controller

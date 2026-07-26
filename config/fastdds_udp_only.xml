@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  fastdds_udp_only.xml
+  ────────────────────
+  Forces FastDDS onto UDPv4 only, disabling the shared-memory (SHM) transport.
+
+  WHY: on a single host, FastDDS delivers data between "same-host" participants
+  over /dev/shm. /dev/shm is NOT network-namespaced, so a publisher in uav1ns
+  and a subscriber in gcsns would hand data to each other through shared memory,
+  BYPASSING the ns-3 simulated Wi-Fi link entirely, making any latency/loss
+  measurement meaningless. Disabling SHM forces the traffic onto UDP, which is
+  routed by IP and therefore crosses the tap/bridge -> ns-3 channel.
+
+  Use it by exporting, before launching a ROS 2 node:
+      export FASTRTPS_DEFAULT_PROFILES_FILE=/home/anton/multi_uav_simulation/config/fastdds_udp_only.xml
+
+  NOTE: harmless (and unnecessary) on the real Pi 5, a separate machine that has
+  no shared /dev/shm with the host, so FastDDS already uses UDP there. Keep it for
+  the all-on-one-host simulation runs.
+-->
+<dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <profiles>
+    <transport_descriptors>
+      <transport_descriptor>
+        <transport_id>udp_only_transport</transport_id>
+        <type>UDPv4</type>
+      </transport_descriptor>
+    </transport_descriptors>
+
+    <participant profile_name="udp_only_participant" is_default_profile="true">
+      <rtps>
+        <userTransports>
+          <transport_id>udp_only_transport</transport_id>
+        </userTransports>
+        <!-- false = do NOT auto-add the built-in transports (which include SHM) -->
+        <useBuiltinTransports>false</useBuiltinTransports>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>
