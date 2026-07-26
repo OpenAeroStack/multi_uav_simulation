@@ -658,7 +658,7 @@ echo "=== Starting real-time ns-3 wireless simulation ==="
     exec ./ns3 run "three_uav_tapbridge_integrated \
         --tap0=tap-gcs --tap1=tap-uav1 --tap2=tap-uav2 --tap3=tap-uav3 \
         --simTime=0 \
-        --txPowerDbm=20 --rxSensitivity=-82 --noiseFloor=-94 \
+        --txPowerDbm=35 --rxSensitivity=-82 --noiseFloor=-94 \
         --mLos=3.0 --mNlos=1.0 --emaAlpha=0.3 \
         --blockThreshDb=3.0 --clearThreshDb=1.0 \
         --delayMs=0.0 \
