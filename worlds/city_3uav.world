@@ -4526,7 +4526,7 @@
          to this model origin when casting GCS links. -->
     <model name="gcs">
       <static>true</static>
-      <pose>-24 0 0 0 0 0</pose>
+      <pose>-70 -7 0 0 0 0</pose>
       <link name="cabinet">
         <pose>0 0 0.45 0 0 0</pose>
         <collision name="cabinet_col">

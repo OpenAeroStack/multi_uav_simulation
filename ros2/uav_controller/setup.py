@@ -22,6 +22,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'dynamic_cluster_manager = uav_controller.dynamic_cluster_manager:main',
             'drone_bridge     = uav_controller.drone_bridge:main',
             'takeoff_mission  = uav_controller.takeoff_mission:main',
             'l_mission       = uav_controller.l_mission:main',
