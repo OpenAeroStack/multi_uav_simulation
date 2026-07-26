@@ -1,13 +1,8 @@
 #!/bin/bash
-# Flat-mode waypoint finding launch — UAV1 only.
-# NOTE: no mavproxy and no sim_vehicle.py on purpose.
-#   - mavproxy exits immediately when backgrounded from a script (stdin EOF)
-#   - sim_vehicle.py kills SITL when its mavproxy exits
-#   - drone_bridge itself is the MAVLink TCP client that unlocks SITL
+# Flat-mode waypoint finding — UAV1 only
 
 echo "=== Cleanup ==="
 pkill -9 -f arducopter 2>/dev/null || true
-pkill -9 -f sim_vehicle 2>/dev/null || true
 pkill -9 -f mavproxy 2>/dev/null || true
 pkill -9 -f gzserver 2>/dev/null || true
 pkill -9 -f gzclient 2>/dev/null || true
@@ -27,6 +22,7 @@ export GAZEBO_RESOURCE_PATH=$HOME/FYP/multi_uav_sim:$HOME/FYP/multi_uav_sim/worl
 cleanup() {
   echo "Shutting down..."
   pkill -9 -f arducopter 2>/dev/null || true
+  pkill -9 -f mavproxy 2>/dev/null || true
   pkill -9 -f gzserver 2>/dev/null || true
   pkill -9 -f gzclient 2>/dev/null || true
   pkill -9 -f micro_ros_agent 2>/dev/null || true
@@ -35,14 +31,15 @@ cleanup() {
 }
 trap cleanup INT
 
-echo "=== [1/4] Gazebo ==="
-gazebo --verbose $HOME/FYP/multi_uav_sim/worlds/small_city_single_uav.world \
+echo "=== [1/5] Gazebo ==="
+gazebo --verbose \
+  $HOME/FYP/multi_uav_sim/worlds/small_city_single_uav.world \
   > /tmp/gazebo_wp.log 2>&1 &
-sleep 20
+echo "Waiting 25s for Gazebo to load..."
+sleep 25
 
-echo "=== [2/4] SITL (direct arducopter) ==="
-mkdir -p /tmp/sitl_wp
-cd /tmp/sitl_wp
+echo "=== [2/5] SITL ==="
+mkdir -p /tmp/sitl_wp && cd /tmp/sitl_wp
 "$ARDUPILOT_HOME/build/sitl/bin/arducopter" \
   --model gazebo-iris --speedup 1 --sysid 1 \
   --defaults "$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm,$HOME/FYP/multi_uav_sim/params/uav1_dds_flat.parm" \
@@ -50,26 +47,38 @@ cd /tmp/sitl_wp
   > /tmp/sitl_wp.log 2>&1 &
 sleep 5
 
-echo "=== [3/4] micro_ros_agent (port 2019) ==="
-ros2 run micro_ros_agent micro_ros_agent udp4 --port 2019 \
-  > /tmp/agent_wp.log 2>&1 &
-sleep 3
-
-echo "=== [4/4] drone_bridge (this unlocks SITL) ==="
-ros2 run uav_controller drone_bridge --ros-args -p uav_id:=1 \
-  > /tmp/bridge_wp.log 2>&1 &
+echo "=== [3/5] mavproxy (unlocks SITL on port 5760) ==="
+nohup mavproxy.py --master=tcp:127.0.0.1:5760 \
+  --logfile=/tmp/mav_wp.tlog \
+  < /dev/null > /tmp/mavproxy_wp.log 2>&1 &
+echo "Waiting 20s for SITL + GPS to initialize..."
 sleep 20
 
+echo "=== [4/5] micro_ros_agent ==="
+ros2 run micro_ros_agent micro_ros_agent udp4 --port 2019 \
+  > /tmp/agent_wp.log 2>&1 &
+sleep 5
+
+echo "=== [5/5] drone_bridge (port 5762 — mavproxy holds 5760) ==="
+ros2 run uav_controller drone_bridge --ros-args \
+  -p uav_id:=1 \
+  -p mavlink_port:=5762 \
+  > /tmp/bridge_wp.log 2>&1 &
+sleep 10
+
 echo ""
-echo "=== Status check ==="
-grep -E "DDS: Initialization passed|EKF3 IMU0 origin set" /tmp/sitl_wp.log \
-  || echo "  (DDS/EKF not ready yet — give it another 20s)"
-echo "--- services ---"
-ros2 service list | grep uav1 || echo "  (no /uav1 services yet)"
+echo "=== Status ==="
+grep -E "DDS: Initialization passed|EKF3 IMU0 origin|ArduPilot Ready" \
+  /tmp/sitl_wp.log || echo "SITL not ready yet"
+grep "Bridge ready\|GPS flowing\|Services" \
+  /tmp/bridge_wp.log || echo "Bridge not ready yet"
+ros2 topic hz /ap/v1/navsat --window 3 &
+HZ_PID=$!
+sleep 5
+kill $HZ_PID 2>/dev/null
 
 echo ""
 echo "================================================"
-echo "  Logs: /tmp/sitl_wp.log /tmp/bridge_wp.log /tmp/agent_wp.log"
 echo "  In a new terminal:"
 echo "    source /opt/ros/humble/setup.bash"
 echo "    source ~/FYP/multi_uav_sim/ros2/install/setup.bash"
