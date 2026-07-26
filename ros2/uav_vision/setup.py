@@ -18,6 +18,7 @@ setup(
             'camera_relay = uav_vision.camera_relay:main',
             'gcs_receiver = uav_vision.gcs_receiver:main',
             'metrics_logger = uav_vision.metrics_logger:main',
+            'detector       = uav_vision.detector:main',
         ],
     },
 )
