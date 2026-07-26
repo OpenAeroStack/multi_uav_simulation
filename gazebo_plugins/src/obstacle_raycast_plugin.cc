@@ -6,12 +6,15 @@
 // so this resolves on any machine/checkout (was a hardcoded /home/ubuntu/... path).
 #include "gazebo_plugins/obstacle_raycast_plugin.hh"
 
+#include <algorithm>
+#include <cmath>
 
 namespace gazebo
 {
 
 void ObstacleRaycastPlugin::Load(physics::WorldPtr world, sdf::ElementPtr sdf)
 {
+  stopping_.store(false, std::memory_order_release);
   this->world_ = world;
   n_uavs_     = sdf->HasElement("n_uavs") ? sdf->Get<int>("n_uavs") : 3;
   uav_prefix_ = sdf->HasElement("uav_prefix") ? sdf->Get<std::string>("uav_prefix") : "iris_";
@@ -30,6 +33,8 @@ void ObstacleRaycastPlugin::Load(physics::WorldPtr world, sdf::ElementPtr sdf)
 
   if (!rclcpp::ok()) rclcpp::init(0, nullptr);
   ros_node_ = std::make_shared<rclcpp::Node>("obstacle_raycast_plugin");
+  ros_executor_ =
+    std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
 
   pos_sub_ = ros_node_->create_subscription<std_msgs::msg::Float32MultiArray>(
     "/uav_world_positions", 10,
@@ -40,8 +45,8 @@ void ObstacleRaycastPlugin::Load(physics::WorldPtr world, sdf::ElementPtr sdf)
   loss_pub_ = ros_node_->create_publisher<std_msgs::msg::Float32MultiArray>(
     "/link_obstacle_loss", 10);
 
-  ros_thread_ = std::thread([this]() { rclcpp::spin(ros_node_); });
-  ros_thread_.detach();
+  ros_executor_->add_node(ros_node_);
+  ros_thread_ = std::thread([this]() { ros_executor_->spin(); });
 
   update_conn_ = event::Events::ConnectWorldUpdateBegin(
     std::bind(&ObstacleRaycastPlugin::OnUpdate, this));
@@ -55,11 +60,43 @@ void ObstacleRaycastPlugin::Load(physics::WorldPtr world, sdf::ElementPtr sdf)
         << (n_nodes_ * (n_nodes_ - 1) / 2) << " links" << std::endl;
 }
 
-ObstacleRaycastPlugin::~ObstacleRaycastPlugin() { rclcpp::shutdown(); }
+ObstacleRaycastPlugin::~ObstacleRaycastPlugin()
+{
+  // Stop new Gazebo callbacks first, then wait for any callback which was
+  // already running. This keeps world_, the publisher, and marker transport
+  // alive until OnUpdate has completely returned.
+  stopping_.store(true, std::memory_order_release);
+  update_conn_.reset();
+  {
+    std::lock_guard<std::mutex> update_lock(update_mutex_);
+  }
+
+  // cancel() wakes spin(); join is the lifetime barrier for the subscription
+  // callback's `this` capture. Do not shut down the process-wide ROS context:
+  // Gazebo may host other ROS-enabled plugins.
+  if (ros_executor_) {
+    ros_executor_->cancel();
+  }
+  if (ros_thread_.joinable()) {
+    ros_thread_.join();
+  }
+  if (ros_executor_ && ros_node_) {
+    ros_executor_->remove_node(ros_node_);
+  }
+
+  pos_sub_.reset();
+  loss_pub_.reset();
+  ros_node_.reset();
+  ros_executor_.reset();
+  world_.reset();
+}
 
 void ObstacleRaycastPlugin::UpdatePositions(const std::vector<float> & data)
 {
+  if (stopping_.load(std::memory_order_acquire)) return;
+
   std::lock_guard<std::mutex> lock(pos_mutex_);
+  if (stopping_.load(std::memory_order_relaxed)) return;
   uav_positions_.clear();
   for (size_t i = 0; i + 3 < data.size(); i += 4) {
     int id = static_cast<int>(data[i]);
@@ -69,11 +106,12 @@ void ObstacleRaycastPlugin::UpdatePositions(const std::vector<float> & data)
 
 void ObstacleRaycastPlugin::OnUpdate()
 {
+  std::lock_guard<std::mutex> update_lock(update_mutex_);
+  if (stopping_.load(std::memory_order_acquire) || !world_) return;
+
   auto now = world_->SimTime();
   if ((now - last_check_).Double() < 0.1) return;
   last_check_ = now;
-
-  std::lock_guard<std::mutex> lock(pos_mutex_);
 
   // CHANGED: the loop now runs over ALL nodes, not just UAVs. With the GCS
   // enabled node 0 is the ground station, so this covers the three GCS<->UAV
@@ -95,7 +133,7 @@ void ObstacleRaycastPlugin::OnUpdate()
       PublishRayMarker(i, j, pos_i, pos_j, extra_loss > 0.0);
     }
   }
-  if (!loss_msg.data.empty()) loss_pub_->publish(loss_msg);
+  if (!loss_msg.data.empty() && loss_pub_) loss_pub_->publish(loss_msg);
 }
 
 // Positions received on /uav_world_positions take priority; when the topic
@@ -107,10 +145,13 @@ void ObstacleRaycastPlugin::OnUpdate()
 //   !gcs_enabled_ : id k    -> model "<uav_prefix>(k+1)"   (legacy behaviour)
 bool ObstacleRaycastPlugin::GetNodePosition(int id, ignition::math::Vector3d & out)
 {
-  auto it = uav_positions_.find(id);
-  if (it != uav_positions_.end()) {
-    out = it->second;
-    return true;
+  {
+    std::lock_guard<std::mutex> lock(pos_mutex_);
+    auto it = uav_positions_.find(id);
+    if (it != uav_positions_.end()) {
+      out = it->second;
+      return true;
+    }
   }
 
   if (gcs_enabled_ && id == 0) return GetGcsPosition(out);
@@ -189,12 +230,18 @@ double ObstacleRaycastPlugin::CastRay(const ignition::math::Vector3d & start,
     ray->GetIntersection(hit_dist, hit_entity);
 
     // If the ray hit absolutely nothing
-    if(hit_entity.empty()) return 0.0;
+    if(hit_entity.empty()) {
+      LogLinkState(id_a, id_b, "", "clear", 0.0);
+      return 0.0;
+    }
 
     double dist_from_start = traveled + hit_dist;
 
     // Strict Distance Bound : Ignore hits that are further away than the destination UAV
-    if(dist_from_start > (link_len - 0.5)) return 0.0;
+    if(dist_from_start > (link_len - 0.5)) {
+      LogLinkState(id_a, id_b, "", "clear", 0.0);
+      return 0.0;
+    }
 
     // Filtered entities (ground, UAV bodies, the GCS structure, "noloss"
     // props) are never real obstacles -- step past and re-cast so they cannot
@@ -204,14 +251,56 @@ double ObstacleRaycastPlugin::CastRay(const ignition::math::Vector3d & start,
       continue;
     }
 
-    // Printing what was actually hit to the terminal for easy debugging
-    RCLCPP_INFO(ros_node_->get_logger(),
-      "Ray %d->%d hit obstacle : %s at distance %.2f",
-      id_a, id_b, hit_entity.c_str(), dist_from_start);
-
-    return ComputeObstacleLoss(hit_entity, dist_from_start, start, end);
+    const double loss =
+      ComputeObstacleLoss(hit_entity, dist_from_start, start, end);
+    LogLinkState(id_a, id_b, hit_entity,
+                 MaterialClassification(hit_entity), loss);
+    return loss;
   }
+  LogLinkState(id_a, id_b, "", "clear", 0.0);
   return 0.0;
+}
+
+std::string ObstacleRaycastPlugin::MaterialClassification(
+  const std::string & entity_name) const
+{
+  for (const char * material :
+       {"glass", "wood", "concrete", "metal", "foliage", "vehicle"}) {
+    if (entity_name.find(material) != std::string::npos) return material;
+  }
+  return entity_name.empty() ? "clear" : "unclassified";
+}
+
+void ObstacleRaycastPlugin::LogLinkState(
+  int id_a, int id_b, const std::string & entity_name,
+  const std::string & material, double loss_db)
+{
+  const auto key = std::minmax(id_a, id_b);
+  auto & previous = link_log_states_[key];
+  const bool blocked = loss_db > 0.0;
+  constexpr double kMaterialLossChangeDb = 0.5;
+  const bool changed =
+    (!previous.initialized && blocked) ||
+    (previous.initialized &&
+     (previous.blocked != blocked ||
+      previous.entity != entity_name ||
+      previous.material != material ||
+      std::abs(previous.loss_db - loss_db) >= kMaterialLossChangeDb));
+
+  if (changed) {
+    RCLCPP_INFO(
+      ros_node_->get_logger(),
+      "Ray %d->%d %s: entity=%s material=%s obstacle_loss=%.2f dB",
+      id_a, id_b, blocked ? "blocked" : "clear",
+      entity_name.empty() ? "none" : entity_name.c_str(),
+      material.c_str(), loss_db);
+  }
+
+  previous.initialized = true;
+  previous.blocked = blocked;
+  previous.entity = entity_name;
+  previous.material = material;
+  previous.loss_db = loss_db;
 }
 
 // Draws each link as a line in gzclient via Gazebo's /marker service:

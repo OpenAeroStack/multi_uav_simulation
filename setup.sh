@@ -8,14 +8,6 @@
 #   export ARDUPILOT_HOME="$HOME/ardupilot"
 #   export ARDUPILOT_HOME="/opt/ardupilot"
 #   export ARDUPILOT_HOME="/media/user/drive-uuid/ardupilot"
-<<<<<<< HEAD
-# REMOVED: pointed at a directory that does not exist on this machine:
-# export ARDUPILOT_HOME="$HOME/ardu_ws/src/ardupilot"
-# ADDED: the built ArduPilot tree actually lives here:
-export ARDUPILOT_HOME="$HOME/ardupilot"
-# ============================================================
-=======
-
 if [[ -z "${ARDUPILOT_HOME:-}" ]]; then
   if [[ -d "$HOME/ardu_ws/src/ardupilot" ]]; then
     ARDUPILOT_HOME="$HOME/ardu_ws/src/ardupilot"
@@ -25,7 +17,7 @@ if [[ -z "${ARDUPILOT_HOME:-}" ]]; then
 fi
 
 export ARDUPILOT_HOME="${ARDUPILOT_HOME:-$HOME/ardu_ws/src/ardupilot}"
->>>>>>> small-city-wimukthi
+# ============================================================
 
 export PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SMALL_CITY_GAZEBO_DIR="${SMALL_CITY_GAZEBO_DIR:-$(cd "$PROJECT_DIR/../small_city_gazebo_world" 2>/dev/null && pwd)}"

@@ -425,7 +425,6 @@ cleanup() {
     roots+=("${BRIDGE_PIDS[@]}")
     roots+=("${AGENT_PIDS[@]}")
     roots+=("${SITL_PIDS[@]}")
-    [[ -n "${GZCLIENT_PID:-}" ]] && roots+=("$GZCLIENT_PID")
     [[ -n "${GAZEBO_PID:-}" ]] && roots+=("$GAZEBO_PID")
     [[ -n "${WORLD_POS_PID:-}" ]] && roots+=("$WORLD_POS_PID")
     [[ -n "${NS3_PID:-}" ]] && roots+=("$NS3_PID")
@@ -815,51 +814,6 @@ wait_for_gazebo_fdm_ports() {
 }
 # END GAZEBO FDM READINESS FUNCTION
 
-
-# BEGIN SINGLE GAZEBO GUI FUNCTION
-start_gazebo_gui_once() {
-    if [[ "${ENABLE_GAZEBO_GUI:-1}" != "1" ]]; then
-        echo "Gazebo GUI disabled; gzserver remains headless."
-        return 0
-    fi
-
-    if [[ -n "${GZCLIENT_PID:-}" ]] &&
-       kill -0 "$GZCLIENT_PID" 2>/dev/null; then
-        echo "Gazebo GUI already running: PID=$GZCLIENT_PID"
-        return 0
-    fi
-
-    # Remove any untracked viewer left from an earlier run.
-    pkill -TERM -x gzclient 2>/dev/null || true
-    sleep 1
-
-    GZCLIENT_LOG="/tmp/gzclient_city.log"
-    : >"$GZCLIENT_LOG"
-
-    gzclient >"$GZCLIENT_LOG" 2>&1 &
-    GZCLIENT_PID=$!
-
-    local deadline=$((SECONDS + 20))
-
-    while (( SECONDS < deadline )); do
-        if ! kill -0 "$GZCLIENT_PID" 2>/dev/null; then
-            echo "ERROR: gzclient exited during startup." >&2
-            cat "$GZCLIENT_LOG" >&2 || true
-            return 1
-        fi
-
-        sleep 0.25
-    done
-
-    # Give the Gazebo marker service time to connect.
-    sleep 3
-
-    echo "Gazebo GUI started once:"
-    echo "  PID=$GZCLIENT_PID"
-    echo "  log=$GZCLIENT_LOG"
-}
-# END SINGLE GAZEBO GUI FUNCTION
-
 echo "=== Starting Gazebo in the root namespace ==="
 
 SMALL_CITY_DIR="$HOME/simulation/small_city_gazebo_world"
@@ -1227,8 +1181,21 @@ validate_obstacle_pipeline() {
         "six-link obstacle-loss payload with finite non-negative losses"
     wait_for_ns3_integration_check
     echo "Obstacle pipeline ready."
-    start_gazebo_gui_once
 
+# BEGIN DELAYED GAZEBO GUI START
+if [[ "$ENABLE_GAZEBO_GUI" == "1" ]]; then
+    : >/tmp/gzclient_city.log
+
+    gzclient >/tmp/gzclient_city.log 2>&1 &
+    GZCLIENT_PID=$!
+
+    echo "Gazebo GUI started after backend readiness:"
+    echo "  PID=$GZCLIENT_PID"
+    echo "  log=/tmp/gzclient_city.log"
+else
+    echo "Gazebo GUI disabled; gzserver continues headlessly."
+fi
+# END DELAYED GAZEBO GUI START
 
 }
 

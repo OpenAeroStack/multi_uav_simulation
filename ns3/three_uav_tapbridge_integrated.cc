@@ -482,7 +482,7 @@ void PublishStats(Ptr<DynamicObstacleLossModel> obstacleLoss,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  CheckIntegration -- one-shot co-simulation sanity report.
+//  CheckIntegration -- retrying co-simulation sanity report.
 //
 //  ADDED with the GCS. Every way this integration breaks looks identical from
 //  the outside: the simulation runs happily and produces plausible numbers
@@ -499,10 +499,12 @@ void PublishStats(Ptr<DynamicObstacleLossModel> obstacleLoss,
 //    - a publisher still on the legacy numbering (ids 0..2 = the UAVs)
 //    - the ROS graph simply not connected (wrong ROS_DOMAIN_ID, etc.)
 //
-//  Runs once, well after the 10 Hz feeds should have delivered something.
+//  Starts at about 10 s and retries while Gazebo and its ROS publishers come
+//  up.  Only the NS-3 simulation thread reads or applies the buffered feed.
 // ─────────────────────────────────────────────────────────────────────────────
 static void CheckIntegration(NodeContainer nodes,
-                             Ptr<DynamicObstacleLossModel> obstacleLoss)
+                             Ptr<DynamicObstacleLossModel> obstacleLoss,
+                             double finalTimeoutSec)
 {
   const uint32_t mask = g_posSeenMask.load();
   std::ostringstream missingPos, missingLoss;
@@ -527,21 +529,24 @@ static void CheckIntegration(NodeContainer nodes,
       return;
     }
 
-  NS_LOG_UNCOND("\n[integration check] ***** INCOMPLETE FEED *****");
-  if (!missingPos.str().empty())
-    NS_LOG_UNCOND("  No position ever received for:" << missingPos.str()
-      << "\n    -> these nodes are frozen at their initial coordinates, so"
-         "\n       every link to them uses the wrong distance.");
-  if (!missingLoss.str().empty())
-    NS_LOG_UNCOND("  No obstacle report ever received for link(s):"
-      << missingLoss.str()
-      << "\n    -> modelled as permanently clear line-of-sight (0 dB, LoS"
-         "\n       fading). Looks identical to a genuinely unobstructed link.");
-  NS_LOG_UNCOND("  Check: <model name=\"gcs\"> present in the world, "
-                "<gcs_enabled>true</gcs_enabled> in the\n"
-                "  obstacle_raycast plugin block, world_pos_publisher running, "
-                "and every publisher\n"
-                "  using ids 0=GCS / 1..N=UAVs.\n");
+  const double now = Simulator::Now().GetSeconds();
+  if (now < finalTimeoutSec)
+    {
+      NS_LOG_UNCOND("[integration check] WAITING: missing node IDs:"
+                    << (missingPos.str().empty() ? " none" : missingPos.str())
+                    << "; missing link pairs:"
+                    << (missingLoss.str().empty() ? " none" : missingLoss.str()));
+      Simulator::Schedule(Seconds(2.0), &CheckIntegration, nodes, obstacleLoss,
+                          finalTimeoutSec);
+      return;
+    }
+
+  NS_LOG_UNCOND("[integration check] FAILED: timed out after "
+                << finalTimeoutSec << " seconds.");
+  NS_LOG_UNCOND("  missing node IDs:"
+                << (missingPos.str().empty() ? " none" : missingPos.str()));
+  NS_LOG_UNCOND("  missing link pairs:"
+                << (missingLoss.str().empty() ? " none" : missingLoss.str()));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1073,15 +1078,15 @@ int main(int argc, char* argv[])
     Simulator::Schedule(Seconds(posLogPeriod), &LogNodePositions,
                         nodes, posLogPeriod);
 
-  // One-shot co-simulation sanity report. Only meaningful in ROS mode --
-  // standalone has no feeds to check, and would report everything missing.
-  // 10 s is ~100 messages at the publishers' 10 Hz, so anything absent by
-  // then is a misconfiguration rather than a slow start.
+  // Retrying co-simulation sanity report. Gazebo is deliberately launched
+  // after NS-3, so a temporary absence at t=10 s is expected.
   if (!standalone)
     {
       const double checkAt = (simTime > 0.0 && simTime < 10.0)
                              ? simTime * 0.9 : 10.0;
-      Simulator::Schedule(Seconds(checkAt), &CheckIntegration, nodes, obstacleLoss);
+      const double finalTimeout = 90.0;
+      Simulator::Schedule(Seconds(checkAt), &CheckIntegration, nodes,
+                          obstacleLoss, finalTimeout);
     }
 
   Simulator::Stop(simTime > 0.0 ? Seconds(simTime) : Seconds(3600.0 * 24));
@@ -1098,7 +1103,8 @@ int main(int argc, char* argv[])
                 "as-is, no offset");
   NS_LOG_UNCOND("  Links    : " << (nodes.GetN() * (nodes.GetN() - 1) / 2)
                 << " (3 GCS<->UAV + 3 UAV<->UAV)"
-                << (standalone ? "" : "; integration checked at t=10s"));
+                << (standalone ? ""
+                               : "; integration checked from t=10s to t=90s"));
   NS_LOG_UNCOND("  GCS init : (" << gcsX << ", " << gcsY << ", " << gcsZ << ") m"
                 << (standalone ? "  [pinned]"
                                : "  [placeholder until Gazebo reports node 0]"));

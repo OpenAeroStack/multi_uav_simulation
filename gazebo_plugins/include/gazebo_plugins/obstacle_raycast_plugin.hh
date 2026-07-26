@@ -9,8 +9,11 @@
 #include <ignition/msgs/marker.pb.h>
 #include <ignition/msgs/Utility.hh>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/executors/single_threaded_executor.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
+#include <atomic>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -24,7 +27,7 @@ class ObstacleRaycastPlugin : public WorldPlugin
 {
 public:
   void Load(physics::WorldPtr world, sdf::ElementPtr sdf) override;
-  ~ObstacleRaycastPlugin();
+  ~ObstacleRaycastPlugin() override;
 
 private:
   void UpdatePositions(const std::vector<float> & data);
@@ -48,6 +51,9 @@ private:
   double CastRay(const ignition::math::Vector3d & start,
                  const ignition::math::Vector3d & end,
                  int id_a, int id_b);
+  void LogLinkState(int id_a, int id_b, const std::string & entity_name,
+                    const std::string & material, double loss_db);
+  std::string MaterialClassification(const std::string & entity_name) const;
   double ComputeObstacleLoss(const std::string & entity_name,
                               double hit_dist,
                               const ignition::math::Vector3d & start,
@@ -86,12 +92,28 @@ private:
   common::Time last_check_;
 
   std::shared_ptr<rclcpp::Node> ros_node_;
+  std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> ros_executor_;
   rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr pos_sub_;
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr loss_pub_;
 
+  // ROS callbacks and the Gazebo update callback run on different threads.
+  // Position data has its own short-held lock; the lifecycle lock is a
+  // teardown barrier for an OnUpdate invocation already in progress.
   std::mutex pos_mutex_;
   std::map<int, ignition::math::Vector3d> uav_positions_;
+  std::mutex update_mutex_;
+  std::atomic<bool> stopping_{false};
   std::thread ros_thread_;
+
+  struct LinkLogState
+  {
+    bool initialized = false;
+    bool blocked = false;
+    std::string entity;
+    std::string material;
+    double loss_db = 0.0;
+  };
+  std::map<std::pair<int, int>, LinkLogState> link_log_states_;
 };
 
 }  // namespace gazebo
