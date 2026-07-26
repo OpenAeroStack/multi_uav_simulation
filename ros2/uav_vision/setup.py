@@ -16,7 +16,6 @@ setup(
     entry_points={
         'console_scripts': [
             'camera_relay = uav_vision.camera_relay:main',
-            'detector = uav_vision.detector:main',
             'gcs_receiver = uav_vision.gcs_receiver:main',
             'metrics_logger = uav_vision.metrics_logger:main',
         ],

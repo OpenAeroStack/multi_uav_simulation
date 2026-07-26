@@ -109,6 +109,7 @@ class CameraRelay(Node):
         self._latest_msg = None
 
         if self._mode == 'edge':
+
             self._pub.publish(msg)
 
         else:
@@ -124,6 +125,8 @@ class CameraRelay(Node):
                 out.header = msg.header
                 out.format = 'jpeg'
                 out.data = buf.tobytes()
+                # In ground mode, after creating the CompressedImage 'out':
+                out.header.frame_id = str(time.time())
                 self._pub.publish(out)
                 kb = len(out.data) / 1024
                 self.get_logger().info(
