@@ -17,9 +17,19 @@ A standalone Gazebo + ArduPilot SITL simulation for 3 UAVs. All Gazebo models ar
 
 ## Step 1 — Install Gazebo 11
 
+On a fresh Ubuntu 22.04 you first need the OSRF package repo (Gazebo 11 is not in Ubuntu's default repos):
+
 ```bash
+sudo mkdir -p /etc/apt/keyrings
+curl -sSL https://packages.osrfoundation.org/gazebo.key | sudo gpg --dearmor -o /etc/apt/keyrings/gazebo.gpg
+echo "deb [signed-by=/etc/apt/keyrings/gazebo.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/gazebo-stable.list
 sudo apt update
-sudo apt install gazebo11 libgazebo11-dev
+```
+
+Then install Gazebo Classic 11 (on jammy the OSRF metapackage is `gazebo`, not `gazebo11`):
+
+```bash
+sudo apt install -y gazebo libgazebo-dev
 ```
 
 Verify:

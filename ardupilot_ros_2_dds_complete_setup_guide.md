@@ -439,7 +439,7 @@ In MAVProxy:
 Switch to guided mode:
 
 ```text
-mode guided
+
 ```
 
 Arm:

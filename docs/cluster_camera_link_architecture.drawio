@@ -1,0 +1,167 @@
+<mxfile host="app.diagrams.net" type="device">
+  <diagram id="cluster-camera-link" name="Cluster Camera Link">
+    <mxGraphModel dx="1200" dy="780" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1850" pageHeight="740" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===================== TITLE ===================== -->
+        <mxCell id="title" value="Multi-UAV camera link over NS-3 &#8212; member drone &#8594; cluster head (no DDS on the wire)" style="text;html=1;align=center;verticalAlign=middle;fontStyle=1;fontSize=18;" vertex="1" parent="1">
+          <mxGeometry x="40" y="8" width="1770" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== GROUPING CONTAINERS (drawn first = behind) ===================== -->
+        <!-- LEFT: member drone root ns -->
+        <mxCell id="cLhost" value="Root namespace &#8212; host machine (member drone side)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#dae8fc;strokeColor=#6c8ebf;dashed=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="540" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="cLns" value="netns: uav1 &#8212; member drone network slice" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#d5e8d4;strokeColor=#82b366;dashed=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="300" width="540" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="cLplumb" value="root ns plumbing (uav1)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="530" width="540" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- MIDDLE: ns-3 -->
+        <mxCell id="cNs3" value="ns-3 real-time simulation (ns3/three_uav_tapbridge_rt.cc)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#ffe6cc;strokeColor=#d79b00;dashed=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="640" y="300" width="470" height="350" as="geometry" />
+        </mxCell>
+
+        <!-- RIGHT: cluster head -->
+        <mxCell id="cRhost" value="Root namespace &#8212; host machine (cluster head side)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#dae8fc;strokeColor=#6c8ebf;dashed=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="60" width="640" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="cRns" value="netns: uav2 &#8212; CLUSTER HEAD network slice" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#d5e8d4;strokeColor=#82b366;dashed=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="300" width="640" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="cRplumb" value="root ns plumbing (uav2)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="530" width="640" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== LEGEND ===================== -->
+        <mxCell id="legend" value="KEY FACTS&#10;&#10;&#8226; Only the inter-drone camera hop crosses ns-3 (raw UDP, no DDS).&#10;&#8226; Gazebo, SITL, micro-ROS and rclpy stay LOCAL on each host.&#10;&#8226; Frames are JPEG-encoded and split into &lt;=1400 B UDP chunks.&#10;&#8226; Run setup_netns_tap.sh with SHARED_SUBNET=1 so uav1 (10.42.0.11)&#10;   and uav2 (10.42.0.12) share one L2 segment through the WiFi.&#10;&#8226; FlowMonitor measures throughput / delay / jitter / loss of the stream." style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacingLeft=8;spacingTop=6;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="640" y="60" width="470" height="200" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== LEFT HOST NODES ===================== -->
+        <mxCell id="gazebo" value="Gazebo Classic 11&#10;+ libgazebo_ros_camera&#10;(namespace /uav1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="60" y="95" width="220" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="sitl" value="ArduPilot SITL (AP_DDS)&#10;+ micro-ROS agent&#10;(internal &#8212; does NOT use ns-3)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="310" y="95" width="250" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="topic1" value="/uav1/camera/image_raw&#10;(sensor_msgs/Image)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="60" y="185" width="300" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== LEFT NETNS NODES ===================== -->
+        <mxCell id="sender" value="camera_stream_sender.py&#10;JPEG encode + chunk &#8594; UDP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="70" y="345" width="290" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="eth0a" value="eth0&#10;10.42.0.11/24" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="400" y="350" width="150" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== LEFT PLUMBING ===================== -->
+        <mxCell id="vetha" value="veth pair" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="70" y="575" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="bra" value="br-uav1&#10;(Linux bridge)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="215" y="575" width="150" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="tapa" value="tap-uav1&#10;(TAP device)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="390" y="575" width="150" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== NS-3 NODES ===================== -->
+        <mxCell id="node1" value="ns-3 node 1&#10;WifiNetDevice + TapBridge&#10;(UseLocal)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="665" y="355" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="node2" value="ns-3 node 2&#10;WifiNetDevice + TapBridge&#10;(UseLocal)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="905" y="355" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="wifi" value="802.11n ad-hoc WiFi channel&#10;Friis loss &#183; 20 ms delay &#183; lossRate&#10;&#8212;&#8212;&#8212;&#10;FlowMonitor: throughput / delay / jitter / loss" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffd6a5;strokeColor=#d79b00;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="665" y="470" width="420" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== RIGHT PLUMBING ===================== -->
+        <mxCell id="tapb" value="tap-uav2&#10;(TAP device)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="575" width="150" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="brb" value="br-uav2&#10;(Linux bridge)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="1375" y="575" width="150" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="vethb" value="veth pair" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="1550" y="575" width="120" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== RIGHT NETNS NODES ===================== -->
+        <mxCell id="eth0b" value="eth0&#10;10.42.0.12/24" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="350" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="receiver" value="camera_stream_receiver.py&#10;reassemble + JPEG decode&#10;(CLUSTER HEAD)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="345" width="380" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== RIGHT HOST NODES ===================== -->
+        <mxCell id="topic2" value="/cluster_head/uav1/image_raw&#10;(republished locally)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="185" width="330" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="yolo" value="yolo_detect_node.py&#10;human detection&#10;(image_topic:=/cluster_head/uav1/image_raw)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="1560" y="95" width="230" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== EDGES ===================== -->
+        <mxCell id="e_gaz_t1" value="publishes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="gazebo" target="topic1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_t1_send" value="rclpy subscribe&#10;(LOCAL &#8212; SHM/loopback, not ns-3)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#3333ff;fontColor=#3333ff;" edge="1" parent="1" source="topic1" target="sender">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_send_eth" value="UDP: JPEG chunks" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="sender" target="eth0a">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_eth_veth" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="eth0a" target="vetha">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_veth_br" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="vetha" target="bra">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_br_tap" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="bra" target="tapa">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_tap_node1" value="into ns-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="tapa" target="node1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_node1_wifi" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="node1" target="wifi">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_wifi_node2" value="simulated radio" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="wifi" target="node2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_node2_tap" value="out of ns-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="node2" target="tapb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_tap_br2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="tapb" target="brb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_br2_veth2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="brb" target="vethb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_veth2_eth2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="vethb" target="eth0b">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_eth2_recv" value="UDP in" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="eth0b" target="receiver">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_recv_t2" value="rclpy publish&#10;(LOCAL)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#3333ff;fontColor=#3333ff;" edge="1" parent="1" source="receiver" target="topic2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_t2_yolo" value="subscribe" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="topic2" target="yolo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
