@@ -6,9 +6,41 @@
 // so this resolves on any machine/checkout (was a hardcoded /home/ubuntu/... path).
 #include "gazebo_plugins/obstacle_raycast_plugin.hh"
 
+#include <algorithm>
+#include <cmath>
+#include <complex>
+
 
 namespace gazebo
 {
+
+// ADDED: the material table. Each row is ONLY the four ITU-R P.2040-3 fitting
+// constants; L_e and alpha are never stored, they are computed from these by
+// MaterialLoss(). Values for glass/wood/concrete/metal are Table 3 of
+// ITU-R P.2040-3 (valid 1-100 GHz, so 5.18 GHz is well inside range).
+//
+// "foliage" and "vehicle" have no Table 3 row -- P.2040 describes homogeneous
+// slabs, a canopy is distributed scatterers and a car is a hollow shell. Their
+// constants are EFFECTIVE-MEDIUM fits, chosen so the same two equations
+// reproduce the measured 5 GHz behaviour (~1.2 dB/m through in-leaf canopy,
+// ~12 dB through a car body). They are fits, not standard values.
+//
+// Order matters: the FIRST keyword found in the entity name wins, so the
+// composite props ("vehicle" bodies are metal, "foliage" has woody parts) are
+// listed before the bulk materials they would otherwise match.
+namespace
+{
+const MaterialSpec kMaterials[] = {
+  //  keyword       a        b        c          d
+  { "foliage",     1.0,    0.0,        0.0,    0.0    },   // Assuming similar to air
+  { "vehicle",     1.0,    0.0,    2.10e-3,    0.0    },   // c from Conductivity_Al chart.pdf | a Assumed since similar to metal
+  { "glass",      6.31,    0.0,    3.60e-3,    1.3394 },   // P.2040-3 Table 3
+  { "wood",       1.99,    0.0,    4.70e-3,    1.0718 },   // P.2040-3 Table 3
+  { "concrete",   5.24,    0.0,    4.62e-2,    0.7822 },   // P.2040-3 Table 3
+  { "brick",      3.91,    0.0,    2.38e-2,    0.1600 },   // P.2040-3 Table 3
+  { "metal",      1.00,    0.0,    1.00e+7,    0.0    },   // P.2040-3 Table 3
+};
+}  // namespace
 
 void ObstacleRaycastPlugin::Load(physics::WorldPtr world, sdf::ElementPtr sdf)
 {
@@ -26,7 +58,12 @@ void ObstacleRaycastPlugin::Load(physics::WorldPtr world, sdf::ElementPtr sdf)
                       ? sdf->Get<ignition::math::Vector3d>("gcs_position")
                       : ignition::math::Vector3d(0, 0, 0);
 
-  n_nodes_ = n_uavs_ + (gcs_enabled_ ? 1 : 0);
+  // ADDED: carrier frequency the material equations are evaluated at. Keep this
+  // in step with the NS-3 channel (802.11a -> 5.18 GHz); expose it so a world
+  // running a different band gets the right L_e/alpha without a recompile.
+  freq_ghz_ = sdf->HasElement("freq_ghz") ? sdf->Get<double>("freq_ghz") : 5.18;
+
+  //n_nodes_ = n_uavs_ + (gcs_enabled_ ? 1 : 0);
 
   if (!rclcpp::ok()) rclcpp::init(0, nullptr);
   ros_node_ = std::make_shared<rclcpp::Node>("obstacle_raycast_plugin");
@@ -286,6 +323,81 @@ double ObstacleRaycastPlugin::ObstacleThickness(const ignition::math::Vector3d &
   return 0.0;
 }
 
+
+
+// ADDED: derives BOTH loss terms for an obstacle from its material, replacing
+// the old hardcoded per-keyword numbers. The entity name only selects a row of
+// kMaterials; the two numbers themselves come out of equations, so changing the
+// carrier frequency changes them automatically.
+//
+// Step 1 -- the row's constants give the electrical properties at freq_ghz_
+// (ITU-R P.2040-3 eq. 57/58, and eq. 9 for the imaginary part):
+//
+//        eps'  = a * f^b
+//        sigma = c * f^d                              [S/m]
+//        eps'' = 17.98 * sigma / f                    (f in GHz)
+//        eta   = eps' - j*eps''                       complex permittivity
+//
+// Step 2 -- EQUATION ONE, the entry/exit penetration loss. Fresnel reflection
+// at normal incidence on the entry face, then again on the exit face. The
+// power fraction getting through one interface is 1 - |Gamma|^2, two faces
+// square that, hence the 20 (not 10) in front of the log:
+//
+//        Reflection = (1 - sqrt(eta)) / (1 + sqrt(eta))
+//        L_e   = -20 * log10(1 - |Reflection|^2)           [dB]
+//
+// Step 3 -- EQUATION TWO, the bulk attenuation constant. The complex refractive
+// index is n = sqrt(eta) = n_r - j*kappa; kappa (the attenuation index) is what
+// the field decays with inside the material. In dB per metre (ITU-R P.2040-3
+// eq. 12/13, field decay exp(-k0*kappa*z), k0 = 2*pi/lambda):
+//
+//        kappa = -Im( sqrt(eta) )
+//        alpha = 8.686 * (2*pi/lambda) * kappa        [dB/m]
+//
+// Returns false when the entity name matches no row -- untagged obstacles are
+// RF-transparent, as before.
+bool ObstacleRaycastPlugin::MaterialLoss(const std::string & entity_name,
+                                          double & L_e, double & alpha) const
+{
+  L_e   = 0.0;
+  alpha = 0.0;
+
+  const MaterialSpec * spec = nullptr;
+  for (const auto & m : kMaterials) {
+    if (entity_name.find(m.keyword) != std::string::npos) { spec = &m; break; }
+  }
+  if (!spec) return false;
+
+  // --- Step 1: electrical properties at the operating frequency -------------
+  const double f     = freq_ghz_;
+  const double eps_r = spec->a * std::pow(f, spec->b);          // eps'
+  const double sigma = spec->c * std::pow(f, spec->d);          // S/m
+  const double eps_i = 17.98 * sigma / f;                       // eps''
+  if (eps_r <= 0.0) return false;                               // malformed row
+
+  // --- Step 2: entry/exit penetration loss ---------------------------------
+  const std::complex<double> eta(eps_r, -eps_i);
+  const std::complex<double> n     = std::sqrt(eta);
+  const std::complex<double> Reflection = (1.0 - n) / (1.0 + n);
+  const double transmitted = 1.0 - std::norm(Reflection);   // norm() is |Reflection|^2
+  // A near-perfect reflector (the metal row) drives the transmitted fraction
+  // to zero and the log to -inf; clamp instead, the link is dead either way.
+  L_e = (transmitted > 1e-12) ? -20.0 * std::log10(transmitted) : max_loss_db_;
+  L_e = std::min(L_e, max_loss_db_);
+
+  // --- Step 3: bulk attenuation constant -----------------------------------
+  //const double lambda = 0.299792458 / f;   // wavelength in m, with f in GHz
+  //const double kappa  = -n.imag();         // attenuation index; Im(sqrt(eta)) < 0
+  const std::complex<double> j(0.0, 1.0);
+  const std::complex<double> gamma = j * 20.96 * f *std::sqrt(eta);  // ITU-R P.2040-3 eq. 12
+  alpha = 8.686 * gamma.real();  // dB/m
+  // A lossless dielectric (sigma = 0) has kappa = 0 -> alpha = 0, so the
+  // obstacle costs only its entry/exit loss. Clamp the lossy extreme.
+  alpha = std::min(std::max(alpha, 0.0), max_loss_db_);
+
+  return true;
+}
+
 double ObstacleRaycastPlugin::ComputeObstacleLoss(const std::string & entity_name,
                                                     double hit_dist,
                                                     const ignition::math::Vector3d & start,
@@ -294,40 +406,18 @@ double ObstacleRaycastPlugin::ComputeObstacleLoss(const std::string & entity_nam
   // CHANGED: an obstacle whose <name> carries NO recognised material keyword
   // now contributes ZERO loss instead of a default 15 dB. Only explicitly
   // tagged materials attenuate the link; anything untagged is treated as
-  // RF-transparent (same net effect as a "noloss" prop). Track whether a
-  // keyword actually matched so we can bail out below.
+  // RF-transparent (same net effect as a "noloss" prop).
   // REMOVED: double L_e = 15.0;  // default: unknown solid ~ masonry / concrete
-  double L_e = 0.0;
-  bool   material_known = false;
-  if (entity_name.find("glass")    != std::string::npos) { L_e = 4.0;  material_known = true; }
-  if (entity_name.find("wood")     != std::string::npos) { L_e = 8.0;  material_known = true; }
-  if (entity_name.find("concrete") != std::string::npos) { L_e = 15.0; material_known = true; }
-  if (entity_name.find("metal")    != std::string::npos) { L_e = 20.0; material_known = true; }
-  // ADDED material classes for the small-city props. A model is tagged by
-  // putting one of these keywords in its <name> in the world file, so the
-  // material lives with the world (author-controlled) and the plugin stays
-  // generic:
-  if (entity_name.find("foliage")  != std::string::npos) { L_e = 5.0;  material_known = true; }  // trees: scattering, not a solid wall
-  if (entity_name.find("vehicle")  != std::string::npos) { L_e = 12.0; material_known = true; }  // cars: hollow metal shell, ground level
+  // CHANGED: L_e and alpha are no longer a table of hardcoded dB values --
+  // MaterialLoss() computes both from the material's electrical properties.
+  double L_e, alpha;
+  if (!MaterialLoss(entity_name, L_e, alpha)) return 0.0;
 
-  // No recognised material keyword -> zero loss (skip the thickness term too).
-  if (!material_known) return 0.0;
-
-  // REMOVED: "penetration_depth" was the free-space distance from the wall to
-  // the destination drone, not the depth of material traversed -- so a drone
-  // far behind a wall was penalised more than one just behind it, which is
-  // physically backwards:
-  // double link_len = (end - start).Length();
-  // double penetration_depth = std::min((link_len - 0.5) - hit_dist, 20.0);
-  // return L_e + 0.5 * penetration_depth;
-  // ADDED: use the TRUE material thickness (entry face -> exit face) found by
-  // a backward ray. Model: fixed entry/exit penetration loss L_e plus a bulk
-  // attenuation term proportional to how much material the signal crosses
-  // (0.5 dB per metre of material, clamped). If the exit face can't be
-  // resolved, fall back to the base material loss alone.
+  // CHANGED: the bulk term is alpha * t, with alpha now material-specific
+  // instead of the flat 0.5 dB/m every obstacle used to get.
   double thickness = ObstacleThickness(start, end, entity_name, hit_dist);
   thickness = std::min(thickness, 20.0);
-  return L_e + 0.5 * thickness;
+  return std::min(L_e + alpha * thickness, max_loss_db_);
 }
 
 GZ_REGISTER_WORLD_PLUGIN(ObstacleRaycastPlugin)
