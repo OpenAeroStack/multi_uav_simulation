@@ -4561,76 +4561,51 @@
         <update_rate>20.0</update_rate>
     </plugin>
 
-    <!-- Pond zone targets — near ocean model x=40 y=-20 -->
-    <include>
-      <uri>model://human_male_1</uri>
-      <name>target_pond_1</name>
+    <model name="person_1">
+      <pose>118.94 67.75 0 0 0 0</pose>
       <static>true</static>
-      <pose>42 -15 0 0 0 0</pose>
-    </include>
+      <include>
+        <uri>model://person_standing</uri>
+        <static>true</static>
+      </include>
+    </model>
 
-    <include>
-      <uri>model://human_female_1</uri>
-      <name>target_pond_2</name>
+    <model name="person_2">
+      <pose>119.94 68.75 0 0 0 -1.57</pose>
       <static>true</static>
-      <pose>38 -25 0 0 0 0</pose>
-    </include>
+      <include>
+        <uri>model://person_standing</uri>
+        <static>true</static>
+      </include>
+    </model>
 
-    <!-- Mountain zone targets — beyond pine tree line at x=115 -->
-    <include>
-      <uri>model://human_male_2</uri>
-      <name>target_mountain_1</name>
+    <model name="person_3">
+      <pose>119.94 67.75 0 0 0 1.57</pose>
       <static>true</static>
-      <pose>140 -20 0 0 0 0</pose>
-    </include>
+      <include>
+        <uri>model://person_standing</uri>
+        <static>true</static>
+      </include>
+    </model>
 
-    <include>
-      <uri>model://human_female_2</uri>
-      <name>target_mountain_2</name>
+    <model name="person_4">
+      <pose>120.94 67.75 0 0 0 3.14</pose>
       <static>true</static>
-      <pose>209.73 -154.73 16.60 0 0 0</pose>
-    </include>
+      <include>
+        <uri>model://person_standing</uri>
+        <static>true</static>
+      </include>
+    </model>
 
-    <include>
-      <uri>model://human_female_2</uri>
-      <name>target_approach_1</name>
+    <model name="person_5">
+      <pose>119.94 66.75 0 0 0 1.57</pose>
       <static>true</static>
-      <pose>-60 -20 0 0 0 0</pose>
-    </include>
+      <include>
+        <uri>model://person_standing</uri>
+        <static>true</static>
+      </include>
+    </model>
+    
 
-    <include>
-      <uri>model://human_male_1</uri>
-      <name>target_downtown_1</name>
-      <static>true</static>
-      <pose>18 10 0 0 0 0</pose>
-    </include>
-
-    <include>
-      <uri>model://human_female_1</uri>
-      <name>target_downtown_2</name>
-      <static>true</static>
-      <pose>-30 20 0 0 0 0</pose>
-    </include>
-
-    <include>
-      <uri>model://human_male_2</uri>
-      <name>target_downtown_3</name>
-      <static>true</static>
-      <pose>70 20 0 0 0 0</pose>
-    </include>
-
-    <include>
-      <uri>model://human_female_2</uri>
-      <name>target_downtown_4</name>
-      <static>true</static>
-      <pose>92 -12 0 0 0 0</pose>
-    </include>
-
-    <include>
-      <uri>model://human_male_1</uri>
-      <name>target_mountain_3</name>
-      <static>true</static>
-      <pose>175 -60 0 0 0 0</pose>
-    </include>
   </world>
 </sdf>
