@@ -1,0 +1,53 @@
+mission:
+  name: city_multi_uav_mission
+  minimum_fleet_size: 3
+  maximum_fleet_size: 6
+
+uavs:
+  1:
+    mission_role: city_patrol
+    takeoff_altitude: 60.0
+    enabled_from_fleet_size: 3
+    waypoints:
+      - name: city_centre
+        latitude: 37.338562
+        longitude: -121.886223
+        altitude: 60.0
+
+  2:
+    mission_role: pond_patrol
+    takeoff_altitude: 40.0
+    enabled_from_fleet_size: 3
+    waypoints:
+      - name: pond_area
+        latitude: 37.340176
+        longitude: -121.887016
+        altitude: 40.0
+
+  3:
+    mission_role: mountain_patrol
+    takeoff_altitude: 50.0
+    enabled_from_fleet_size: 3
+    waypoints:
+      - name: mountain_area
+        latitude: 37.340092
+        longitude: -121.884521
+        altitude: 50.0
+
+  4:
+    mission_role: eastern_sector_patrol
+    takeoff_altitude: 45.0
+    enabled_from_fleet_size: 4
+    waypoints: []
+
+  5:
+    mission_role: southern_sector_patrol
+    takeoff_altitude: 55.0
+    enabled_from_fleet_size: 5
+    waypoints: []
+
+  6:
+    mission_role: northern_perimeter_patrol
+    takeoff_altitude: 50.0
+    enabled_from_fleet_size: 6
+    waypoints: []

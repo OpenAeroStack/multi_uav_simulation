@@ -1,10 +1,58 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Create the isolated Layer-2 endpoint topology used by the ns-3 wireless link.
+# Fleet size is read from NUM_UAVS and config/fleet_config.sh.
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+FLEET_CONFIG="${FLEET_CONFIG:-$PROJECT_DIR/config/fleet_config.sh}"
+REQUESTED_NUM_UAVS="${NUM_UAVS:-}"
+
+
+if [[ ! -f "$FLEET_CONFIG" ]]; then
+    echo "ERROR: Fleet configuration not found: $FLEET_CONFIG" >&2
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$FLEET_CONFIG"
+
+echo "Configured topology fleet size: $NUM_UAVS"
+
+
 if [[ ${EUID} -ne 0 ]]; then
     exec sudo -E bash "$0" "$@"
+fi
+
+if [[ ! -f "$FLEET_CONFIG" ]]; then
+    echo "ERROR: Fleet configuration not found: $FLEET_CONFIG" >&2
+    exit 1
+fi
+
+# fleet_config.sh may intentionally use variables that are not yet defined.
+set +u
+# shellcheck source=/dev/null
+source "$FLEET_CONFIG"
+set -u
+
+# A value supplied by the launcher overrides the default in fleet_config.sh.
+if [[ -n "$REQUESTED_NUM_UAVS" ]]; then
+    NUM_UAVS="$REQUESTED_NUM_UAVS"
+else
+    NUM_UAVS="${NUM_UAVS:-3}"
+fi
+
+MIN_UAVS="${MIN_UAVS:-3}"
+MAX_UAVS="${MAX_UAVS:-6}"
+
+if ! [[ "$NUM_UAVS" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: NUM_UAVS must be an integer, got: $NUM_UAVS" >&2
+    exit 1
+fi
+if (( NUM_UAVS < MIN_UAVS || NUM_UAVS > MAX_UAVS )); then
+    echo "ERROR: NUM_UAVS must be between $MIN_UAVS and $MAX_UAVS, got: $NUM_UAVS" >&2
+    exit 1
 fi
 
 NS3_USER="${NS3_USER:-${SUDO_USER:-}}"
@@ -18,47 +66,40 @@ if ! id "$NS3_USER" >/dev/null 2>&1; then
     exit 1
 fi
 
-ENDPOINTS=(gcs uav1 uav2 uav3)
+ENDPOINTS=(gcs)
+UAV_ENDPOINTS=()
 
-declare -A NAMESPACE=(
-    [gcs]=gcsns
-    [uav1]=uav1
-    [uav2]=uav2
-    [uav3]=uav3
-)
-declare -A ADDRESS=(
-    [gcs]=10.42.0.10/24
-    [uav1]=10.42.0.11/24
-    [uav2]=10.42.0.12/24
-    [uav3]=10.42.0.13/24
-)
-declare -A MAC=(
-    [gcs]=02:00:00:00:00:00
-    [uav1]=02:00:00:00:00:01
-    [uav2]=02:00:00:00:00:02
-    [uav3]=02:00:00:00:00:03
-)
-declare -A TAP_MAC=(
-    [gcs]=02:aa:00:00:00:10
-    [uav1]=02:aa:00:00:00:11
-    [uav2]=02:aa:00:00:00:12
-    [uav3]=02:aa:00:00:00:13
-)
-declare -A MANAGEMENT_HOST_ADDRESS=(
-    [uav1]=172.31.1.1/30
-    [uav2]=172.31.2.1/30
-    [uav3]=172.31.3.1/30
-)
-declare -A MANAGEMENT_UAV_ADDRESS=(
-    [uav1]=172.31.1.2/30
-    [uav2]=172.31.2.2/30
-    [uav3]=172.31.3.2/30
-)
-declare -A MANAGEMENT_HOST_IP=(
-    [uav1]=172.31.1.1
-    [uav2]=172.31.2.1
-    [uav3]=172.31.3.1
-)
+declare -A NAMESPACE
+declare -A ADDRESS
+declare -A MAC
+declare -A TAP_MAC
+declare -A MANAGEMENT_HOST_ADDRESS
+declare -A MANAGEMENT_UAV_ADDRESS
+declare -A MANAGEMENT_HOST_IP
+
+# GCS configuration
+NAMESPACE[gcs]="gcsns"
+ADDRESS[gcs]="${GCS_WIRELESS_IP}/24"
+MAC[gcs]="02:00:00:00:00:00"
+TAP_MAC[gcs]="02:aa:00:00:00:10"
+
+# Generate UAV1 ... UAVN from fleet_config.sh
+for ((uid=1; uid<=NUM_UAVS; uid++)); do
+    endpoint="uav${uid}"
+
+    ENDPOINTS+=("$endpoint")
+    UAV_ENDPOINTS+=("$endpoint")
+
+    NAMESPACE["$endpoint"]="$(uav_namespace "$uid")"
+    ADDRESS["$endpoint"]="$(uav_wireless_ip "$uid")/24"
+
+    MAC["$endpoint"]="02:00:00:00:00:0${uid}"
+    TAP_MAC["$endpoint"]="02:aa:00:00:00:1${uid}"
+
+    MANAGEMENT_HOST_ADDRESS["$endpoint"]="$(uav_management_host_ip "$uid")/30"
+    MANAGEMENT_UAV_ADDRESS["$endpoint"]="$(uav_management_namespace_ip "$uid")/30"
+    MANAGEMENT_HOST_IP["$endpoint"]="$(uav_management_host_ip "$uid")"
+done
 
 disable_veth_offloading() {
     local interface="$1"
@@ -71,18 +112,31 @@ disable_veth_offloading() {
 
 remove_stale_topology() {
     local endpoint ns bridge tap host_veth management_host_veth
+    local uid
 
     echo "Removing stale ns-3 wireless topology..."
-    for endpoint in "${ENDPOINTS[@]}"; do
-        ns="${NAMESPACE[$endpoint]}"
-        bridge="br-$endpoint"
-        tap="tap-$endpoint"
-        host_veth="veth-$endpoint-host"
-        management_host_veth="sim-$endpoint-host"
+
+    # Always remove GCS.
+    ip netns del gcsns 2>/dev/null || true
+    ip link set br-gcs down 2>/dev/null || true
+    ip link del br-gcs type bridge 2>/dev/null || true
+    ip link del tap-gcs 2>/dev/null || true
+    ip link del veth-gcs-host 2>/dev/null || true
+
+    # Remove all supported UAV endpoints, including inactive ones.
+    for ((uid=1; uid<=MAX_UAVS; uid++)); do
+        endpoint="uav${uid}"
+        ns="$(uav_namespace "$uid")"
+        bridge="$(uav_bridge "$uid")"
+        tap="$(uav_tap "$uid")"
+        host_veth="$(uav_wireless_veth "$uid")"
+        management_host_veth="$(uav_management_veth "$uid")"
 
         ip netns del "$ns" 2>/dev/null || true
+
         ip link set "$bridge" down 2>/dev/null || true
         ip link del "$bridge" type bridge 2>/dev/null || true
+
         ip link del "$tap" 2>/dev/null || true
         ip link del "$host_veth" 2>/dev/null || true
         ip link del "$management_host_veth" 2>/dev/null || true
@@ -96,23 +150,15 @@ create_endpoint() {
     local tap="tap-$endpoint"
     local host_veth="veth-$endpoint-host"
     local address="${ADDRESS[$endpoint]}"
-
     local wifi_mac="${MAC[$endpoint]}"
     local tap_mac="${TAP_MAC[$endpoint]}"
 
     ip netns add "$ns"
-
     ip link add "$host_veth" type veth peer name wifi0 netns "$ns"
 
-    ip netns exec "$ns" \
-    	sysctl -qw net.ipv6.conf.wifi0.disable_ipv6=1
-
-    ip netns exec "$ns" \
-    	ip link set wifi0 address "$wifi_mac"
-
-    ip netns exec "$ns" \
-    ip addr add "$address" dev wifi0
-
+    ip netns exec "$ns" sysctl -qw net.ipv6.conf.wifi0.disable_ipv6=1
+    ip netns exec "$ns" ip link set wifi0 address "$wifi_mac"
+    ip netns exec "$ns" ip addr add "$address" dev wifi0
     ip netns exec "$ns" ip link set lo up
     ip netns exec "$ns" ip link set wifi0 up
 
@@ -213,14 +259,21 @@ verify_management_link() {
     fi
 
     expected_host_ip="${MANAGEMENT_HOST_IP[$endpoint]}"
-    echo "VERIFY: ip netns exec $ns ping -c 1 -W 1 $expected_host_ip"
-    ip netns exec "$ns" ping -c 1 -W 1 "$expected_host_ip" >/dev/null
 
-    for peer in uav1 uav2 uav3; do
+    echo "VERIFY: ip netns exec $ns ping -c 1 -W 1 $expected_host_ip"
+
+    ip netns exec "$ns" \
+        ping -c 1 -W 1 "$expected_host_ip" >/dev/null
+
+    for peer in "${UAV_ENDPOINTS[@]}"; do
         [[ "$peer" == "$endpoint" ]] && continue
+
         echo "VERIFY (must fail): ip netns exec $ns ping -c 1 -W 1 ${MANAGEMENT_HOST_IP[$peer]}"
-        if ip netns exec "$ns" ping -c 1 -W 1 "${MANAGEMENT_HOST_IP[$peer]}" \
+
+        if ip netns exec "$ns" \
+            ping -c 1 -W 1 "${MANAGEMENT_HOST_IP[$peer]}" \
             >/dev/null 2>&1; then
+
             echo "ERROR: $ns can reach another UAV's management host IP: ${MANAGEMENT_HOST_IP[$peer]}" >&2
             return 1
         fi
@@ -232,7 +285,9 @@ show_summary() {
 
     echo
     echo "ns-3 wireless topology interface summary"
+    echo "Configured fleet size: $NUM_UAVS"
     echo "TAP owner: $NS3_USER"
+
     for endpoint in "${ENDPOINTS[@]}"; do
         ns="${NAMESPACE[$endpoint]}"
         bridge="br-$endpoint"
@@ -260,13 +315,14 @@ show_summary() {
     done
 }
 
+echo "Configured fleet size from fleet config: $NUM_UAVS"
 remove_stale_topology
 
 for endpoint in "${ENDPOINTS[@]}"; do
     create_endpoint "$endpoint"
 done
 
-for endpoint in uav1 uav2 uav3; do
+for endpoint in "${UAV_ENDPOINTS[@]}"; do
     create_management_link "$endpoint"
 done
 
@@ -274,10 +330,12 @@ for endpoint in "${ENDPOINTS[@]}"; do
     verify_endpoint "$endpoint"
 done
 
-for endpoint in uav1 uav2 uav3; do
+for endpoint in "${UAV_ENDPOINTS[@]}"; do
     verify_management_link "$endpoint"
 done
 
 show_summary
+
 echo
 echo "Topology creation and verification completed successfully."
+echo "Configured UAV count: $NUM_UAVS"

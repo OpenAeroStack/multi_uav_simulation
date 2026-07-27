@@ -28,10 +28,12 @@ setup(
             'l_mission       = uav_controller.l_mission:main',
             'multi_mission   = uav_controller.multi_mission:main',
             'faculty_mission = uav_controller.faculty_mission:main',
+	    'fleet_mission = uav_controller.fleet_mission:main',
             'airport_mission   = uav_controller.airport_mission:main',
             'position_accuracy_test = uav_controller.position_accuracy_test:main',
             'single_uav_mission = uav_controller.single_uav_mission:main',
             'city_mission = uav_controller.city_mission:main',
+            
             'gazebo_ns3_position_sender = uav_controller.gazebo_ns3_position_sender:main',
         ],
     },

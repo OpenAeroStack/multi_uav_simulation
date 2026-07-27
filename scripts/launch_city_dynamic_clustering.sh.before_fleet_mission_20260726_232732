@@ -1,8 +1,6 @@
-
-
 #!/bin/bash
 
-set -eo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -16,32 +14,6 @@ if [[ ! -f "$FLEET_CONFIG" ]]; then
 fi
 
 source "$FLEET_CONFIG"
-
-MIN_UAVS="${MIN_UAVS:-3}"
-MAX_UAVS="${MAX_UAVS:-6}"
-EXPECTED_LINKS=$((NUM_UAVS * (NUM_UAVS + 1) / 2))
-
-required_fleet_functions=(
-    uav_wireless_ip
-    uav_dds_port
-    uav_mavlink_port
-    uav_gazebo_fdm_port
-    uav_sitl_udp_port
-    uav_management_host_ip
-    uav_management_namespace_ip
-    uav_namespace
-    uav_tap
-    uav_bridge
-    uav_wireless_veth
-    uav_management_veth
-)
-
-for required_function in "${required_fleet_functions[@]}"; do
-    if ! declare -F "$required_function" >/dev/null; then
-        echo "ERROR: fleet_config.sh does not define $required_function()." >&2
-        exit 1
-    fi
-done
 
 echo "Configured fleet size: $NUM_UAVS"
 
@@ -66,7 +38,9 @@ NETANIM_STARTED=0
 export GAZEBO_MODEL_PATH="$SMALL_CITY_DIR/models:${GAZEBO_MODEL_PATH:-}"
 export GAZEBO_MODEL_DATABASE_URI=""
 export GAZEBO_RESOURCE_PATH="$SMALL_CITY_DIR:${GAZEBO_RESOURCE_PATH:-}"
-WORLD_PATH="${WORLD_PATH:-$PROJECT_DIR/worlds/city_${NUM_UAVS}uav.world}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+RUN_USER="${SUDO_USER:-$USER}"
 NS3_LOG="/tmp/ns3_stdout.log"
 MISSION_TIMEOUT_SEC="${MISSION_TIMEOUT_SEC:-900}"
 TAP_READY_TIMEOUT_SEC="${TAP_READY_TIMEOUT_SEC:-120}"
@@ -95,7 +69,6 @@ BRIDGE_LOGS=()
 
 SITL_PIDS=()
 SITL_LOGS=()
-SITL_DEFAULTS=()
 
 SOCAT_PIDS=()
 
@@ -121,7 +94,7 @@ done
 
 GAZEBO_LOG=/tmp/gazebo_city.log
 WORLD_POS_LOG=/tmp/world_pos_publisher.log
-MISSION_LOG=/tmp/fleet_mission.log
+MISSION_LOG=/tmp/city_mission.log
 CLUSTER_LOG="${CLUSTER_LOG:-/tmp/dynamic_cluster_manager.log}"
 CLUSTER_NUM_UAVS="$NUM_UAVS"
 CLUSTER_READY_TIMEOUT_SEC="${CLUSTER_READY_TIMEOUT_SEC:-30}"
@@ -238,21 +211,23 @@ cleanup_previous_instances() {
     echo "=== Cleaning previous simulation instances ==="
 
     local patterns=(
-        'fleet_mission'
         'city_mission'
         'dynamic_cluster_manager'
         'drone_bridge'
         '/build/sitl/bin/arducopter'
+        'micro_ros_agent.*udp4.*--port (2019|2020|2021)'
         '[w]orld_pos_publisher.py'
         'scratch_three-uav_three-uav'
         'three_uav_tapbridge_rt'
         'three_uav_tapbridge_integrated'
-        'gzserver.*city_[0-9]+uav[.]world'
+        'gzserver.*city_3uav\.world'
         'gzclient'
+        'world_pos_publisher\.py'
         'micro_ros_agent'
     )
 
-    local pattern pid
+    local pattern
+    local pid
     local -a stale_pids=()
     local -a remaining_pids=()
 
@@ -265,11 +240,21 @@ cleanup_previous_instances() {
         done < <(pgrep -f -- "$pattern" 2>/dev/null || true)
     done
 
+    # Remove duplicate PIDs.
     if [[ ${#stale_pids[@]} -gt 0 ]]; then
-        mapfile -t stale_pids < <(printf '%s\n' "${stale_pids[@]}" | sort -nu)
+        mapfile -t stale_pids < <(
+            printf '%s\n' "${stale_pids[@]}" |
+            sort -nu
+        )
+    fi
+
+    if [[ ${#stale_pids[@]} -gt 0 ]]; then
         echo "Stopping stale processes: ${stale_pids[*]}"
+
         sudo kill -TERM "${stale_pids[@]}" 2>/dev/null || true
         sleep 2
+
+        remaining_pids=()
 
         for pid in "${stale_pids[@]}"; do
             if kill -0 "$pid" 2>/dev/null; then
@@ -287,27 +272,29 @@ cleanup_previous_instances() {
 
     cleanup_previous_namespaces
     cleanup_previous_links
+
     echo "Previous simulation cleanup complete."
 }
 
 
 ###########    cleanup previous namespaces and links    ########################
 cleanup_previous_namespaces() {
-    local namespace pid uav_id
+    local namespace
+    local pid
     local -a namespace_pids=()
-    local -a namespaces=(gcsns)
 
-    for ((uav_id = 1; uav_id <= MAX_UAVS; uav_id++)); do
-        namespaces+=("$(uav_namespace "$uav_id")")
-    done
-
-    for namespace in "${namespaces[@]}"; do
-        if ! sudo ip netns list | awk '{print $1}' | grep -qx "$namespace"; then
+    for namespace in gcsns uav1 uav2 uav3; do
+        if ! sudo ip netns list |
+            awk '{print $1}' |
+            grep -qx "$namespace"; then
             continue
         fi
 
         echo "Cleaning namespace: $namespace"
-        mapfile -t namespace_pids < <(sudo ip netns pids "$namespace" 2>/dev/null || true)
+
+        mapfile -t namespace_pids < <(
+            sudo ip netns pids "$namespace" 2>/dev/null || true
+        )
 
         if [[ ${#namespace_pids[@]} -gt 0 ]]; then
             sudo kill -TERM "${namespace_pids[@]}" 2>/dev/null || true
@@ -328,17 +315,28 @@ cleanup_previous_namespaces() {
 ############    cleanup previous links    ########################
 
 cleanup_previous_links() {
-    local link uav_id
-    local -a links=(tap-gcs veth-gcs-host br-gcs)
+    local link
 
-    for ((uav_id = 1; uav_id <= MAX_UAVS; uav_id++)); do
-        links+=(
-            "$(uav_tap "$uav_id")"
-            "$(uav_wireless_veth "$uav_id")"
-            "$(uav_management_veth "$uav_id")"
-            "$(uav_bridge "$uav_id")"
-        )
-    done
+    local links=(
+        tap-gcs
+        tap-uav1
+        tap-uav2
+        tap-uav3
+
+        veth-gcs-host
+        veth-uav1-host
+        veth-uav2-host
+        veth-uav3-host
+
+        sim-uav1-host
+        sim-uav2-host
+        sim-uav3-host
+
+        br-gcs
+        br-uav1
+        br-uav2
+        br-uav3
+    )
 
     for link in "${links[@]}"; do
         if ip link show "$link" >/dev/null 2>&1; then
@@ -366,25 +364,31 @@ prepare_netanim_output() {
 ######### we implement bidirectional connectivity verification between GCS and UAVs through ns-3 wireless simulation ########
 
 verify_bidirectional_wireless() {
-    local uav_id namespace uav_ip
+    local namespace
+    local uav_ip
 
     echo "=== Verifying bidirectional ns-3 wireless connectivity ==="
 
-    for ((uav_id = 1; uav_id <= NUM_UAVS; uav_id++)); do
-        namespace="$(uav_namespace "$uav_id")"
-        uav_ip="$(uav_wireless_ip "$uav_id")"
+    for entry in \
+        "uav1 10.42.0.11" \
+        "uav2 10.42.0.12" \
+        "uav3 10.42.0.13"
+    do
+        read -r namespace uav_ip <<<"$entry"
 
         echo "GCS -> $namespace"
-        sudo ip netns exec gcsns ping -c 3 -W 2 "$uav_ip" || {
-            echo "ERROR: gcsns cannot reach $namespace at $uav_ip" >&2
-            return 1
-        }
+        sudo ip netns exec gcsns \
+            ping -c 3 -W 2 "$uav_ip" || {
+                echo "ERROR: gcsns cannot reach $namespace at $uav_ip" >&2
+                return 1
+            }
 
         echo "$namespace -> GCS"
-        sudo ip netns exec "$namespace" ping -c 3 -W 2 "$GCS_WIRELESS_IP" || {
-            echo "ERROR: $namespace cannot reach GCS at $GCS_WIRELESS_IP" >&2
-            return 1
-        }
+        sudo ip netns exec "$namespace" \
+            ping -c 3 -W 2 10.42.0.10 || {
+                echo "ERROR: $namespace cannot reach the GCS DDS agent" >&2
+                return 1
+            }
     done
 }
 for option in "$@"; do
@@ -449,23 +453,17 @@ dump_ns3_failure() {
 }
 
 cleanup() {
-    local root pid child index deadline uav_id
+    local root pid child index deadline
     local -a roots=()
     local -a tree=()
     local -a children=()
-    local -a namespaces=(gcsns)
-    local -a bridges=(br-gcs)
-    local -a taps=(tap-gcs)
-    local -a wireless_veths=(veth-gcs-host)
-    local -a management_veths=()
-
-    for ((uav_id = 1; uav_id <= MAX_UAVS; uav_id++)); do
-        namespaces+=("$(uav_namespace "$uav_id")")
-        bridges+=("$(uav_bridge "$uav_id")")
-        taps+=("$(uav_tap "$uav_id")")
-        wireless_veths+=("$(uav_wireless_veth "$uav_id")")
-        management_veths+=("$(uav_management_veth "$uav_id")")
-    done
+    local -a namespaces=(gcsns uav1 uav2 uav3)
+    local -a bridges=(br-gcs br-uav1 br-uav2 br-uav3)
+    local -a taps=(tap-gcs tap-uav1 tap-uav2 tap-uav3)
+    local -a wireless_veths=(
+        veth-gcs-host veth-uav1-host veth-uav2-host veth-uav3-host
+    )
+    local -a management_veths=(sim-uav1-host sim-uav2-host sim-uav3-host)
 
     if (( CLEANUP_RUNNING || CLEANUP_COMPLETE )); then
         return 0
@@ -498,6 +496,8 @@ cleanup() {
         return 0
     fi
 
+    # Stop each saved process root and its descendants. This handles sudo/bash
+    # wrappers and Gazebo's gzserver/gzclient children without broad pkill.
     for root in "${roots[@]}"; do
         [[ "$root" =~ ^[0-9]+$ ]] || continue
         kill -0 "$root" 2>/dev/null || continue
@@ -525,9 +525,10 @@ cleanup() {
         done
         wait "$root" 2>/dev/null || true
     done
-
     finalize_netanim_xml "${NETANIM_FILE:-}"
 
+    # Namespace deletion removes namespace-side wifi0/sim0 peers. Explicit
+    # root-side deletion below also makes partial and repeated cleanup safe.
     for pid in "${namespaces[@]}"; do
         sudo ip netns del "$pid" 2>/dev/null || true
     done
@@ -573,8 +574,10 @@ fi
 source "$PROJECT_DIR/setup.sh"
 BINARY="$ARDUPILOT_HOME/build/sitl/bin/arducopter"
 BASE_DEFAULTS="$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm"
+UAV1_DEFAULTS="$BASE_DEFAULTS,$PROJECT_DIR/params/uav1_dds.parm"
+UAV2_DEFAULTS="$BASE_DEFAULTS,$PROJECT_DIR/params/uav2_dds.parm"
+UAV3_DEFAULTS="$BASE_DEFAULTS,$PROJECT_DIR/params/uav3_dds.parm"
 HOME_GPS="37.3382,-121.8863,0,0"
-MISSION_CONFIG="$PROJECT_DIR/config/mission_plans.yaml"
 validate_dds_param_file() {
     local file="$1"
     local expected_port="$2"
@@ -624,13 +627,11 @@ validate_dds_param_file() {
     echo "DDS configuration valid: 10.42.0.10:$expected_port"
 }
 
-###### Validating DDS parameters and constructing SITL defaults ################
+###### Validating dds parameters ################
 
-for ((uav_id = 1; uav_id <= NUM_UAVS; uav_id++)); do
-    dds_file="$PROJECT_DIR/params/uav${uav_id}_dds.parm"
-    validate_dds_param_file "$dds_file" "$(uav_dds_port "$uav_id")"
-    SITL_DEFAULTS[$uav_id]="$BASE_DEFAULTS,$dds_file"
-done
+validate_dds_param_file "$PROJECT_DIR/params/uav1_dds.parm" 2019
+validate_dds_param_file "$PROJECT_DIR/params/uav2_dds.parm" 2020
+validate_dds_param_file "$PROJECT_DIR/params/uav3_dds.parm" 2021
 
 ## cleanupt process
 sudo -v
@@ -642,11 +643,7 @@ echo "$$" > "$PID_FILE"
 
 
 echo "=== Setting up isolated ns-3 wireless topology ==="
-sudo env \
-    NUM_UAVS="$NUM_UAVS" \
-    NS3_USER="$RUN_USER" \
-    FLEET_CONFIG="$PROJECT_DIR/config/fleet_config.sh" \
-    bash "$PROJECT_DIR/scripts/setup_ns3_wireless_topology.sh"
+sudo NS3_USER="$RUN_USER" "$SCRIPT_DIR/setup_ns3_wireless_topology.sh"
 
 NS3_ROOT="$(resolve_ns3_root)"
 echo "Using ns-3 root: $NS3_ROOT"
@@ -680,24 +677,20 @@ echo "=== Building ns-3 target: three_uav_tapbridge_integrated ==="
 : >"$NS3_LOG"
 
 echo "=== Starting real-time ns-3 wireless simulation ==="
-NS3_RUN_SPEC="three_uav_tapbridge_integrated --numUavs=$NUM_UAVS --tap0=tap-gcs"
-for ((uav_id = 1; uav_id <= NUM_UAVS; uav_id++)); do
-    NS3_RUN_SPEC+=" --tap${uav_id}=$(uav_tap "$uav_id")"
-done
-NS3_RUN_SPEC+=" --simTime=0"
-NS3_RUN_SPEC+=" --txPowerDbm=35 --rxSensitivity=-82 --noiseFloor=-94"
-NS3_RUN_SPEC+=" --mLos=3.0 --mNlos=1.0 --emaAlpha=0.3"
-NS3_RUN_SPEC+=" --blockThreshDb=3.0 --clearThreshDb=1.0"
-NS3_RUN_SPEC+=" --delayMs=0.0 --lossRate=0.0 --rngRun=1"
-NS3_RUN_SPEC+=" --snrLogFile=/tmp/ns3_phy_snr.csv"
-NS3_RUN_SPEC+=" --csvPath=/tmp/ns3_link_validation.csv"
-NS3_RUN_SPEC+=" --enableNetAnim=false"
-
-echo "NS-3 fleet size: $NUM_UAVS"
-echo "NS-3 run specification: $NS3_RUN_SPEC"
 (
     cd "$NS3_ROOT"
-    exec ./ns3 run "$NS3_RUN_SPEC"
+    exec ./ns3 run "three_uav_tapbridge_integrated \
+        --tap0=tap-gcs --tap1=tap-uav1 --tap2=tap-uav2 --tap3=tap-uav3 \
+        --simTime=0 \
+        --txPowerDbm=35 --rxSensitivity=-82 --noiseFloor=-94 \
+        --mLos=3.0 --mNlos=1.0 --emaAlpha=0.3 \
+        --blockThreshDb=3.0 --clearThreshDb=1.0 \
+        --delayMs=0.0 \
+        --lossRate=0.0 \
+        --rngRun=1 \
+        --snrLogFile=/tmp/ns3_phy_snr.csv \
+        --csvPath=/tmp/ns3_link_validation.csv \
+        --enableNetAnim=false"
 ) >"$NS3_LOG" 2>&1 &
 NS3_PID=$!
 echo "ns-3 PID: $NS3_PID"
@@ -745,18 +738,11 @@ done
 verify_bidirectional_wireless
 
 verify_wireless_network() {
-    local destination namespace tap bridge uav_id deadline
-    local -a destinations=()
-    local -a namespaces=(gcsns)
-    local -a taps=(tap-gcs)
-    local -a bridges=(br-gcs)
-
-    for ((uav_id = 1; uav_id <= NUM_UAVS; uav_id++)); do
-        destinations+=("$(uav_wireless_ip "$uav_id")")
-        namespaces+=("$(uav_namespace "$uav_id")")
-        taps+=("$(uav_tap "$uav_id")")
-        bridges+=("$(uav_bridge "$uav_id")")
-    done
+    local destination namespace tap bridge
+    local -a destinations=(10.42.0.11 10.42.0.12 10.42.0.13)
+    local -a namespaces=(gcsns uav1 uav2 uav3)
+    local -a taps=(tap-gcs tap-uav1 tap-uav2 tap-uav3)
+    local -a bridges=(br-gcs br-uav1 br-uav2 br-uav3)
 
     echo "=== Wireless connectivity through ns-3 ==="
     for destination in "${destinations[@]}"; do
@@ -796,6 +782,10 @@ verify_wireless_network() {
     ip -o -4 address show | grep -E 'inet 10[.]42[.]0[.]' || echo "  none"
     echo "Root namespace routes for 10.42.0.0/24 (expected: none):"
     ip route show 10.42.0.0/24 || true
+    echo "Each root bridge has only one namespace veth and one unnumbered TAP."
+    echo "Therefore the root kernel has no Layer-3 endpoint or route on the wireless subnet."
+    echo "The --prove-ns3-path negative-control test establishes this conclusively:"
+    echo "the same namespace pings must fail after ns-3 releases the TAPs."
 
     if (( PROVE_NS3_PATH )); then
         echo "=== Negative control: stopping ns-3 ==="
@@ -804,20 +794,19 @@ verify_wireless_network() {
 
         deadline=$((SECONDS + 5))
         while (( SECONDS < deadline )); do
-            pending=0
-            for tap in "${taps[@]}"; do
-                if tap_is_attached "$tap"; then
-                    pending=1
-                    break
-                fi
-            done
-            (( pending == 0 )) && break
+            if ! tap_is_attached tap-gcs &&
+               ! tap_is_attached tap-uav1 &&
+               ! tap_is_attached tap-uav2 &&
+               ! tap_is_attached tap-uav3; then
+                break
+            fi
             sleep 0.1
         done
 
         for destination in "${destinations[@]}"; do
             echo "NEGATIVE CONTROL (must fail): ip netns exec gcsns ping -c 1 -W 1 $destination"
-            if sudo ip netns exec gcsns ping -c 1 -W 1 "$destination" >/dev/null 2>&1; then
+            if sudo ip netns exec gcsns ping -c 1 -W 1 "$destination" \
+                >/dev/null 2>&1; then
                 echo "ERROR: $destination remained reachable after ns-3 stopped; possible bypass." >&2
                 return 1
             fi
@@ -838,15 +827,11 @@ fi
 wait_for_gazebo_fdm_ports() {
     local timeout_sec="${1:-60}"
     local deadline=$((SECONDS + timeout_sec))
-    local uav_id port
-    local -a required_ports=()
+    local -a required_ports=(9002 9012 9022)
     local -a missing_ports=()
+    local port
 
-    for ((uav_id = 1; uav_id <= NUM_UAVS; uav_id++)); do
-        required_ports+=("$(uav_gazebo_fdm_port "$uav_id")")
-    done
-
-    echo "Waiting for Gazebo ArduPilot FDM ports: ${required_ports[*]}"
+    echo "Waiting for Gazebo ArduPilot FDM ports..."
 
     while (( SECONDS < deadline )); do
         missing_ports=()
@@ -862,7 +847,8 @@ wait_for_gazebo_fdm_ports() {
             return 0
         fi
 
-        if [[ -n "${GAZEBO_PID:-}" ]] && ! kill -0 "$GAZEBO_PID" 2>/dev/null; then
+        if [[ -n "${GAZEBO_PID:-}" ]] &&
+           ! kill -0 "$GAZEBO_PID" 2>/dev/null; then
             echo "ERROR: Gazebo exited while waiting for FDM ports." >&2
             tail -n 120 "${GAZEBO_LOG:-/tmp/gazebo_city.log}" >&2 || true
             return 1
@@ -873,9 +859,11 @@ wait_for_gazebo_fdm_ports() {
 
     echo "ERROR: Gazebo FDM ports did not become ready." >&2
     echo "Missing UDP ports: ${missing_ports[*]}" >&2
-    echo "The world $WORLD_PATH must contain iris_1 through iris_${NUM_UAVS}." >&2
+    echo "----- Gazebo log -----" >&2
     tail -n 120 "${GAZEBO_LOG:-/tmp/gazebo_city.log}" >&2 || true
+    echo "----- UDP sockets -----" >&2
     ss -lunp >&2 || true
+
     return 1
 }
 # END GAZEBO FDM READINESS FUNCTION
@@ -883,7 +871,7 @@ wait_for_gazebo_fdm_ports() {
 echo "=== Starting Gazebo in the root namespace ==="
 
 SMALL_CITY_DIR="$HOME/simulation/small_city_gazebo_world"
-WORLD_PATH="${WORLD_PATH:-$PROJECT_DIR/worlds/city_${NUM_UAVS}uav.world}"
+WORLD_PATH="$PROJECT_DIR/worlds/city_3uav.world"
 
 if [[ ! -d "$SMALL_CITY_DIR" ]]; then
     echo "ERROR: Small-city directory not found: $SMALL_CITY_DIR" >&2
@@ -897,7 +885,6 @@ fi
 
 if [[ ! -f "$WORLD_PATH" ]]; then
     echo "ERROR: Gazebo world file not found: $WORLD_PATH" >&2
-    echo "Create worlds/city_${NUM_UAVS}uav.world or set WORLD_PATH explicitly." >&2
     exit 1
 fi
 
@@ -1007,9 +994,10 @@ GAZEBO_PID=$!
 echo "Gazebo running: PID=$GAZEBO_PID log=$GAZEBO_LOG"
 
 run_ros_in_root() {
-    bash --noprofile --norc -c '
-        set -eo pipefail
+    bash -lc '
+        set -e
         set +u
+        source /opt/ros/humble/setup.bash
         for setup_file in "$1" "$2" "$3"; do
             [[ -f "$setup_file" ]] && source "$setup_file"
         done
@@ -1081,7 +1069,7 @@ wait_for_root_topic_publisher() {
 validate_world_position_payload() {
     local payload="$1"
 
-    awk -v n="$NUM_UAVS" '
+    awk '
       function numeric(s) {
         return s ~ /^[-+]?[0-9]+([.][0-9]*)?([eE][-+]?[0-9]+)?$/ ||
                s ~ /^[-+]?[.][0-9]+([eE][-+]?[0-9]+)?$/
@@ -1095,10 +1083,10 @@ validate_world_position_payload() {
         if (count == 0 || count % 4 != 0) exit 1
         for (i = 1; i <= count; i += 4) {
           id = values[i] + 0
-          if (id != int(id) || id < 0 || id > n) exit 1
+          if (id != int(id) || id < 0 || id > 3) exit 1
           seen[id] = 1
         }
-        for (id = 0; id <= n; ++id)
+        for (id = 0; id <= 3; ++id)
           if (!seen[id]) exit 1
       }
     ' <<<"$payload"
@@ -1107,7 +1095,7 @@ validate_world_position_payload() {
 validate_obstacle_loss_payload() {
     local payload="$1"
 
-    awk -v n="$NUM_UAVS" '
+    awk '
       function numeric(s) {
         return s ~ /^[-+]?[0-9]+([.][0-9]*)?([eE][-+]?[0-9]+)?$/ ||
                s ~ /^[-+]?[.][0-9]+([eE][-+]?[0-9]+)?$/
@@ -1123,15 +1111,16 @@ validate_obstacle_loss_payload() {
           a = values[i] + 0
           b = values[i + 1] + 0
           loss = values[i + 2] + 0
-          if (a != int(a) || b != int(b) || a < 0 || b > n || a >= b)
+          if (a != int(a) || b != int(b) || a < 0 || b > 3 || a >= b)
             exit 1
           if (!numeric(values[i + 2]) || loss < 0)
             exit 1
           pairs[a "-" b] = 1
         }
-        for (a = 0; a <= n; ++a)
-          for (b = a + 1; b <= n; ++b)
-            if (!pairs[a "-" b]) exit 1
+        required[1] = "0-1"; required[2] = "0-2"; required[3] = "0-3"
+        required[4] = "1-2"; required[5] = "1-3"; required[6] = "2-3"
+        for (i = 1; i <= 6; ++i)
+          if (!pairs[required[i]]) exit 1
       }
     ' <<<"$payload"
 }
@@ -1201,7 +1190,7 @@ run_ros_in_root \
     --ros-args \
     -p model_states_topic:=/gazebo/model_states \
     -p uav_prefix:=iris_ \
-    -p n_uavs:="$NUM_UAVS" \
+    -p n_uavs:=3 \
     -p rate_hz:=10.0 \
     -p gcs_enabled:=true \
     -p gcs_model:=gcs \
@@ -1274,10 +1263,10 @@ validate_obstacle_pipeline() {
 
     receive_and_validate_pipeline_payload \
         /uav_world_positions validate_world_position_payload \
-        "world-position payload containing node IDs 0 through $NUM_UAVS"
+        "world-position payload containing node IDs 0,1,2,3"
     receive_and_validate_pipeline_payload \
         /link_obstacle_loss validate_obstacle_loss_payload \
-        "$EXPECTED_LINKS-link obstacle-loss payload with finite non-negative losses"
+        "six-link obstacle-loss payload with finite non-negative losses"
     wait_for_ns3_integration_check
     echo "Obstacle pipeline ready."
 
@@ -1443,7 +1432,7 @@ wait_for_sitl_ready() {
 
             echo "----- Gazebo messages for $namespace -----" >&2
             grep -iE \
-                "$namespace|iris_${namespace#uav}|ArduPilot|Broken.*connection" \
+                "$namespace|iris_[123]|ArduPilot|Broken.*connection" \
                 "${GAZEBO_LOG:-/tmp/gazebo_city.log}" |
                 tail -n 80 >&2 || true
             echo "------------------------------------------" >&2
@@ -1555,38 +1544,51 @@ while true; do
 done
 
 echo "micro_ros_agent ports ready inside gcsns:"
-for port in "${AGENT_PORTS[@]}"; do
-    sudo ip netns exec gcsns ss -lunp "sport = :$port"
-done
+sudo ip netns exec gcsns ss -lunp \
+    "( sport = :2019 or sport = :2020 or sport = :2021 )"
 # BEGIN GAZEBO FDM READINESS GATE
 wait_for_gazebo_fdm_ports 60
 # END GAZEBO FDM READINESS GATE
 
 echo "=== Starting namespaced SITL instances sequentially ==="
-for ((uav_id = 1; uav_id <= NUM_UAVS; uav_id++)); do
-    namespace="$(uav_namespace "$uav_id")"
-    instance=$((uav_id - 1))
-    mavlink_port="$(uav_mavlink_port "$uav_id")"
-    gazebo_ip="$(uav_management_host_ip "$uav_id")"
-    sitl_udp_port="$(uav_sitl_udp_port "$uav_id")"
 
-    echo "--- Starting UAV${uav_id} SITL ---"
-    launch_sitl         "$namespace"         "$instance"         "$uav_id"         "$mavlink_port"         "$gazebo_ip"         "${SITL_DEFAULTS[$uav_id]}"
+echo "--- Starting UAV1 SITL ---"
+launch_sitl uav1 0 1 5760 172.31.1.1 "$UAV1_DEFAULTS"
 
-    wait_for_sitl_ready         "$namespace"         "$sitl_udp_port"         "${SITL_PIDS[$((uav_id - 1))]}"         "/tmp/multi_uav_sitl/${namespace}/arducopter.log"
+wait_for_sitl_ready \
+    uav1 9003 "${SITL_PIDS[0]}" \
+    /tmp/multi_uav_sitl/uav1/arducopter.log
 
-    echo "UAV${uav_id} SITL startup complete."
-    sleep 2
-done
+echo "UAV1 SITL startup complete."
+sleep 2
 
-echo "All $NUM_UAVS SITL instances are running."
+echo "--- Starting UAV2 SITL ---"
+launch_sitl uav2 1 2 5770 172.31.2.1 "$UAV2_DEFAULTS"
+
+wait_for_sitl_ready \
+    uav2 9013 "${SITL_PIDS[1]}" \
+    /tmp/multi_uav_sitl/uav2/arducopter.log
+
+echo "UAV2 SITL startup complete."
+sleep 2
+
+echo "--- Starting UAV3 SITL ---"
+launch_sitl uav3 2 3 5780 172.31.3.1 "$UAV3_DEFAULTS"
+
+wait_for_sitl_ready \
+    uav3 9023 "${SITL_PIDS[2]}" \
+    /tmp/multi_uav_sitl/uav3/arducopter.log
+
+echo "UAV3 SITL startup complete."
+echo "All three SITL instances are running."
 
 run_ros_in_gcsns() {
     sudo ip netns exec gcsns \
         sudo -H -u "$RUN_USER" \
-        bash --noprofile --norc -c '
-            set -eo pipefail
+        bash -lc '
+            set -e
             set +u
+            source /opt/ros/humble/setup.bash
             source "$1"
             source "$2"
             set -u
@@ -1675,9 +1677,9 @@ wait_for_dds_gps() {
 }
 
 echo "=== Verifying namespaced AP_DDS GPS telemetry ==="
-for ((uav_number = 1; uav_number <= NUM_UAVS; uav_number++)); do
+for uav_number in 1 2 3; do
     if ! wait_for_dds_gps "$uav_number"; then
-        echo "Aborting before fleet_mission because UAV$uav_number DDS GPS is not ready." >&2
+        echo "Aborting before city_mission because UAV$uav_number DDS GPS is not ready." >&2
         exit 1
     fi
 done
@@ -1755,53 +1757,15 @@ start_drone_bridge() {
     echo "Started $node_name: PID=$! MAVLink=$mavlink_host:$mavlink_port log=$log_file"
 }
 
-mission_takeoff_altitude() {
-    local uav_id="$1"
-
-    python3 - "$MISSION_CONFIG" "$uav_id" <<'PY_ALTITUDE'
-import sys
-from pathlib import Path
-
-import yaml
-
-path = Path(sys.argv[1])
-uav_id = int(sys.argv[2])
-
-if not path.is_file():
-    raise SystemExit(f"Mission configuration not found: {path}")
-
-data = yaml.safe_load(path.read_text()) or {}
-uavs = data.get("uavs", {})
-entry = uavs.get(uav_id, uavs.get(str(uav_id)))
-
-if not isinstance(entry, dict):
-    raise SystemExit(f"Missing mission configuration for UAV{uav_id}")
-
-altitude = entry.get("takeoff_altitude")
-if altitude is None:
-    raise SystemExit(f"Missing takeoff_altitude for UAV{uav_id}")
-
-try:
-    altitude = float(altitude)
-except (TypeError, ValueError):
-    raise SystemExit(f"Invalid takeoff_altitude for UAV{uav_id}: {altitude!r}")
-
-if altitude <= 0:
-    raise SystemExit(f"takeoff_altitude must be positive for UAV{uav_id}")
-
-print(altitude)
-PY_ALTITUDE
-}
-
 echo "=== Starting drone_bridge nodes inside gcsns (ROS_DOMAIN_ID=$ROS_DOMAIN_ID) ==="
-for ((uav_id = 1; uav_id <= NUM_UAVS; uav_id++)); do
-    mavlink_host="$(uav_wireless_ip "$uav_id")"
-    mavlink_port="$(uav_mavlink_port "$uav_id")"
-    takeoff_altitude="$(mission_takeoff_altitude "$uav_id")"
+wait_for_sitl_tcp 1 10.42.0.11 5760
+start_drone_bridge 1 drone_bridge_uav1 10.42.0.11 5760 60.0 "${BRIDGE_LOGS[0]}"
 
-    wait_for_sitl_tcp "$uav_id" "$mavlink_host" "$mavlink_port"
-    start_drone_bridge         "$uav_id"         "drone_bridge_uav${uav_id}"         "$mavlink_host"         "$mavlink_port"         "$takeoff_altitude"         "${BRIDGE_LOGS[$((uav_id - 1))]}"
-done
+wait_for_sitl_tcp 2 10.42.0.12 5770
+start_drone_bridge 2 drone_bridge_uav2 10.42.0.12 5770 40.0 "${BRIDGE_LOGS[1]}"
+
+wait_for_sitl_tcp 3 10.42.0.13 5780
+start_drone_bridge 3 drone_bridge_uav3 10.42.0.13 5780 50.0 "${BRIDGE_LOGS[2]}"
 
 verify_mission_prerequisites() {
     local i
@@ -1846,6 +1810,12 @@ start_dynamic_cluster_manager() {
     if pgrep -u "$(id -u "$RUN_USER")" \
         -f '[d]ynamic_cluster_manager' >/dev/null; then
         echo "ERROR: A dynamic_cluster_manager process is already running." >&2
+        return 1
+    fi
+
+    if [[ "$CLUSTER_NUM_UAVS" != "3" ]]; then
+        echo "ERROR: This launcher currently contains a 3-UAV Gazebo/ns-3 scenario." >&2
+        echo "CLUSTER_NUM_UAVS must remain 3 until the fleet launcher is generalized." >&2
         return 1
     fi
 
@@ -1904,53 +1874,47 @@ start_dynamic_cluster_manager() {
 }
 
 start_city_mission() {
-    echo "=== Starting fleet mission inside gcsns ==="
-
-    MISSION_LOG="${MISSION_LOG:-/tmp/fleet_mission.log}"
-
-    sudo ip netns exec gcsns \
-    sudo -H -u "$RUN_USER" \
-    env -u SHELLOPTS \
-        NUM_UAVS="$NUM_UAVS" \
-        PROJECT_DIR="$PROJECT_DIR" \
-        ROS_DOMAIN_ID="$ROS_DOMAIN_ID" \
-        ROS2CLI_NO_DAEMON=1 \
-    bash --noprofile --norc -c '
-        set +u
-        set -eo pipefail
-        source /opt/ros/humble/setup.bash
-        source "$PROJECT_DIR/ros2/install/setup.bash"
-
-        echo "Mission fleet size: $NUM_UAVS"
-        echo "Mission file: $PROJECT_DIR/config/mission_plans.yaml"
-
-        exec ros2 run uav_controller fleet_mission \
-            --ros-args \
-            -p "num_uavs:=$NUM_UAVS" \
-            -p "mission_file:=$PROJECT_DIR/config/mission_plans.yaml"
-    ' >"$MISSION_LOG" 2>&1 &
-
-    MISSION_PID=$!
-    sleep 3
-
-    if ! kill -0 "$MISSION_PID" 2>/dev/null; then
-        echo "ERROR: fleet_mission exited during startup." >&2
-        tail -n 80 "$MISSION_LOG" >&2 || true
+    if sudo ip netns exec gcsns \
+        pgrep -u "$(id -u "$RUN_USER")" -f '[c]ity_mission' >/dev/null; then
+        echo "ERROR: A city_mission process is already running; refusing to start a duplicate." >&2
         return 1
     fi
 
-    echo "fleet_mission started:"
-    echo "  PID=$MISSION_PID"
-    echo "  UAVs=$NUM_UAVS"
-    echo "  log=$MISSION_LOG"
+    : >"$MISSION_LOG"
+    sudo ip netns exec gcsns \
+        sudo -H -u "$RUN_USER" \
+        bash -lc '
+            set -e
+            set +u
+            source /opt/ros/humble/setup.bash
+            source "$1"
+            source "$2"
+            set -u
+            export ROS_DOMAIN_ID="$3"
+            exec ros2 run uav_controller city_mission
+        ' mission-shell \
+        "$HOME/ardu_ws/install/setup.bash" \
+        "$PROJECT_DIR/ros2/install/setup.bash" \
+        "$ROS_DOMAIN_ID" \
+        >"$MISSION_LOG" 2>&1 &
+    MISSION_PID=$!
+
+    sleep 1
+    if ! kill -0 "$MISSION_PID" 2>/dev/null; then
+        echo "ERROR: city_mission exited during startup." >&2
+        cat "$MISSION_LOG" >&2 || true
+        return 1
+    fi
+    echo "city_mission started: PID=$MISSION_PID log=$MISSION_LOG"
 }
 
-echo "=== Final prerequisite check, dynamic clustering, and fleet mission startup ==="
+echo "=== Final prerequisite check, dynamic clustering, and city_mission startup ==="
 verify_mission_prerequisites
 
 echo "=== Starting dynamic clustering in the root ROS namespace ==="
 start_dynamic_cluster_manager
 
+echo "=== Starting city mission inside gcsns ==="
 start_city_mission
 
 MISSION_DEADLINE=$((SECONDS + MISSION_TIMEOUT_SEC))
@@ -1974,9 +1938,9 @@ while kill -0 "$MISSION_PID" 2>/dev/null; do
     fi
 
     if (( SECONDS >= MISSION_DEADLINE )); then
-        echo "ERROR: fleet_mission exceeded ${MISSION_TIMEOUT_SEC}s." >&2
+        echo "ERROR: city_mission exceeded ${MISSION_TIMEOUT_SEC}s." >&2
         echo "The mission process is still running and did not report completion." >&2
-        echo "----- Last fleet_mission messages -----" >&2
+        echo "----- Last city_mission messages -----" >&2
         tail -n 120 "$MISSION_LOG" >&2 || true
         echo "--------------------------------------" >&2
         exit 124
@@ -1984,7 +1948,7 @@ while kill -0 "$MISSION_PID" 2>/dev/null; do
 
     if (( SECONDS - MISSION_LAST_REPORT >= 30 )); then
         echo
-        echo "fleet_mission is still running. Recent messages:"
+        echo "city_mission is still running. Recent messages:"
         tail -n 8 "$MISSION_LOG" 2>/dev/null || true
         echo
         echo "dynamic_cluster_manager recent messages:"
@@ -2000,11 +1964,11 @@ wait "$MISSION_PID"
 mission_status=$?
 set -e
 if (( mission_status != 0 )); then
-    echo "ERROR: fleet_mission exited with status $mission_status; initiating cleanup." >&2
+    echo "ERROR: city_mission exited with status $mission_status; initiating cleanup." >&2
     echo "----- $MISSION_LOG -----" >&2
     cat "$MISSION_LOG" >&2 || true
     echo "------------------------" >&2
     exit "$mission_status"
 fi
 
-echo "fleet_mission completed successfully; initiating cleanup."
+echo "city_mission completed successfully; initiating cleanup."

@@ -513,11 +513,11 @@
       <link_name>iris::rotor_3</link_name>
     </plugin>
     <plugin name="arducopter_plugin" filename="libArduPilotPlugin.so">
-      <!-- UAV4 management link (UDP only):
-           SITL 172.31.4.2:9033 receives Gazebo FDM state.
-           Gazebo 172.31.4.1:9032 receives SITL servo output. -->
-      <listen_addr>172.31.4.1</listen_addr>
-      <fdm_addr>172.31.4.2</fdm_addr>
+      <!-- UAV3 management link (UDP only):
+           SITL 172.31.3.2:9033 receives Gazebo FDM state.
+           Gazebo 172.31.3.1:9032 receives SITL servo output. -->
+      <listen_addr>172.31.3.1</listen_addr>
+      <fdm_addr>172.31.3.2</fdm_addr>
       <fdm_port_in>9032</fdm_port_in>
       <fdm_port_out>9033</fdm_port_out>
       <!--
@@ -619,7 +619,7 @@
         <visualize>1</visualize>
         <plugin name="camera_controller" filename="libgazebo_ros_camera.so">
           <ros>
-            <namespace>/uav4</namespace>
+            <namespace>/uav3</namespace>
           </ros>
           <camera_name>camera</camera_name>
           <frame_name>camera_optical_frame</frame_name>
