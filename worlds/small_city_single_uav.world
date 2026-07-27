@@ -3,6 +3,14 @@
 <sdf version="1.6">
   <world name="default">
 
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <latitude_deg>6.0792673</latitude_deg>
+      <longitude_deg>80.1921607</longitude_deg>
+      <elevation>31</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+
     <gui>
      <camera name="user_camera">
        <pose>-40.637 0.86 2.365 0 0.1899 0.476</pose>
@@ -4561,35 +4569,38 @@
         <update_rate>20.0</update_rate>
     </plugin>
 
-    <model name="person_1">
-      <pose>118.94 67.75 0 0 0 0</pose>
+    <model name="person_center">
+      <pose>40.5 -187.9 -1.16 0 0 1.57</pose>
       <static>true</static>
       <include>
         <uri>model://person_standing</uri>
         <static>true</static>
       </include>
     </model>
+
 
     <model name="person_2">
-      <pose>119.94 68.75 0 0 0 -1.57</pose>
+      <pose>40.5 -186.9 -1.16 0 0 -1.57</pose>
       <static>true</static>
       <include>
         <uri>model://person_standing</uri>
         <static>true</static>
       </include>
     </model>
+
 
     <model name="person_3">
-      <pose>119.94 67.75 0 0 0 1.57</pose>
+      <pose>39.5 -187.9 -1.16 0 0 0</pose>
       <static>true</static>
       <include>
         <uri>model://person_standing</uri>
         <static>true</static>
       </include>
     </model>
+
 
     <model name="person_4">
-      <pose>120.94 67.75 0 0 0 3.14</pose>
+      <pose>41.5 -187.9 -1.16 0 0 3.14</pose>
       <static>true</static>
       <include>
         <uri>model://person_standing</uri>
@@ -4597,8 +4608,9 @@
       </include>
     </model>
 
+
     <model name="person_5">
-      <pose>119.94 66.75 0 0 0 1.57</pose>
+      <pose>40.5 -188.9 -1.16 0 0 1.57</pose>
       <static>true</static>
       <include>
         <uri>model://person_standing</uri>

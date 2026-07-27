@@ -43,9 +43,11 @@ echo "=== [2/5] SITL ==="
 mkdir -p /tmp/sitl_wp && cd /tmp/sitl_wp
 "$ARDUPILOT_HOME/build/sitl/bin/arducopter" \
   --model gazebo-iris --speedup 1 --sysid 1 \
+  --home=6.0790684,80.1915283,0.00,0 \
   --defaults "$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm,$HOME/FYP/multi_uav_sim/params/uav1_dds_flat.parm" \
   --sim-address=127.0.0.1 -I0 \
   > /tmp/sitl_wp.log 2>&1 &
+
 sleep 5
 
 echo "=== [3/5] mavproxy (unlocks SITL on port 5760) ==="
