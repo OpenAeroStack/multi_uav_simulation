@@ -18,6 +18,7 @@ source ~/FYP/multi_uav_sim/ros2/install/setup.bash
 export GAZEBO_MODEL_PATH=$HOME/FYP/multi_uav_sim/models:$GAZEBO_MODEL_PATH
 export GAZEBO_PLUGIN_PATH=$HOME/FYP/multi_uav_sim/install/multi_uav_gazebo_plugins/lib:$GAZEBO_PLUGIN_PATH
 export GAZEBO_RESOURCE_PATH=$HOME/FYP/multi_uav_sim:$HOME/FYP/multi_uav_sim/worlds:$GAZEBO_RESOURCE_PATH
+export GAZEBO_MODEL_PATH=$HOME/FYP/small_city_gazebo/models:$GAZEBO_MODEL_PATH
 
 cleanup() {
   echo "Shutting down..."
