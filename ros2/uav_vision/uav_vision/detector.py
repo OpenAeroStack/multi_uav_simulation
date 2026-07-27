@@ -65,12 +65,16 @@ class Detector(Node):
             os.path.expanduser('~/yolo_env/yolov8n.pt'))
         self.declare_parameter('conf_threshold', 0.25)
         self.declare_parameter('publish_debug', True)
+        self.declare_parameter('target_classes', '0')
 
         self._uav_id    = self.get_parameter('uav_id').value
         self._mode      = self.get_parameter('processing_mode').value
         model_path      = self.get_parameter('model_path').value
         self._conf      = float(self.get_parameter('conf_threshold').value)
         self._debug     = bool(self.get_parameter('publish_debug').value)
+        self._target_classes = [
+            int(c) for c in
+            str(self.get_parameter('target_classes').value).split(',')]
 
         # Load YOLO model
         self.get_logger().info(f'[Detector] Loading model: {model_path}')
@@ -145,7 +149,7 @@ class Detector(Node):
             img_bgr,
             verbose=False,
             conf=self._conf,
-            classes=[0])  # class 0 = person in COCO
+            classes=self._target_classes)
 
         inference_ms = (time.time() - t0) * 1000.0
 
@@ -170,7 +174,7 @@ class Detector(Node):
 
         self.get_logger().info(
             f'[Detector] #{self._frame_count:04d} | '
-            f'{len(detections)} person(s) | '
+            f'{len(detections)} detections(s) | '
             f'inference={inference_ms:.0f}ms')
 
         # Annotated debug image
