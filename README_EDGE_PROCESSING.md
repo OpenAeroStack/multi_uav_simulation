@@ -1,45 +1,40 @@
-# Edge vs Ground Processing — RPi5 Hardware-in-the-Loop
+# Edge Processing — RPi5 Hardware-in-the-Loop
 
 Branch: `ground-vs-edge-processing-RPi`
 
-This document explains the **edge-vs-ground vision experiment** and how it runs as
-**hardware-in-the-loop (HITL)** with a real **Raspberry Pi 5** as the onboard edge
-computer. For the base simulation setup (Gazebo, SITL, ROS 2), see the main
-[README.md](README.md).
+This document explains **edge processing**: running the vision detection **onboard
+the drone** (on a real Raspberry Pi 5) so that only tiny detection results — not
+video — travel over the wireless link to the ground station. For the base simulation
+setup (Gazebo, SITL, ROS 2), see the main [README.md](README.md).
 
 ---
 
-## 1. The question this answers
+## 1. What edge processing means here
 
-A surveillance drone sees people with its camera. Where should the detection run?
+A surveillance drone sees people with its camera. In **edge processing** the drone
+does the work itself:
 
-- **Edge processing** — run YOLO **onboard the drone**; send the ground station only
-  the tiny detection results (~76 bytes/frame).
-- **Ground processing** — stream the **video** to the ground station and run YOLO
-  there (tens of KB/frame over the link).
+1. The camera frame is processed **on the drone's onboard computer** (the RPi5).
+2. YOLO runs there and produces a small detection result (~76 bytes: class,
+   confidence, bounding box).
+3. **Only that result** is sent to the ground station over the wireless link.
 
-Edge saves bandwidth and keeps working when the radio link is bad; ground needs a
-big pipe but uses the drone's limited compute for nothing. We measure the trade-off
-(latency, bytes on the link, telemetry health) over a **realistic** ns-3-simulated
-Wi-Fi channel that includes building shadowing and fading.
+The heavy video never crosses the radio link — it stays on the drone. This saves
+bandwidth and keeps working even when the wireless channel is poor.
 
 ---
 
-## 2. Topology — 2 drones
+## 2. Setup — the RPi5 as the onboard edge computer
 
-| Drone | Flight (SITL) | Vision | Role |
-|---|---|---|---|
-| **UAV1** | host PC | host PC | "cluster"/host drone (baseline) |
-| **UAV2** | host PC | **Raspberry Pi 5** | real edge node under test |
-
-UAV2's autopilot (SITL) still runs on the host — only its **vision** moves to the
-Pi. Vision only for now; the Pi does not command the drone yet.
+The RPi5 is **UAV2's onboard computer**. Its autopilot (SITL) still runs on the
+host; only its **vision** runs on the Pi. Vision only for now — the Pi does not
+command the drone yet.
 
 ```
         HOST PC                                              RPi5  (UAV2)
 ┌────────────────────────┐                          ┌──────────────────────────┐
-│ Gazebo (both cameras)  │  /uav2/camera/image_raw   │  camera_relay            │
-│ SITL x2  ·  ns-3  · GCS │═════════════════════════▶│  detector (YOLO onboard) │
+│ Gazebo (UAV2 camera)   │  /uav2/camera/image_raw   │  camera_relay (throttle) │
+│ SITL   ·  ns-3  ·  GCS  │═════════════════════════▶│  detector (YOLO onboard) │
 │                        │  ETHERNET — sensor link    │        │                 │
 │                        │  (172.31.2.x, UNIMPAIRED)  │        │ /detections/uav2 │
 │  ns-3  ◀───────────────────────────────────────────────────┘  (~76 bytes)     │
@@ -58,45 +53,44 @@ reach the Pi — over the **USB-Gigabit-Ethernet cable**.
 On a *real* drone the camera is bolted to the Pi and connected by a **CSI ribbon
 cable**; the frame is captured onboard and never touches a network. In this HITL rig
 the Ethernet cable **stands in for that CSI cable**. This camera transport is a
-**simulation artifact** and is *not* part of what the experiment measures — it just
-feeds simulated pixels into the real edge processor. Raw 640×480 RGB is ~73 Mbps,
-which Gigabit Ethernet handles easily (and `camera_relay`'s `frame_rate_hz` throttle
-trims it further).
+**simulation artifact** and is *not* part of what is measured — it just feeds
+simulated pixels into the real edge processor. Raw 640×480 RGB is ~73 Mbps, which
+Gigabit Ethernet handles easily (and `camera_relay`'s `frame_rate_hz` throttle trims
+it further).
 
 ### Two logical links (both ride the Ethernet cable(s))
 
 | Link | Subnet | Carries | Impaired by ns-3? |
 |---|---|---|---|
 | Sensor / management | `172.31.2.x` | Gazebo camera → Pi (the drone's input bus) | No |
-| Wireless | `10.42.0.x` | Pi → GCS: **edge** = 76 B detections · **ground** = JPEG video | **Yes** |
+| Wireless | `10.42.0.x` | Pi → GCS: **76-byte detections only** | **Yes** |
 
-The GCS lives **only** on the wireless subnet, so the OS automatically routes
-detection/video traffic through ns-3 while camera traffic takes the plain sensor
-link. (Two USB-Ethernet adapters, or one adapter with two VLANs, keep the two links
-physically separate so real Wi-Fi never contaminates the simulated channel.)
+The GCS lives **only** on the wireless subnet, so the OS automatically routes the
+detection traffic through ns-3 while the camera takes the plain sensor link. (Two
+USB-Ethernet adapters, or one adapter with two VLANs, keep the two links physically
+separate so real Wi-Fi never contaminates the simulated channel.)
 
 ---
 
-## 4. The vision pipeline (`ros2/uav_vision/`)
+## 4. The edge nodes (`ros2/uav_vision/`)
 
-Same nodes in both modes; **where** you launch them decides the mode.
+All run on the drone side (the RPi5, or a namespace standing in for it), except the
+receiver/logger which run at the GCS:
 
-| Node | edge mode | ground mode |
+| Node | Where | Role |
 |---|---|---|
-| `camera_relay` | on Pi: republish raw frame **locally** → `/cluster/cam/uavN` | on Pi: JPEG-compress → `/relay/uavN/compressed` (crosses link) |
-| `detector` | on Pi: YOLO onboard → `/detections/uavN` (crosses link) | at GCS: YOLO on received frames |
-| `gcs_receiver` | at GCS: receive detections | at GCS: receive frames |
-| `metrics_logger` | at GCS: per-frame CSV (size, latency, `navsat_age`) | same |
+| `camera_relay` | drone (Pi) | subscribe raw camera, throttle to `frame_rate_hz`, republish **locally** on `/cluster/cam/uavN` |
+| `detector` | drone (Pi) | run YOLO on the local frame, publish `/detections/uavN` (~76 B) — this is what crosses the wireless link |
+| `gcs_receiver` | GCS | receive the detections |
+| `metrics_logger` | GCS | per-frame CSV: detection size, latency, `navsat_age` (telemetry health) |
 
-`camera_relay` is the valve that implements the edge/ground split: in **edge** mode
-it keeps the heavy video local and only detections cross the wireless link; in
-**ground** mode it ships compressed video across. See the docstrings in
-`ros2/uav_vision/uav_vision/` for details (the nodes deliberately avoid `cv_bridge`
-due to a NumPy 2.x incompatibility).
+The nodes deliberately avoid `cv_bridge` (NumPy 2.x incompatibility) and do their own
+Image↔numpy conversion. `camera_relay` keeps the raw frame **local** to the drone —
+nothing but the detection result leaves the onboard computer.
 
 ---
 
-## 5. Host-only dry run (namespaces stand in for the Pi)
+## 5. Host-only dry run (namespace stands in for the Pi)
 
 Before the Pi is wired in, the whole thing runs on the host, with a **Linux network
 namespace playing the RPi5's role** (`uav1ns` in the examples below; the real Pi will
@@ -137,7 +131,7 @@ python3 scripts/world_pos_publisher.py
 ### 5.3 The UDP-only DDS profile (REQUIRED on a single host)
 
 On one machine, `/dev/shm` is shared across namespaces, so FastDDS would deliver
-detections through **shared memory and bypass ns-3** — making any latency/loss number
+detections through **shared memory and bypass ns-3** — making any latency number
 meaningless. Force UDP with the provided profile:
 
 ```bash
@@ -147,13 +141,13 @@ export FASTRTPS_DEFAULT_PROFILES_FILE=$PWD/config/fastdds_udp_only.xml
 > On the **real Pi** (a separate machine with no shared `/dev/shm`) this profile is
 > unnecessary but harmless — FastDDS already uses UDP there.
 
-### 5.4 Launch the vision nodes (edge mode)
+### 5.4 Launch the edge nodes
 
-Each vision node runs inside a namespace and exports the DDS profile. The detector
-uses the repo `venv` python (for `ultralytics`) with ROS on the path.
+Each node runs inside a namespace and exports the DDS profile. The detector uses the
+repo `venv` python (for `ultralytics`) with ROS on the path.
 
 ```bash
-# uav1ns — camera_relay
+# uav1ns — camera_relay (throttle + local republish)
 sudo ip netns exec uav1ns bash -c 'cd '"$PWD"' && source /opt/ros/humble/setup.bash && source install/setup.bash && export FASTRTPS_DEFAULT_PROFILES_FILE='"$PWD"'/config/fastdds_udp_only.xml && ros2 run uav_vision camera_relay --ros-args -p uav_id:=1 -p processing_mode:=edge -p frame_rate_hz:=2.0'
 
 # uav1ns — detector (YOLO onboard)
@@ -167,19 +161,16 @@ sudo ip netns exec gcsns bash -c 'cd '"$PWD"' && source /opt/ros/humble/setup.ba
 the ns-3 simulated Wi-Fi. Fly a mission (e.g. `scripts/single_drone_takeoff.py`) so
 the camera passes over people and the person count goes non-zero.
 
-For **ground mode**, launch `camera_relay` with `processing_mode:=ground` and run the
-`detector` in **`gcsns`** instead of the drone namespace.
-
 ---
 
-## 6. Moving from namespace to real Pi
+## 6. Moving from namespace to the real Pi
 
 The namespace `uav2ns` and the RPi5 are interchangeable by design:
 
 1. Replace the `uav2ns` veth in bridge `br-uav2` with the **physical USB-Ethernet
    NIC** facing the Pi.
 2. Give the Pi `10.42.0.12` (wireless, routed through ns-3) and `172.31.2.2` (sensor).
-3. Run the same `camera_relay` + `detector` (edge) on the Pi. No DDS profile needed.
+3. Run the same `camera_relay` + `detector` on the Pi. No DDS profile needed.
 4. Sync clocks (chrony/PTP) so cross-machine latency numbers are valid.
 
 See `docs/HITL_INTEGRATION_PLAN.md` for the full phased plan and open items.
@@ -190,7 +181,7 @@ See `docs/HITL_INTEGRATION_PLAN.md` for the full phased plan and open items.
 
 | Path | What |
 |---|---|
-| `ros2/uav_vision/` | the vision nodes (`camera_relay`, `detector`, `gcs_receiver`, `metrics_logger`) |
+| `ros2/uav_vision/` | the edge nodes (`camera_relay`, `detector`, `gcs_receiver`, `metrics_logger`) |
 | `scripts/netns/wireless_up.sh` · `management_up.sh` | create namespaces, TAPs, the two links |
 | `scripts/netns/netns_down.sh` | tear everything down |
 | `config/fastdds_udp_only.xml` | force UDP (disable SHM) for host-only runs |
