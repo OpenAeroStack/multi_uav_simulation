@@ -44,6 +44,7 @@ import json
 import os
 import time
 
+
 import cv2
 import numpy as np
 import rclpy
@@ -51,6 +52,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import Image, CompressedImage
 from std_msgs.msg import String
+from datetime import datetime
 
 
 class Detector(Node):
@@ -95,7 +97,7 @@ class Detector(Node):
 
         # Input topic depends on mode
         if self._mode == 'edge':
-            in_topic = f'/cluster/cam/uav{self._uav_id}'
+            in_topic = f'/uav{self._uav_id}/camera/image_raw'
             self._sub = self.create_subscription(
                 Image, in_topic, self._on_raw, qos)
             self.get_logger().info(
@@ -146,10 +148,12 @@ class Detector(Node):
         t0 = time.time()
 
         results = self._model(
-            img_bgr,
-            verbose=False,
-            conf=self._conf,
-            classes=self._target_classes)
+        img_bgr,
+        imgsz=960,
+        conf=0.25,
+        classes=self._target_classes,
+        verbose=False
+        )
 
         inference_ms = (time.time() - t0) * 1000.0
 
@@ -179,13 +183,30 @@ class Detector(Node):
 
         # Annotated debug image
         if self._debug_pub is not None:
-            annotated = results[0].plot()  # BGR numpy array with boxes
-            debug_msg              = Image()
-            debug_msg.height       = annotated.shape[0]
-            debug_msg.width        = annotated.shape[1]
-            debug_msg.encoding     = 'bgr8'
-            debug_msg.step         = annotated.shape[1] * 3
-            debug_msg.data         = annotated.tobytes()
+            annotated = results[0].plot()
+
+            # Always create directory
+            save_dir = "/tmp/yolo_frames"
+            os.makedirs(save_dir, exist_ok=True)
+
+            # Save only frames with detections
+            if len(detections) > 0:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+                filename = os.path.join(
+                    save_dir,
+                    f"det_{timestamp}.jpg"
+                )
+
+                cv2.imwrite(filename, annotated)
+
+            debug_msg = Image()
+            debug_msg.height = annotated.shape[0]
+            debug_msg.width = annotated.shape[1]
+            debug_msg.encoding = 'bgr8'
+            debug_msg.step = annotated.shape[1] * 3
+            debug_msg.data = annotated.tobytes()
+
             self._debug_pub.publish(debug_msg)
 
     def _on_raw(self, msg: Image) -> None:

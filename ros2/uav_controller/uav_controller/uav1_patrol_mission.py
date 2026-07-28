@@ -39,7 +39,7 @@ from std_msgs.msg import Float32
 CENTER_LAT        = 6.079429
 CENTER_LON        = 80.193174
 BOX_SIZE_M        = 25.0     # full side length of the box
-PATROL_ALTITUDE   = 30.0     # metres, relative
+PATROL_ALTITUDE   = 25.0     # metres, relative
 LAPS              = 2
 ARRIVAL_RADIUS_M  = 2.5      # horizontal distance counted as "arrived"
 WAYPOINT_TIMEOUT  = 40.0     # seconds to wait per waypoint before giving up
