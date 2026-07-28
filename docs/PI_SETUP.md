@@ -117,7 +117,11 @@ sudo apt install -y python3-venv python3-pip libgl1 libglib2.0-0
 python3 -m venv ~/yolo_env --system-site-packages   # see ROS/cv2 from system
 source ~/yolo_env/bin/activate
 pip install --upgrade pip
-pip install ultralytics                              # brings torch (CPU) for arm64
+# IMPORTANT (Pi 4): install CPU-only torch FIRST. The default arm64 torch wheel is a
+# CUDA build whose CPU kernels use instructions the Pi 4 (Cortex-A72) lacks -> YOLO
+# inference crashes with "Illegal instruction" (SIGILL). The +cpu wheels fix it.
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+pip install ultralytics
 # grab the small model weights (same one the host uses)
 python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"   # downloads yolov8n.pt to CWD
 ```
