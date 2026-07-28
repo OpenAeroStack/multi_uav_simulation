@@ -23,7 +23,7 @@
 
 SHELL := /bin/bash
 .ONESHELL:
-.PHONY: help netns netns-down gazebo ns3 pos sitl relay detector gcs status down
+.PHONY: help netns netns-down gazebo ns3 pos sitl relay detector gcs mission takeoff status down
 
 # ---- paths (edit here if your machine differs) ----
 PROJECT  := /home/anton/multi_uav_simulation
@@ -41,6 +41,9 @@ MODEL    := $(PROJECT)/yolov8n.pt
 # which drone (1..3); the Pi will be UAV 2
 UAV      := 1
 
+# the invoking (non-root) user — so flight scripts use YOUR python (~/.local has pymavlink)
+ME       := $(shell whoami)
+
 # ROS + workspace overlay, sourced by every ROS target
 ROS = source /opt/ros/humble/setup.bash && source $(PROJECT)/install/setup.bash
 
@@ -54,6 +57,8 @@ help:
 	@echo "  relay        (sudo) camera_relay, edge                 [Terminal E]"
 	@echo "  detector     (sudo) YOLO detector, edge                [Terminal F]"
 	@echo "  gcs          (sudo) ground-station receiver            [Terminal G]"
+	@echo "  mission      (sudo) arm + takeoff + fly waypoints (UAV$(UAV))  [Terminal H]"
+	@echo "  takeoff      (sudo) arm + hover at 10 m (sanity check)"
 	@echo "  status       show what is running"
 	@echo "  down         kill all sim processes"
 	@echo "  netns-down   (sudo) remove namespaces"
@@ -119,6 +124,18 @@ gcs:
 	  cd $(PROJECT) && source /opt/ros/humble/setup.bash && source install/setup.bash && \
 	  export FASTRTPS_DEFAULT_PROFILES_FILE=$(DDS) && \
 	  ros2 run uav_vision gcs_receiver --ros-args -p uav_id:=$(UAV) -p processing_mode:=edge'
+
+# 9. Fly the drone. The mission/takeoff scripts talk MAVLink to SITL on
+#    127.0.0.1:5760 — which lives INSIDE the drone namespace, so run there.
+#    'mission' = arm + take off + fly waypoints (camera passes over the scene).
+#    'takeoff' = arm + hover at 10 m (simpler sanity check).
+#    We enter the namespace as root (required) then drop back to $(ME) with
+#    runuser, so python finds pymavlink in your ~/.local site-packages.
+mission:
+	sudo ip netns exec uav$(UAV)ns runuser -u $(ME) -- bash -c 'cd $(PROJECT) && python3 scripts/single_drone_mission.py'
+
+takeoff:
+	sudo ip netns exec uav$(UAV)ns runuser -u $(ME) -- bash -c 'cd $(PROJECT) && python3 scripts/single_drone_takeoff.py'
 
 status:
 	@echo "gazebo:   $$(pgrep -xc gzserver)"
