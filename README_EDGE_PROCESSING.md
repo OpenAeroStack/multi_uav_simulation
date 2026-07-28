@@ -161,6 +161,47 @@ sudo ip netns exec gcsns bash -c 'cd '"$PWD"' && source /opt/ros/humble/setup.ba
 the ns-3 simulated Wi-Fi. Fly a mission (e.g. `scripts/single_drone_takeoff.py`) so
 the camera passes over people and the person count goes non-zero.
 
+### 5.5 The easy way — `Makefile.edge` (one word per terminal)
+
+Typing those long commands across seven terminals is error-prone, so
+[`Makefile.edge`](Makefile.edge) wraps each one in a one-word target. It already sets
+every path, the ROS overlay, `GAZEBO_MODEL_DATABASE_URI=` (offline models),
+`NS3_EXECUTABLE_PATH`, and the UDP-only DDS profile for you.
+
+```bash
+# optional: rename so you can drop the -f flag → just `make gazebo`, etc.
+mv Makefile.edge Makefile
+```
+
+Each long-running target runs in the **foreground**, so give it its **own terminal**.
+Bring-up order:
+
+| Step | Command | Terminal | sudo | What it does |
+|---|---|---|---|---|
+| 1 | `make netns` | one-shot | yes | create namespaces + TAPs + both links |
+| 2 | `make gazebo` | A | no | 3D world + camera |
+| 3 | `make ns3` | B | no | simulated Wi-Fi (needs the taps) |
+| 4 | `make pos` | C | no | feed drone position to ns-3 |
+| 5 | `make sitl` | D | yes | flight brain inside `uav1ns` |
+| 6 | `make relay` | E | yes | `camera_relay` (edge) |
+| 7 | `make detector` | F | yes | YOLO `detector` (edge) |
+| 8 | `make gcs` | G | yes | `gcs_receiver` at the GCS |
+
+Helpers (any terminal):
+
+```bash
+make status        # what's running (gazebo / ns-3 / pos / SITL / namespaces)
+make down          # kill all sim processes (leaves namespaces intact)
+make netns-down    # remove the namespaces
+make help          # list every target
+```
+
+Pick a different drone with `UAV=<n>`, e.g. `make sitl UAV=2` (the Pi will be UAV 2).
+Namespaces are temporary — rerun `make netns` after a reboot.
+
+> Use `make -f Makefile.edge <target>` if you keep the original filename instead of
+> renaming it to `Makefile`.
+
 ---
 
 ## 6. Moving from namespace to the real Pi
@@ -181,6 +222,7 @@ See `docs/HITL_INTEGRATION_PLAN.md` for the full phased plan and open items.
 
 | Path | What |
 |---|---|
+| `Makefile.edge` | one-word shortcuts for the whole host bring-up (see §5.5) |
 | `ros2/uav_vision/` | the edge nodes (`camera_relay`, `detector`, `gcs_receiver`, `metrics_logger`) |
 | `scripts/netns/wireless_up.sh` · `management_up.sh` | create namespaces, TAPs, the two links |
 | `scripts/netns/netns_down.sh` | tear everything down |

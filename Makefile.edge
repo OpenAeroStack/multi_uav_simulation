@@ -1,0 +1,137 @@
+# Makefile.edge — one-word shortcuts for the edge-processing host rehearsal.
+#
+# Usage:  make -f Makefile.edge <target>
+#   (or rename to Makefile to just type `make <target>`)
+#
+# Each long-running target runs in the FOREGROUND, so open one terminal per
+# target. Typical order (each in its own terminal unless noted):
+#
+#   make -f Makefile.edge netns      # 1. (sudo, one-shot) create namespaces + taps
+#   make -f Makefile.edge gazebo     # 2. Terminal A: 3D world + camera
+#   make -f Makefile.edge ns3        # 3. Terminal B: simulated Wi-Fi (needs taps)
+#   make -f Makefile.edge pos        # 4. Terminal C: feed drone position to ns-3
+#   make -f Makefile.edge sitl       # 5. Terminal D: (sudo) flight brain in uav1ns
+#   make -f Makefile.edge relay      # 6. Terminal E: (sudo) camera_relay  (edge)
+#   make -f Makefile.edge detector   # 7. Terminal F: (sudo) YOLO detector (edge)
+#   make -f Makefile.edge gcs        # 8. Terminal G: (sudo) ground-station receiver
+#
+#   make -f Makefile.edge status     # what's running
+#   make -f Makefile.edge down       # kill all sim processes
+#   make -f Makefile.edge netns-down # (sudo) remove namespaces
+#
+# Pick the drone with UAV=<n> (default 1), e.g.  make -f Makefile.edge sitl UAV=2
+
+SHELL := /bin/bash
+.ONESHELL:
+.PHONY: help netns netns-down gazebo ns3 pos sitl relay detector gcs status down
+
+# ---- paths (edit here if your machine differs) ----
+PROJECT  := /home/anton/multi_uav_simulation
+AP       := /home/anton/ardu_ws/src/ardupilot
+NS3ROOT  := /home/anton/ns-allinone-3.38/ns-3.38
+APGAZEBO := /home/anton/ardupilot_gazebo/build
+
+NS3BIN   := $(NS3ROOT)/build/scratch/multi_uav_simulation/ns3.38-three_uav_tapbridge_integrated-default
+WORLD    := $(PROJECT)/worlds/small_city_single_uav.world
+DDS      := $(PROJECT)/config/fastdds_udp_only.xml
+PYVENV   := $(PROJECT)/venv/bin/python
+DETBIN   := $(PROJECT)/install/uav_vision/lib/uav_vision/detector
+MODEL    := $(PROJECT)/yolov8n.pt
+
+# which drone (1..3); the Pi will be UAV 2
+UAV      := 1
+
+# ROS + workspace overlay, sourced by every ROS target
+ROS = source /opt/ros/humble/setup.bash && source $(PROJECT)/install/setup.bash
+
+help:
+	@echo "Edge-processing host rehearsal. Run each in its own terminal:"
+	@echo "  netns        (sudo) create namespaces + taps           [one-shot]"
+	@echo "  gazebo       3D world + camera                         [Terminal A]"
+	@echo "  ns3          simulated Wi-Fi (needs taps)              [Terminal B]"
+	@echo "  pos          feed drone position to ns-3               [Terminal C]"
+	@echo "  sitl         (sudo) flight brain in uav$(UAV)ns             [Terminal D]"
+	@echo "  relay        (sudo) camera_relay, edge                 [Terminal E]"
+	@echo "  detector     (sudo) YOLO detector, edge                [Terminal F]"
+	@echo "  gcs          (sudo) ground-station receiver            [Terminal G]"
+	@echo "  status       show what is running"
+	@echo "  down         kill all sim processes"
+	@echo "  netns-down   (sudo) remove namespaces"
+	@echo "Pick a drone with UAV=<n>, e.g. 'make -f Makefile.edge sitl UAV=2'"
+
+# 1. Network plumbing (root). Namespaces/taps are temporary — redo after a reboot.
+netns:
+	sudo bash $(PROJECT)/scripts/netns/wireless_up.sh
+	sudo bash $(PROJECT)/scripts/netns/management_up.sh
+
+netns-down:
+	sudo bash $(PROJECT)/scripts/netns/netns_down.sh
+
+# 2. Gazebo: physics + camera (root namespace, no sudo).
+gazebo:
+	export ARDUPILOT_HOME=$(AP)
+	export GAZEBO_MODEL_PATH=$(PROJECT)/models:/usr/share/gazebo-11/models
+	export GAZEBO_RESOURCE_PATH=/usr/share/gazebo-11
+	export GAZEBO_MODEL_DATABASE_URI=          # blank = use ONLY local models, never fetch online
+	export GAZEBO_PLUGIN_PATH=/opt/ros/humble/lib:$(APGAZEBO):$(PROJECT)/install/multi_uav_gazebo_plugins/lib:/usr/lib/x86_64-linux-gnu/gazebo-11/plugins
+	export LD_LIBRARY_PATH=/opt/ros/humble/lib:$$LD_LIBRARY_PATH
+	$(ROS)
+	gzserver --verbose $(WORLD)
+
+# 3. ns-3: the simulated wireless channel. NS3_EXECUTABLE_PATH lets TapBridge
+#    find its tap-creator helper when the binary is run directly.
+ns3:
+	$(ROS)
+	export NS3_EXECUTABLE_PATH=$(NS3ROOT)/build/src/tap-bridge:$(NS3ROOT)/build/src/fd-net-device:$(NS3ROOT)/build/utils
+	$(NS3BIN) --simTime=0
+
+# 4. Position feed: reads Gazebo poses, tells ns-3 where the nodes are.
+pos:
+	$(ROS)
+	python3 $(PROJECT)/scripts/world_pos_publisher.py
+
+# 5. SITL (flight brain) INSIDE the drone namespace. FDM points at the host
+#    side of the sensor link (172.31.<UAV>.1).
+sitl:
+	sudo ip netns exec uav$(UAV)ns bash -c '\
+	  mkdir -p /tmp/sitl_uav$(UAV)_netns && cd /tmp/sitl_uav$(UAV)_netns && \
+	  $(AP)/build/sitl/bin/arducopter --model gazebo-iris --speedup 1 --sysid $(UAV) \
+	    --defaults $(AP)/Tools/autotest/default_params/copter.parm,$(AP)/Tools/autotest/default_params/gazebo-iris.parm \
+	    --sim-address=172.31.$(UAV).1 -I$$(($(UAV)-1))'
+
+# 6. camera_relay (edge): throttle + republish raw frame locally in the namespace.
+relay:
+	sudo ip netns exec uav$(UAV)ns bash -c '\
+	  cd $(PROJECT) && source /opt/ros/humble/setup.bash && source install/setup.bash && \
+	  export FASTRTPS_DEFAULT_PROFILES_FILE=$(DDS) && \
+	  ros2 run uav_vision camera_relay --ros-args -p uav_id:=$(UAV) -p processing_mode:=edge -p frame_rate_hz:=2.0'
+
+# 7. detector (edge): YOLO onboard. Uses the venv python for ultralytics.
+detector:
+	sudo ip netns exec uav$(UAV)ns bash -c '\
+	  cd $(PROJECT) && source /opt/ros/humble/setup.bash && source install/setup.bash && \
+	  export FASTRTPS_DEFAULT_PROFILES_FILE=$(DDS) && \
+	  $(PYVENV) $(DETBIN) --ros-args -p uav_id:=$(UAV) -p processing_mode:=edge -p model_path:=$(MODEL)'
+
+# 8. gcs_receiver (edge): receives the detections that crossed ns-3.
+gcs:
+	sudo ip netns exec gcsns bash -c '\
+	  cd $(PROJECT) && source /opt/ros/humble/setup.bash && source install/setup.bash && \
+	  export FASTRTPS_DEFAULT_PROFILES_FILE=$(DDS) && \
+	  ros2 run uav_vision gcs_receiver --ros-args -p uav_id:=$(UAV) -p processing_mode:=edge'
+
+status:
+	@echo "gazebo:   $$(pgrep -xc gzserver)"
+	@echo "ns-3:     $$(pgrep -fc '[n]s3.38-three_uav_tapbridge')"
+	@echo "pos-feed: $$(pgrep -fc '[w]orld_pos_publisher')"
+	@echo "SITL:     $$(pgrep -xc arducopter)"
+	@echo "namespaces:"; ip netns list 2>/dev/null || echo "  none"
+
+down:
+	-pkill -9 -x gzserver
+	-pkill -9 -x gzclient
+	-pkill -9 -x arducopter
+	-pkill -9 -f 'ns3.38-three_uav'
+	-pkill -9 -f world_pos_publisher
+	-pkill -9 -f 'lib/uav_vision'
+	@echo "sim processes stopped (namespaces left intact; use netns-down to remove them)"
