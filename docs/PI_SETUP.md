@@ -1,21 +1,17 @@
-# Raspberry Pi 5 Setup — Edge Vision Node (Stage B)
+# Raspberry Pi 4B Setup — Edge Vision Node (Stage B)
 
-Goal: get a **boxed Raspberry Pi 5** to the point where it runs UAV2's onboard vision
+Goal: get a **Raspberry Pi 4B** to the point where it runs UAV2's onboard vision
 (`camera_relay` + `detector`) and swaps in for the `uav2ns` namespace in the HITL rig.
 The autopilot (SITL), Gazebo, ns-3 and the GCS all stay on the host PC.
 
-> **IMPORTANT — the Pi 5 needs Ubuntu 24.04, NOT 22.04.**
-> Ubuntu 22.04 does **not** support the Pi 5 (its 5.15 kernel lacks the BCM2712 drivers) —
-> a 22.04 card simply won't boot. The Pi 5 is certified for **Ubuntu 24.04 LTS**, whose ROS
-> distro is **Jazzy**.
+> **Board matters — this guide is for the Raspberry Pi 4B.** The Pi 4B fully supports
+> **Ubuntu 22.04**, so it runs **exactly the same stack as the host**:
+> **Ubuntu 22.04 (jammy) · 64-bit ARM (arm64) · ROS 2 Humble.** No version mismatch, no
+> workarounds — an exact match with the host means DDS "just works."
 >
-> The host runs **Ubuntu 22.04 + ROS 2 Humble**. Cross-distro (Jazzy↔Humble) DDS is normally
-> risky, BUT the `uav_vision` nodes use **only standard messages** — `std_msgs/String`
-> (JSON detections) and `sensor_msgs/Image`/`CompressedImage` (camera) — which are **identical
-> across Humble and Jazzy**, so the Pi(Jazzy)↔host(Humble) link works for the topics we use.
-> If it ever misbehaves, the fallback is running **ROS 2 Humble in Docker** on the Pi.
->
-> So on the Pi: **Ubuntu 24.04 (noble) · 64-bit ARM (arm64) · ROS 2 Jazzy.**
+> (Note: the **Pi 5** is different — it needs Ubuntu 24.04 and won't boot 22.04. If you ever
+> switch to a Pi 5, you'd use 24.04 + ROS 2 Jazzy, or run Humble in Docker. This guide assumes
+> the **Pi 4B**.)
 
 This guide is **phased**. Do Phase 3 fully (the Pi becomes a working ROS vision box on
 its own), then Phase 4 (wire it into the sim the easy way), then Phase 5 (add the ns-3
@@ -38,19 +34,16 @@ impaired link for the real HITL measurement).
 
 ## Phase 3 — Turn the boxed Pi into a working ROS vision box
 
-### 3.1 Flash Ubuntu 24.04 (on your host PC)
-
-Because the Pi 5 officially supports 24.04, it appears **directly in Pi Imager's menu** — no
-custom-image download or manual `network-config` editing needed, and the OS-customisation
-(WiFi/SSH) applies correctly.
+### 3.1 Flash Ubuntu 22.04 (on your host PC)
 
 1. Install **Raspberry Pi Imager** on the host:
    ```bash
    sudo apt update && sudo apt install -y rpi-imager
    ```
 2. Insert the microSD card, run `rpi-imager` and choose:
-   - **Device:** Raspberry Pi 5
-   - **OS:** *Other general-purpose OS → Ubuntu → **Ubuntu Server 24.04.x LTS (64-bit)***
+   - **Device: Raspberry Pi 4** ← IMPORTANT. If you pick "Pi 5" here, Imager HIDES 22.04
+     (22.04 is not Pi-5-compatible). Selecting Pi 4 makes 22.04 appear.
+   - **OS:** *Other general-purpose OS → Ubuntu → **Ubuntu Server 22.04.x LTS (64-bit)***
      (Server, not Desktop — lighter for a headless companion computer.)
    - **Storage:** your microSD card
 3. When prompted, open **OS Customisation → General** and set:
@@ -62,11 +55,9 @@ custom-image download or manual `network-config` editing needed, and the OS-cust
 4. **Services tab → Enable SSH** → Use password authentication.
 5. **Save → Write.** Eject → into the Pi → power on → wait 2–3 min for first boot.
 
-> **DO NOT use Ubuntu 22.04** — it will not boot on the Pi 5.
->
-> **Bulletproof backup if WiFi still won't connect:** the Pi 5 has a built-in Ethernet port.
-> Plug a cable from it to your host's USB-Ethernet adapter (or a router LAN port) and reach it
-> over the wire — no WiFi needed. This is also the link used later in Phase 4/5.
+> **Bulletproof backup if WiFi won't connect:** the Pi 4B has a built-in Ethernet port. Plug a
+> cable from it to your host's USB-Ethernet adapter (or a router LAN port) and reach it over the
+> wire — no WiFi needed. This is also the link used later in Phase 4/5.
 >
 > **cloud-init only applies on FIRST boot** — if you change WiFi/SSH after the Pi has already
 > booted once, editing `network-config` on the card does nothing; **re-flash** to re-apply.
@@ -86,7 +77,7 @@ sudo apt update && sudo apt full-upgrade -y
 sudo reboot
 ```
 
-### 3.3 Install ROS 2 Jazzy (on the Pi — 24.04's distro)
+### 3.3 Install ROS 2 Humble (on the Pi — matches the host exactly)
 
 ```bash
 # locale
@@ -106,15 +97,15 @@ http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME
 
 # install (ros-base is enough for a headless vision node; add colcon + rosdep)
 sudo apt update
-sudo apt install -y ros-jazzy-ros-base ros-dev-tools python3-colcon-common-extensions
+sudo apt install -y ros-humble-ros-base ros-dev-tools python3-colcon-common-extensions
 
 # make it available every shell
-echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
+echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
 source ~/.bashrc
 ```
 Sanity check:
 ```bash
-ros2 --help >/dev/null && echo "ROS 2 Jazzy OK"
+ros2 --help >/dev/null && echo "ROS 2 Humble OK"
 ```
 
 ### 3.4 Python env for YOLO (on the Pi)
@@ -142,7 +133,7 @@ cd ~/multi_uav_simulation
 git checkout ground-vs-edge-processing-RPi
 
 # build ONLY the vision package (the Pi doesn't need gazebo/ns-3 packages)
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/humble/setup.bash
 colcon build --packages-select uav_vision
 echo "source ~/multi_uav_simulation/install/setup.bash" >> ~/.bashrc
 source ~/.bashrc
