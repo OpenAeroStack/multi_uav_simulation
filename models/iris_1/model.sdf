@@ -606,19 +606,19 @@
       <sensor name="iris1_camera" type="camera">
         <pose>0 0 0 0 1.0472 0</pose>
         <camera>
-          <horizontal_fov>2.0</horizontal_fov>
+          <horizontal_fov>0.9</horizontal_fov>
           <image>
-            <width>640</width>
-            <height>480</height>
+            <width>1280</width>
+            <height>720</height>
             <format>R8G8B8</format>
           </image>
           <clip>
             <near>0.05</near>
-            <far>15000</far>
+            <far>2000</far>
           </clip>
         </camera>
         <always_on>1</always_on>
-        <update_rate>10</update_rate>
+        <update_rate>20</update_rate>
         <visualize>1</visualize>
         <plugin name="camera_controller" filename="libgazebo_ros_camera.so">
           <ros>

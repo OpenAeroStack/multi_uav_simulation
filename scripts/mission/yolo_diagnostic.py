@@ -25,7 +25,12 @@ class Grab(Node):
         print(f"Frame: {msg.width}x{msg.height}, encoding={msg.encoding}")
 
         model = YOLO('~/yolo_env/yolov8n.pt'.replace('~', '/home/randilsk'))
-        results = model(arr, verbose=False, conf=0.02)  # NO class filter at all
+        results = model(
+            arr,
+            imgsz=1280,
+            conf=0.25,
+            verbose=False
+        )
 
         boxes = results[0].boxes
         print(f"\nTotal raw detections (any class): {len(boxes)}")

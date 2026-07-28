@@ -109,7 +109,7 @@ class CameraRelay(Node):
         self._latest_msg = None
 
         if self._mode == 'edge':
-
+            msg.header.frame_id = str(time.time())
             self._pub.publish(msg)
 
         else:
