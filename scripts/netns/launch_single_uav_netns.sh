@@ -227,6 +227,8 @@ sudo ip netns exec uav1ns sudo -H -u "$RUN_USER" bash -c '
     > "$SITL_LOG_DIR/arducopter.log" 2>&1 &
 SITL_PID=$!
 
+
+
 echo "  Waiting for SITL UDP 9003 inside uav1ns..."
 deadline=$((SECONDS + 60))
 while ! sudo ip netns exec uav1ns ss -H -lun "sport = :9003" | grep -q .; do
