@@ -35,22 +35,44 @@ impaired link for the real HITL measurement).
    ```bash
    sudo apt update && sudo apt install -y rpi-imager
    ```
-2. Insert the microSD card into the host.
-3. Run `rpi-imager` and choose:
+   > **NOTE:** current Pi Imager only lists the newest LTS (24.04) for the Pi 5 — **22.04
+   > will NOT appear** in the OS menu. So we flash the official 22.04 image with "Use
+   > custom." Do NOT use 24.04 — ROS 2 Humble needs 22.04.
+2. Download the official 22.04 arm64 Pi image on the host (no need to unzip — Imager reads
+   `.img.xz` directly):
+   ```bash
+   cd ~/Downloads
+   wget https://cdimage.ubuntu.com/releases/22.04/release/ubuntu-22.04.5-preinstalled-server-arm64+raspi.img.xz
+   ```
+3. Insert the microSD card, run `rpi-imager` and choose:
    - **Device:** Raspberry Pi 5
-   - **OS:** *Other general-purpose OS → Ubuntu → **Ubuntu Server 22.04.5 LTS (64-bit)***
-     (Server, not Desktop — it's lighter for a headless companion computer. You can add a
-     GUI later if you want.)
-   - **Storage:** your microSD card
-4. Click the **gear / "Edit Settings"** (pre-configuration) and set:
-   - **Hostname:** `uav2-pi` (easy to remember)
-   - **Enable SSH** → "Use password authentication" (or add your public key)
-   - **Username / password:** e.g. `anton` / your password (matching your host username
-     keeps paths simple, but not required)
-   - **Configure WiFi** with your network's SSID + password (so it gets online for
-     installing packages in this phase — the USB-Ethernet link comes later)
-   - **Locale / timezone** to match yours
-5. **Write** the card. When done, insert it into the Pi and power on.
+   - **OS:** scroll to the bottom → **Use custom** → select the `ubuntu-22.04.5-...raspi.img.xz`
+   - **Storage:** your microSD card → **Write**
+4. **Headless WiFi + SSH — the Ubuntu way (cloud-init).** Pi Imager's "Edit Settings"
+   dialog is for *Raspberry Pi OS* and usually does NOT apply to Ubuntu images, so configure
+   WiFi via cloud-init instead:
+   - After writing, **unplug/replug the microSD** so the FAT partition **`system-boot`**
+     mounts.
+   - Edit the file **`network-config`** on that partition:
+     ```yaml
+     version: 2
+     wifis:
+       wlan0:
+         dhcp4: true
+         optional: true
+         access-points:
+           "YOUR_WIFI_NAME":
+             password: "YOUR_WIFI_PASSWORD"
+     ```
+   - SSH is **already enabled by default** on Ubuntu Server images — nothing to do.
+   - (Optional: set the hostname by editing `/etc/hostname` after first boot, or via the
+     `user-data` cloud-init file.)
+5. Eject the card, put it in the Pi, power on. **Default login: `ubuntu` / `ubuntu`** — you'll
+   be forced to change the password on first login.
+
+> **Even simpler alternative:** if you can plug the Pi into your router with a spare
+> **Ethernet cable** for the first boot, skip the `network-config` edit entirely — it gets an
+> IP over DHCP and SSH works immediately. Configure WiFi later from the console if you want.
 
 ### 3.2 First boot + SSH in (from the host)
 
