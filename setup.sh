@@ -11,7 +11,7 @@
 # REMOVED: pointed at a directory that does not exist on this machine:
 # export ARDUPILOT_HOME="$HOME/ardu_ws/src/ardupilot"
 # ADDED: the built ArduPilot tree actually lives here:
-export ARDUPILOT_HOME="$HOME/ardu_ws/src/ardupilot"
+export ARDUPILOT_HOME="$HOME/FYP/ardu_ws/src/ardupilot"
 # ============================================================
 
 export PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,3 +35,4 @@ echo "ArduPilot found at: $ARDUPILOT_HOME"
 echo "Project dir   : $PROJECT_DIR"
 echo "Gazebo models : $GAZEBO_MODEL_PATH"
 
+export GAZEBO_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/gazebo-11/plugins:$GAZEBO_PLUGIN_PATH
