@@ -160,12 +160,13 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== [4/8] Starting Gazebo ==="
 export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:$HOME/FYP/small_city_gazebo/models:${GAZEBO_MODEL_PATH:-}"
+export GAZEBO_PLUGIN_PATH="$PROJECT_DIR/install/multi_uav_gazebo_plugins/lib:${GAZEBO_PLUGIN_PATH:-}"
 export GAZEBO_RESOURCE_PATH="$PROJECT_DIR:$PROJECT_DIR/worlds:${GAZEBO_RESOURCE_PATH:-}"
 
 [[ -f "$WORLD_PATH" ]] || { echo "ERROR: world file not found: $WORLD_PATH" >&2; exit 1; }
 
 : > "$GAZEBO_LOG"
-gzserver --verbose "$WORLD_PATH" -s libgazebo_ros_init.so -s libgazebo_ros_factory.so > "$GAZEBO_LOG" 2>&1 &
+gazebo --verbose "$WORLD_PATH" -s libgazebo_ros_init.so -s libgazebo_ros_factory.so > "$GAZEBO_LOG" 2>&1 &
 GAZEBO_PID=$!
 echo "  Waiting ${GAZEBO_STARTUP_SEC}s for Gazebo..."
 sleep "$GAZEBO_STARTUP_SEC"
@@ -184,7 +185,7 @@ echo "=== [5/8] micro_ros_agent inside gcsns ==="
 : > "$AGENT_LOG"
 sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
     source /opt/ros/humble/setup.bash
-    source "$HOME/ardu_ws/install/setup.bash"
+    source "$HOME/FYP/ardu_ws/install/setup.bash"
     source "$1"
     exec ros2 run micro_ros_agent micro_ros_agent udp4 --port 2019
 ' agent-shell "$PROJECT_DIR/ros2/install/setup.bash" > "$AGENT_LOG" 2>&1 &
@@ -216,14 +217,16 @@ chown "$RUN_USER":"$(id -gn "$RUN_USER")" "$SITL_LOG_DIR"
 
 sudo ip netns exec uav1ns sudo -H -u "$RUN_USER" bash -c '
     cd "$1"
-    exec "$2" --wipe --model gazebo-iris --speedup 1 --sysid 1 --instance 0 \
-        --defaults "$3" --sim-address "$4" --home "$5" --serial0=tcp:0.0.0.0:5760
+    shift
+    exec strace -f -e trace=none -o /dev/null "$@"
 ' sitl-shell \
     "$SITL_LOG_DIR" \
     "$ARDUPILOT_HOME/build/sitl/bin/arducopter" \
-    "$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm,$DDS_PARM" \
-    "172.31.1.1" \
-    "$HOME_GPS" \
+    --wipe --model gazebo-iris --speedup 1 --sysid 1 --instance 0 \
+    --defaults "$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm,$DDS_PARM" \
+    --sim-address "172.31.1.1" \
+    --home "$HOME_GPS" \
+    --serial0=tcp:0.0.0.0:5760 \
     > "$SITL_LOG_DIR/arducopter.log" 2>&1 &
 SITL_PID=$!
 
@@ -264,7 +267,7 @@ deadline=$((SECONDS + DDS_GPS_TIMEOUT))
 while true; do
     info=$(sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
         source /opt/ros/humble/setup.bash
-    source "$HOME/ardu_ws/install/setup.bash"
+    source "$HOME/FYP/ardu_ws/install/setup.bash"
         source "$1"
         ros2 topic info /ap/v1/navsat 2>/dev/null
     ' t-shell "$PROJECT_DIR/ros2/install/setup.bash" || true)
@@ -299,7 +302,7 @@ echo "=== [8/8] Starting drone_bridge inside gcsns ==="
 : > "$BRIDGE_LOG"
 sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
     source /opt/ros/humble/setup.bash
-    source "$HOME/ardu_ws/install/setup.bash"
+    source "$HOME/FYP/ardu_ws/install/setup.bash"
     source "$1"
     exec ros2 run uav_controller drone_bridge --ros-args \
         -p uav_id:=1 -p mavlink_host:=10.42.0.11 -p mavlink_port:=5760
