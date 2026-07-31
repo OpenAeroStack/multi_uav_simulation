@@ -159,8 +159,11 @@ echo ""
 # STEP 4 — Gazebo (root namespace)
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== [4/8] Starting Gazebo ==="
-export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:$HOME/FYP/small_city_gazebo/models:${GAZEBO_MODEL_PATH:-}"
-export GAZEBO_RESOURCE_PATH="$PROJECT_DIR:$PROJECT_DIR/worlds:${GAZEBO_RESOURCE_PATH:-}"
+CITY="$HOME/FYP/small_city_gazebo_world"   # external city-world assets repo (models + terrain)
+export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:$CITY/models:${GAZEBO_MODEL_PATH:-}"
+export GAZEBO_RESOURCE_PATH="$PROJECT_DIR:$PROJECT_DIR/worlds:$CITY:${GAZEBO_RESOURCE_PATH:-}"
+# Project + ArduPilot Gazebo plugins (obstacle raycaster + gazebo-iris FDM) — not set by setup.sh
+export GAZEBO_PLUGIN_PATH="$PROJECT_DIR/install/multi_uav_gazebo_plugins/lib:$HOME/ardupilot_gazebo/build:${GAZEBO_PLUGIN_PATH:-}"
 
 [[ -f "$WORLD_PATH" ]] || { echo "ERROR: world file not found: $WORLD_PATH" >&2; exit 1; }
 

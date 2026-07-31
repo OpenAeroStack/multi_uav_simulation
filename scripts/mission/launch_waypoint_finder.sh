@@ -10,15 +10,22 @@ pkill -9 -f micro_ros_agent 2>/dev/null || true
 pkill -9 -f drone_bridge 2>/dev/null || true
 sleep 3
 
-source ~/FYP/multi_uav_sim/setup.sh
+# Project root on this machine
+PROJECT="/home/anton/multi_uav_simulation"
+
+source "$PROJECT/setup.sh"
 source /opt/ros/humble/setup.bash
 source ~/ardu_ws/install/setup.bash
-source ~/FYP/multi_uav_sim/ros2/install/setup.bash
+source "$PROJECT/install/setup.bash"        # uav_vision, multi_uav_gazebo_plugins
+source "$PROJECT/ros2/install/setup.bash"   # uav_controller (drone_bridge)
 
-export GAZEBO_MODEL_PATH=$HOME/FYP/multi_uav_sim/models:$GAZEBO_MODEL_PATH
-export GAZEBO_PLUGIN_PATH=$HOME/FYP/multi_uav_sim/install/multi_uav_gazebo_plugins/lib:$GAZEBO_PLUGIN_PATH
-export GAZEBO_RESOURCE_PATH=$HOME/FYP/multi_uav_sim:$HOME/FYP/multi_uav_sim/worlds:$GAZEBO_RESOURCE_PATH
-export GAZEBO_MODEL_PATH=$HOME/FYP/small_city_gazebo/models:$GAZEBO_MODEL_PATH
+# External city-world assets repo (models + terrain) — provides the ambulance/
+# buildings/etc. meshes that the small_city world references.
+CITY="$HOME/FYP/small_city_gazebo_world"
+
+export GAZEBO_MODEL_PATH=$PROJECT/models:$CITY/models:$GAZEBO_MODEL_PATH
+export GAZEBO_PLUGIN_PATH=$PROJECT/install/multi_uav_gazebo_plugins/lib:$HOME/ardupilot_gazebo/build:$GAZEBO_PLUGIN_PATH
+export GAZEBO_RESOURCE_PATH=$PROJECT:$PROJECT/worlds:$CITY:$GAZEBO_RESOURCE_PATH
 
 cleanup() {
   echo "Shutting down..."
@@ -34,7 +41,7 @@ trap cleanup INT
 
 echo "=== [1/5] Gazebo ==="
 gazebo --verbose \
-  $HOME/FYP/multi_uav_sim/worlds/small_city_single_uav.world \
+  "$PROJECT/worlds/small_city_single_uav.world" \
   > /tmp/gazebo_wp.log 2>&1 &
 echo "Waiting 25s for Gazebo to load..."
 sleep 25
@@ -44,7 +51,7 @@ mkdir -p /tmp/sitl_wp && cd /tmp/sitl_wp
 "$ARDUPILOT_HOME/build/sitl/bin/arducopter" \
   --model gazebo-iris --speedup 1 --sysid 1 \
   --home=6.0790684,80.1915283,0.00,0 \
-  --defaults "$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm,$HOME/FYP/multi_uav_sim/params/uav1_dds_flat.parm" \
+  --defaults "$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm,$PROJECT/params/uav1_dds_flat.parm" \
   --sim-address=127.0.0.1 -I0 \
   > /tmp/sitl_wp.log 2>&1 &
 
@@ -84,8 +91,9 @@ echo ""
 echo "================================================"
 echo "  In a new terminal:"
 echo "    source /opt/ros/humble/setup.bash"
-echo "    source ~/FYP/multi_uav_sim/ros2/install/setup.bash"
-echo "    python3 $HOME/FYP/multi_uav_sim/scripts/mission/waypoint_finder.py"
+echo "    source $PROJECT/install/setup.bash"
+echo "    source $PROJECT/ros2/install/setup.bash"
+echo "    python3 $PROJECT/scripts/mission/waypoint_finder.py"
 echo "================================================"
 echo "Ctrl+C to shut down"
 
