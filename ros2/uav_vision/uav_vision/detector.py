@@ -210,9 +210,13 @@ class Detector(Node):
             self._debug_pub.publish(debug_msg)
 
     def _on_raw(self, msg: Image) -> None:
-        """Edge mode: raw frame from camera_relay (local, no wireless)."""
+        
+        """Edge mode: raw frame directly from Gazebo (no relay hop — detector
+        subscribes to the raw topic directly, so this IS the earliest point
+        we can stamp a wall-clock reference)."""
+        frame_id = str(time.time())
         img = self._img_msg_to_numpy(msg)
-        self._run_inference(img, msg.header.frame_id)
+        self._run_inference(img, frame_id)
 
     def _on_compressed(self, msg: CompressedImage) -> None:
         """Ground mode: compressed frame that already crossed wireless link."""

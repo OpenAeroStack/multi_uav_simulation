@@ -29,12 +29,9 @@ setup_ns gcsns  tap-gcs  br-gcs  veth0h veth0n 10.42.0.10/24
 
 # UAV nodes
 setup_ns uav1ns tap-uav1 br-uav1 veth1h veth1n 10.42.0.11/24
-setup_ns uav2ns tap-uav2 br-uav2 veth2h veth2n 10.42.0.12/24
-setup_ns uav3ns tap-uav3 br-uav3 veth3h veth3n 10.42.0.13/24
 
 echo ""
 echo "[ns-tap] Done."
 echo "  gcsns  → 10.42.0.10  (tap-gcs,  br-gcs)"
 echo "  uav1ns → 10.42.0.11  (tap-uav1, br-uav1)"
-echo "  uav2ns → 10.42.0.12  (tap-uav2, br-uav2)"
-echo "  uav3ns → 10.42.0.13  (tap-uav3, br-uav3)"
+
