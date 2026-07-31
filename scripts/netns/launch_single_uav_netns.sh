@@ -217,16 +217,25 @@ echo "=== [6/8] SITL inside uav1ns ==="
 mkdir -p "$SITL_LOG_DIR"
 chown "$RUN_USER":"$(id -gn "$RUN_USER")" "$SITL_LOG_DIR"
 
+# Run arducopter UNDER strace (ptrace). REQUIRED workaround: without it, SITL enters
+# an endless reboot loop once the Gazebo FDM connects with DDS enabled inside the
+# netns (SITL keeps re-loading defaults and re-execing, dropping the FDM link ->
+# "Broken ArduPilot connection"). Being ptrace-traced suppresses that auto-reboot, so
+# SITL settles and stays up. `-e trace=none` traces NO syscalls (near-zero overhead);
+# it is here purely for the ptrace side-effect. Matches the working setup on the other
+# laptop. Needs `strace` installed (sudo apt install -y strace).
 sudo ip netns exec uav1ns sudo -H -u "$RUN_USER" bash -c '
     cd "$1"
-    exec "$2" --wipe --model gazebo-iris --speedup 1 --sysid 1 --instance 0 \
-        --defaults "$3" --sim-address "$4" --home "$5" --serial0=tcp:0.0.0.0:5760
+    shift
+    exec strace -f -e trace=none -o /dev/null "$@"
 ' sitl-shell \
     "$SITL_LOG_DIR" \
     "$ARDUPILOT_HOME/build/sitl/bin/arducopter" \
-    "$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm,$DDS_PARM" \
-    "172.31.1.1" \
-    "$HOME_GPS" \
+    --wipe --model gazebo-iris --speedup 1 --sysid 1 --instance 0 \
+    --defaults "$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm,$DDS_PARM" \
+    --sim-address "172.31.1.1" \
+    --home "$HOME_GPS" \
+    --serial0=tcp:0.0.0.0:5760 \
     > "$SITL_LOG_DIR/arducopter.log" 2>&1 &
 SITL_PID=$!
 
