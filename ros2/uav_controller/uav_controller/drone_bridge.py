@@ -90,10 +90,10 @@ class DroneBridge(Node):
 
         # ── DDS subscribers (telemetry) ───────────────────────────────────────
         self.create_subscription(
-            NavSatFix,    '/ap/navsat',
+            NavSatFix,    f'/ap/v{self.uav_id}/navsat',
             self._cb_navsat,  AP_DDS_QOS)
         self.create_subscription(
-            BatteryState, '/ap/battery',
+            BatteryState, f'/ap/v{self.uav_id}/battery',
             self._cb_battery, AP_DDS_QOS)
 
         # ── publishers ────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ class DroneBridge(Node):
 
         self.get_logger().info(
             f'[UAV{self.uav_id}] Bridge ready'
-            f' | waiting for DDS GPS from /ap/navsat ...')
+            f' | waiting for DDS GPS from /ap/v{self.uav_id}/navsat ...')
         self.get_logger().info(
             f'[UAV{self.uav_id}] Services: '
             f'{ns}/arm  {ns}/takeoff  {ns}/land  {ns}/rtl')

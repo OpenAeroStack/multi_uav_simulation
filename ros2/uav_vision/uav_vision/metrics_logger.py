@@ -12,8 +12,6 @@ CSV columns:
   uav_id           — which UAV
   frame_num        — sequential counter
   size_bytes       — message payload size in bytes
-  capture_sec      — ROS header stamp seconds (set at relay/Gazebo send time)
-  capture_nsec     — ROS header stamp nanoseconds
   latency_ms       — (receipt wall time) - (capture wall time) in milliseconds
                      Valid because relay and gcsns are on the same machine —
                      no clock sync issues. Measures: Gazebo publish → relay
@@ -32,6 +30,7 @@ Parameters:
 import csv
 import os
 import time
+import json
 from datetime import datetime
 
 import rclpy
@@ -74,8 +73,8 @@ class MetricsLogger(Node):
         self._writer   = csv.writer(self._csv_file)
         self._writer.writerow([
             'run_id', 'timestamp_s', 'mode', 'uav_id', 'frame_num',
-            'size_bytes', 'capture_sec', 'capture_nsec',
-            'latency_ms', 'navsat_age_ms'])
+            'size_bytes', 'latency_ms', 'inference_ms', 'overhead_ms',
+            'navsat_age_ms'])
         self._csv_file.flush()
 
         qos = QoSProfile(
@@ -83,17 +82,12 @@ class MetricsLogger(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=1)
 
-        # Ground mode — compressed frames
-        self._ground_sub = self.create_subscription(
-            CompressedImage,
-            f'/relay/uav{self._uav_id}/compressed',
-            self._on_ground, qos)
-
-        # Edge mode — detection results
-        self._edge_sub = self.create_subscription(
-            String,
-            f'/detections/uav{self._uav_id}',
-            self._on_edge, qos)
+        # Single subscription — both modes ultimately produce a detection
+        # result, and that's the point we actually want to compare.
+        self._det_sub = self.create_subscription(
+            String, f'/detections/uav{self._uav_id}',
+            self._on_detection, qos)
+    
 
         # DDS health monitor — track navsat arrival rate
         # This subscription goes to gcsns's micro_ros_agent output
@@ -117,53 +111,34 @@ class MetricsLogger(Node):
             return -1.0
         return (time.time() - self._last_navsat_t) * 1000.0
 
-    def _on_ground(self, msg: CompressedImage) -> None:
+    def _on_detection(self, msg: String) -> None:
         self._ground_count += 1
-        receipt_t  = time.time()   # wall clock — same reference as header stamp
-        size_b     = len(msg.data)
-
-        capture_sec  = msg.header.stamp.sec
-        capture_nsec = msg.header.stamp.nanosec
-        capture_t    = capture_sec + capture_nsec * 1e-9
+        receipt_t = time.time()
+        size_b    = len(msg.data.encode())
 
         try:
-            send_t     = float(msg.header.frame_id)
-            latency_ms = (receipt_t - send_t) * 1000.0
-        except (ValueError, AttributeError):
-            latency_ms = -1.0
-        navsat_age   = self._navsat_age_ms()
+            payload = json.loads(msg.data)
+            send_t       = float(payload['frame_id'])
+            inference_ms = float(payload.get('inference_ms', -1.0))
+            latency_ms   = (receipt_t - send_t) * 1000.0
+            overhead_ms  = latency_ms - inference_ms if inference_ms >= 0 else -1.0
+        except (ValueError, KeyError, json.JSONDecodeError):
+            latency_ms, inference_ms, overhead_ms = -1.0, -1.0, -1.0
 
-        self._writer.writerow([
-            self._run_id, f'{receipt_t:.6f}', 'ground',
-            self._uav_id, self._ground_count, size_b,
-            capture_sec, capture_nsec,
-            f'{latency_ms:.2f}', f'{navsat_age:.1f}'])
-        self._csv_file.flush()
-
-        self.get_logger().info(
-            f'[ground] #{self._ground_count:04d} | '
-            f'{size_b/1024:.1f} KB | '
-            f'latency={latency_ms:.0f} ms | '
-            f'navsat_age={navsat_age:.0f} ms')
-
-    def _on_edge(self, msg: String) -> None:
-        self._edge_count += 1
-        receipt_t  = time.time()
-        size_b     = len(msg.data.encode())
         navsat_age = self._navsat_age_ms()
 
         self._writer.writerow([
-            self._run_id, f'{receipt_t:.6f}', 'edge',
-            self._uav_id, self._edge_count, size_b,
-            0, 0, 0.0, f'{navsat_age:.1f}'])
+            self._run_id, f'{receipt_t:.6f}', self._mode,
+            self._uav_id, self._ground_count, size_b,
+            f'{latency_ms:.2f}', f'{inference_ms:.1f}',
+            f'{overhead_ms:.2f}', f'{navsat_age:.1f}'])
         self._csv_file.flush()
 
         self.get_logger().info(
-            f'[edge] #{self._edge_count:04d} | '
-            f'{size_b}B | '
-            f'navsat_age={navsat_age:.0f} ms | '
-            f'{msg.data[:60]}')
-
+            f'[{self._mode}] #{self._ground_count:04d} | '
+            f'latency={latency_ms:.0f}ms | inference={inference_ms:.0f}ms | '
+            f'overhead={overhead_ms:.0f}ms | navsat_age={navsat_age:.0f}ms')
+    
     def destroy_node(self):
         self._csv_file.close()
         self.get_logger().info(

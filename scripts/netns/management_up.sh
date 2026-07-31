@@ -39,14 +39,7 @@ setup_mgmt_link() {
 # UAV1: root=172.31.1.1  <->  uav1ns=172.31.1.2
 setup_mgmt_link uav1ns sim1h sim1n 172.31.1.1/30 172.31.1.2/30
 
-# UAV2: root=172.31.2.1  <->  uav2ns=172.31.2.2
-setup_mgmt_link uav2ns sim2h sim2n 172.31.2.1/30 172.31.2.2/30
-
-# UAV3: root=172.31.3.1  <->  uav3ns=172.31.3.2
-setup_mgmt_link uav3ns sim3h sim3n 172.31.3.1/30 172.31.3.2/30
 
 echo ""
 echo "[mgmt-link] Done."
 echo "  uav1ns SITL must use --sim-address=172.31.1.1"
-echo "  uav2ns SITL must use --sim-address=172.31.2.1"
-echo "  uav3ns SITL must use --sim-address=172.31.3.1"

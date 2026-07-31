@@ -4459,7 +4459,7 @@
       7.088345356237102
       2.5500000000000003
       0.0
-      0
+      0 
       0
       0
       </pose>
@@ -4502,7 +4502,7 @@
     <model name="iris_1_demo">
       <pose>-70 -22 0 0 0 0</pose>
       <include>
-        <uri>model://iris_1</uri>
+        <uri>model://iris_1_netns</uri>
       </include>
     </model>
 
