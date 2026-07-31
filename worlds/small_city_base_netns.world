@@ -4494,7 +4494,7 @@
     <model name="iris_1_demo">
       <pose>-18 2 0 0 0 0</pose>
       <include>
-        <uri>model://iris_1_netns</uri>
+        <uri>model://iris_1</uri>
       </include>
     </model>
 
@@ -4502,7 +4502,7 @@
     <model name="iris_2_demo">
       <pose>-18 -2 0 0 0 0</pose>
       <include>
-        <uri>model://iris_2_netns</uri>
+        <uri>model://iris_2</uri>
       </include>
     </model>
 
@@ -4510,7 +4510,7 @@
     <model name="iris_3_demo">
       <pose>-14 0 0 0 0 0</pose>
       <include>
-        <uri>model://iris_3_netns</uri>
+        <uri>model://iris_3</uri>
       </include>
     </model>
 
