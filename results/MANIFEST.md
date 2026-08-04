@@ -73,3 +73,6 @@ Tick as produced. ★ = load-bearing, V = validation figure.
 - Record the RNG seed for every ns-3 run. Repeats with the same seed are not
   independent replications.
 - Note the warm-up exclusion window applied to any computed statistic.
+
+
+Emulation floor: management veth (no NS-3) = 0.032ms. NS-3 in path = ~158-161ms regardless of separation (confirmed via live position tracking: 5.3m vs 146.8m, both from /tmp/ns3_single.log), statistically indistinguishable between the two. Verified not attributable to --delayMs (source-confirmed default off) or propagation delay (negligible at six orders of magnitude smaller than the measured floor at these ranges). Attributed to ns-3 real-time discrete-event scheduling and TapBridge overhead. Initial test session was contaminated by a missing world_pos_publisher.py (nodes frozen at static placeholder coordinates); fixed by adding the publisher as a permanent pipeline step, confirmed via live coordinate tracking before this result was accepted.
