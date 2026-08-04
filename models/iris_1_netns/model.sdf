@@ -605,7 +605,16 @@
         </inertia>
       </inertial>
       <sensor name="iris1_camera" type="camera">
-        <pose>0 0 0 0 1.0472 0</pose>
+        <!-- Pitch 0.7854 rad = 45 deg down. Chosen, not arbitrary: the pixel
+             height of a standing person scales as sin(pitch)*cos(pitch),
+             i.e. 0.5*sin(2*pitch), which peaks at exactly 45 deg. Steeper is
+             worse both ways - at 90 deg (nadir) a standing person has no
+             vertical extent at all, and a top-down blob is the hardest case
+             for a COCO-trained model, which sees people mostly side-on.
+             At 15 m altitude this covers 8.6-26.2 m ahead of the drone and
+             puts a person at ~56 px (vs ~49 px at the previous 60 deg).
+             WAS: 1.0472 (60 deg). -->
+        <pose>0 0 0 0 0.7854 0</pose>
         <camera>
           <horizontal_fov>0.9</horizontal_fov>
           <image>

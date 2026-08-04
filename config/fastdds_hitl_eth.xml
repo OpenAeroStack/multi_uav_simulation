@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  fastdds_hitl_eth.xml
+  ────────────────────
+  DDS profile for HITL runs: host PC <-> Raspberry Pi 4B edge node over the
+  DIRECT WIRED SENSOR LINK (10.0.0.0/24).
+
+  Use the SAME file on both machines:
+      export FASTRTPS_DEFAULT_PROFILES_FILE=<repo>/config/fastdds_hitl_eth.xml
+
+  ── WHY THIS EXISTS ────────────────────────────────────────────────────────
+  Both machines are DUAL-HOMED (host: WiFi + USB-gigabit + ~8 netns
+  bridges/TAPs; Pi: wlan0 + eth0). By default FastDDS announces a locator on
+  EVERY local interface, so:
+    * the Pi wastes discovery on host addresses it can never route to
+      (172.31.1.1, 10.42.0.x, the tap-* / br-* devices);
+    * the 421 Mbps camera stream can end up on WiFi, where large samples
+      fragment and are dropped -- the "Pi received 0 frames" failure.
+  The interfaceWhiteList below pins DDS to the wired link only.
+
+  Non-existent addresses in the list are simply never matched, which is why
+  one file works on both machines: the host matches 10.0.0.1, the Pi matches
+  10.0.0.2, and both match 127.0.0.1 for their own local participants.
+
+  ── WHY UDP-ONLY ───────────────────────────────────────────────────────────
+  Same reason as fastdds_udp_only.xml: /dev/shm is NOT network-namespaced, so
+  the shared-memory transport lets participants in different namespaces talk
+  without crossing the simulated ns-3 link, which would silently invalidate
+  every latency/loss measurement. Cross-machine traffic uses UDP regardless;
+  disabling SHM keeps host-side behaviour identical and deterministic.
+
+  ── IMPORTANT ──────────────────────────────────────────────────────────────
+  FastDDS reads the interface list ONCE, when a participant is created.
+  Humble ships FastDDS 2.6, which has NO dynamic interface detection. Any
+  process started BEFORE 10.0.0.x was assigned cannot use it -- restart the
+  process after the addresses exist.
+
+  Requires raised kernel socket buffers on BOTH machines (a 1280x720 RGB
+  frame is 2.76 MB = ~1900 UDP fragments at a 1500-byte MTU):
+      sudo sysctl -w net.core.rmem_max=536870912
+      sudo sysctl -w net.core.rmem_default=134217728
+      sudo sysctl -w net.ipv4.ipfrag_high_thresh=134217728
+-->
+<dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <profiles>
+    <transport_descriptors>
+      <transport_descriptor>
+        <transport_id>hitl_eth_transport</transport_id>
+        <type>UDPv4</type>
+
+        <!-- Pin DDS to the wired sensor link (plus loopback for local pairs).
+             The address that does not exist on a given machine is ignored. -->
+        <interfaceWhiteList>
+          <address>127.0.0.1</address>
+          <address>10.0.0.1</address>   <!-- host  : enx00e04c680050 -->
+          <address>10.0.0.2</address>   <!-- Pi 4B : eth0            -->
+        </interfaceWhiteList>
+
+        <!-- Sized for 2.76 MB image samples. These are the DDS-level buffers;
+             they still require the kernel sysctl limits above to take effect. -->
+        <sendBufferSize>16777216</sendBufferSize>
+        <receiveBufferSize>16777216</receiveBufferSize>
+
+        <!-- Keep datagrams under the 1500-byte MTU so the NIC, not the IP
+             layer, decides fragmentation boundaries. -->
+        <maxMessageSize>1400</maxMessageSize>
+        <maxInitialPeersRange>4</maxInitialPeersRange>
+      </transport_descriptor>
+    </transport_descriptors>
+
+    <participant profile_name="hitl_eth_participant" is_default_profile="true">
+      <rtps>
+        <userTransports>
+          <transport_id>hitl_eth_transport</transport_id>
+        </userTransports>
+        <!-- false = do NOT auto-add the built-in transports (which include SHM) -->
+        <useBuiltinTransports>false</useBuiltinTransports>
+      </rtps>
+    </participant>
+  </profiles>
+</dds> 

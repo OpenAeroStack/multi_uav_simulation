@@ -4,8 +4,9 @@ detector.py
 Location-agnostic YOLO human detector. Same node runs in two places
 depending on processing mode:
 
-  edge  : runs inside uav1ns (same namespace as camera_relay)
-           subscribes to /cluster/cam/uav1 (raw, local — no wireless crossing)
+  edge  : runs on the drone's onboard computer (uav1ns, or a real Pi 4B in HITL)
+           subscribes to /uav1/camera/image_raw (raw, over the unimpaired sensor
+           link — no wireless crossing)
            publishes /detections/uav1 (tiny JSON — crosses wireless to gcsns)
 
   ground: runs inside gcsns
@@ -35,7 +36,14 @@ Parameters:
   processing_mode (str,   default 'edge') — determines input topic
   model_path      (str,   default ~/yolo_env/yolov8n.pt)
   conf_threshold  (float, default 0.25)   — minimum detection confidence
+  imgsz           (int,   default 960)    — YOLO inference size; the longest side
+                                            is scaled to this and the aspect ratio
+                                            kept, so 1280x720 -> 960x544
   publish_debug   (bool,  default True)   — whether to publish annotated image
+
+NOTE for NCNN models: the exported model has a FIXED input shape, so `imgsz` here
+must match what the model was exported with (export with imgsz=[544, 960] to match
+the 960 default). A mismatch is silently ignored, not raised.
 
 NOTE: must be launched with ~/yolo_env active since ultralytics lives there.
 """
@@ -66,6 +74,7 @@ class Detector(Node):
             'model_path',
             os.path.expanduser('~/yolo_env/yolov8n.pt'))
         self.declare_parameter('conf_threshold', 0.25)
+        self.declare_parameter('imgsz', 960)
         self.declare_parameter('publish_debug', True)
         self.declare_parameter('target_classes', '0')
 
@@ -73,6 +82,7 @@ class Detector(Node):
         self._mode      = self.get_parameter('processing_mode').value
         model_path      = self.get_parameter('model_path').value
         self._conf      = float(self.get_parameter('conf_threshold').value)
+        self._imgsz     = int(self.get_parameter('imgsz').value)
         self._debug     = bool(self.get_parameter('publish_debug').value)
         self._target_classes = [
             int(c) for c in
@@ -121,6 +131,11 @@ class Detector(Node):
 
         self.get_logger().info(
             f'[Detector] Publishing detections -> {det_topic}')
+        # Log the inference settings so every run's log is self-documenting —
+        # comparing runs is meaningless without knowing which knobs were set.
+        self.get_logger().info(
+            f'[Detector] inference: imgsz={self._imgsz} conf={self._conf} '
+            f'classes={self._target_classes}')
         if self._debug:
             self.get_logger().info(
                 f'[Detector] Publishing debug -> {debug_topic} '
@@ -148,11 +163,11 @@ class Detector(Node):
         t0 = time.time()
 
         results = self._model(
-        img_bgr,
-        imgsz=960,
-        conf=0.25,
-        classes=self._target_classes,
-        verbose=False
+            img_bgr,
+            imgsz=self._imgsz,
+            conf=self._conf,
+            classes=self._target_classes,
+            verbose=False
         )
 
         inference_ms = (time.time() - t0) * 1000.0

@@ -168,6 +168,12 @@ export GAZEBO_PLUGIN_PATH="$PROJECT_DIR/install/multi_uav_gazebo_plugins/lib:$HO
 [[ -f "$WORLD_PATH" ]] || { echo "ERROR: world file not found: $WORLD_PATH" >&2; exit 1; }
 
 : > "$GAZEBO_LOG"
+# HITL: pin Gazebo's DDS to the wired sensor link (10.0.0.x) so the Pi edge node
+# can subscribe to the camera. Scoped to THIS process only -- exporting it
+# globally would whitelist 10.0.0.x for the gcsns/uav1ns participants too, which
+# live on 10.42.0.x, and would break the netns DDS path. Harmless when no Pi is
+# attached (the address simply is not matched). See config/fastdds_hitl_eth.xml.
+FASTRTPS_DEFAULT_PROFILES_FILE="$PROJECT_DIR/config/fastdds_hitl_eth.xml" \
 gzserver --verbose "$WORLD_PATH" -s libgazebo_ros_init.so -s libgazebo_ros_factory.so > "$GAZEBO_LOG" 2>&1 &
 GAZEBO_PID=$!
 echo "  Waiting ${GAZEBO_STARTUP_SEC}s for Gazebo..."
