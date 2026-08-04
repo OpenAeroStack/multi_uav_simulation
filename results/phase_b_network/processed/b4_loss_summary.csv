@@ -1,0 +1,6 @@
+label,offered_rate,duration_s,tx_packets,rx_packets,tap_packet_loss_pct,tap_byte_loss_pct,iperf_reported_loss_pct
+d01_58_5m,2M,10,1905,1639,13.96,11.86,12.00
+d01_69_5m,2M,10,1914,1654,13.58,11.38,11.00
+d01_83_09m,2M,10,1912,1655,13.44,11.62,11.00
+d01_97_7m,2M,10,1910,1657,13.25,11.25,11.00
+d01_113_8m,2M,10,1912,1654,13.49,11.02,11.00

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-import sys, numpy as np, cv2, rclpy
+import os
+import sys
+import numpy as np
+import cv2
+import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import Image
@@ -24,7 +28,8 @@ class Grab(Node):
             arr = arr[:, :, ::-1].copy()
         print(f"Frame: {msg.width}x{msg.height}, encoding={msg.encoding}")
 
-        model = YOLO('~/yolo_env/yolov8n.pt'.replace('~', '/home/randilsk'))
+        model_path = os.path.expanduser('~/yolo_env/yolov8n.pt')
+        model = YOLO(model_path)
         results = model(
             arr,
             imgsz=1280,

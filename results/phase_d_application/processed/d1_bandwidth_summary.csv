@@ -1,0 +1,3 @@
+label,duration_s,uav1_to_gcs_bytes,uav1_to_gcs_pkts,uav1_to_gcs_mbps,gcs_to_uav1_bytes,gcs_to_uav1_pkts,gcs_to_uav1_mbps,mean_pkt_size_bytes,pkt_rate_per_sec
+d1_edge_run1,60.0,1304470,3962,0.1739,288556,4027,0.0385,329.2,66.03
+d1_ground_run1,60.0,7895959,8185,1.0528,289819,3282,0.0386,964.7,136.42

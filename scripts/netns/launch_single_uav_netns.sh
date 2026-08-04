@@ -116,11 +116,13 @@ echo "=== [3/8] Building + starting ns-3 (three_uav_tapbridge_integrated) ==="
 (cd "$NS3_ROOT" && ./ns3 build three_uav_tapbridge_integrated)
 
 : > "$NS3_LOG"
+SNR_LOG="/tmp/ns3_snr.csv"
 (
     cd "$NS3_ROOT"
     exec ./ns3 run "three_uav_tapbridge_integrated \
         --tap0=tap-gcs --tap1=tap-uav1 --tap2=tap-uav2 --tap3=tap-uav3 \
-        --simTime=0 --uavAltitude=30"
+        --simTime=0 --uavAltitude=30 \
+        --snrLogFile=$SNR_LOG --posLogPeriod=2.0"
 ) > "$NS3_LOG" 2>&1 &
 NS3_PID=$!
 echo "  ns-3 PID=$NS3_PID  log=$NS3_LOG"

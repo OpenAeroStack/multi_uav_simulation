@@ -2,3 +2,4 @@ label,from_ns,target,n,loss_pct,mean_ms,median_ms,stdev_ms,min_ms,max_ms,p95_ms,
 floor_mgmt_veth,uav1ns,172.31.1.1,100,0.0,0.032,0.033,0.011,0.012,0.060,0.051,0.057,rtt_floor_mgmt_veth_20260804_173012.log
 floor_ns3_colocated,gcsns,10.42.0.11,100,0.0,158.280,155.000,19.852,110.000,208.000,192.000,198.000,rtt_floor_ns3_colocated_20260804_173334.log
 floor_ns3_operational,gcsns,10.42.0.11,100,0.0,160.700,161.500,16.479,119.000,205.000,190.000,200.000,rtt_floor_ns3_operational_20260804_173558.log
+floor_ns3_chrt_test,gcsns,10.42.0.11,100,0.0,152.310,151.500,17.445,113.000,206.000,179.000,193.000,rtt_floor_ns3_chrt_test_20260804_181930.log
