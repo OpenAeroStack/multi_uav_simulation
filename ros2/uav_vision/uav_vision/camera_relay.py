@@ -69,13 +69,13 @@ class CameraRelay(Node):
 
         if self._mode == 'edge':
             out_topic = f'/cluster/cam/uav{self._uav_id}'
-            self._pub = self.create_publisher(Image, out_topic, 1)
+            self._pub = self.create_publisher(Image, out_topic, qos)
             self.get_logger().info(
                 f'[UAV{self._uav_id}] EDGE mode: {in_topic} -> {out_topic} '
                 f'at {self._rate_hz:.1f} Hz (raw, local)')
         else:
             out_topic = f'/relay/uav{self._uav_id}/compressed'
-            self._pub = self.create_publisher(CompressedImage, out_topic, 1)
+            self._pub = self.create_publisher(CompressedImage, out_topic, qos)
             self.get_logger().info(
                 f'[UAV{self._uav_id}] GROUND mode: {in_topic} -> {out_topic} '
                 f'at {self._rate_hz:.1f} Hz, JPEG quality={self._quality}')

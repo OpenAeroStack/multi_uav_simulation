@@ -39,6 +39,7 @@ GAZEBO_PID=""
 SITL_PID=""
 AGENT_PID=""
 BRIDGE_PID=""
+POSPUB_PID=""
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 0 — Cleanup
@@ -176,6 +177,30 @@ kill -0 "$GAZEBO_PID" 2>/dev/null || {
     exit 1
 }
 echo "  Gazebo running: PID=$GAZEBO_PID"
+echo ""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 4b — world_pos_publisher.py (feeds real Gazebo positions into ns-3's
+# mobility model; without this, ns-3 nodes stay frozen at static placeholder
+# coordinates regardless of where the drone actually flies)
+# ═══════════════════════════════════════════════════════════════════════════
+echo "=== [4b/8] Starting world_pos_publisher.py (root namespace) ==="
+POSPUB_LOG="/tmp/pospub_netns.log"
+: > "$POSPUB_LOG"
+python3 "$PROJECT_DIR/scripts/world_pos_publisher.py" > "$POSPUB_LOG" 2>&1 &
+POSPUB_PID=$!
+sleep 3
+if ! kill -0 "$POSPUB_PID" 2>/dev/null; then
+    echo "ERROR: world_pos_publisher.py exited during startup." >&2
+    cat "$POSPUB_LOG" >&2
+    exit 1
+fi
+if grep -q "Relaying /gazebo/model_states" "$POSPUB_LOG"; then
+    echo "  world_pos_publisher.py running: PID=$POSPUB_PID"
+else
+    echo "  WARNING: world_pos_publisher.py started but did not confirm relay startup."
+    echo "           Check $POSPUB_LOG"
+fi
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -328,14 +353,14 @@ echo "      source $PROJECT_DIR/ros2/install/setup.bash"
 echo "      python3 $PROJECT_DIR/ros2/uav_controller/uav_controller/uav1_patrol_mission.py"
 echo "  '"
 echo ""
-echo "  PIDs: ns3=$NS3_PID gazebo=$GAZEBO_PID sitl=$SITL_PID agent=$AGENT_PID bridge=$BRIDGE_PID"
-echo "  Logs: $NS3_LOG  $GAZEBO_LOG  $SITL_LOG_DIR/arducopter.log  $AGENT_LOG  $BRIDGE_LOG"
+echo "  PIDs: ns3=$NS3_PID gazebo=$GAZEBO_PID pospub=$POSPUB_PID sitl=$SITL_PID agent=$AGENT_PID bridge=$BRIDGE_PID"
+echo "  Logs: $NS3_LOG  $GAZEBO_LOG  $POSPUB_LOG  $SITL_LOG_DIR/arducopter.log  $AGENT_LOG  $BRIDGE_LOG"
 echo "  Ctrl+C to shut down everything."
 echo ""
 
 cleanup() {
     echo "Shutting down..."
-    kill "$BRIDGE_PID" "$AGENT_PID" "$SITL_PID" "$GAZEBO_PID" "$NS3_PID" 2>/dev/null || true
+    kill "$BRIDGE_PID" "$AGENT_PID" "$SITL_PID" "$GAZEBO_PID" "$NS3_PID" "$POSPUB_PID" 2>/dev/null || true
     sleep 1
     sudo ip netns del gcsns 2>/dev/null || true
     sudo ip netns del uav1ns 2>/dev/null || true

@@ -73,8 +73,8 @@ class MetricsLogger(Node):
         self._writer   = csv.writer(self._csv_file)
         self._writer.writerow([
             'run_id', 'timestamp_s', 'mode', 'uav_id', 'frame_num',
-            'size_bytes', 'latency_ms', 'inference_ms', 'overhead_ms',
-            'navsat_age_ms'])
+            'size_bytes', 'detection_count', 'latency_ms', 'inference_ms',
+            'overhead_ms', 'navsat_age_ms'])
         self._csv_file.flush()
 
         qos = QoSProfile(
@@ -120,16 +120,18 @@ class MetricsLogger(Node):
             payload = json.loads(msg.data)
             send_t       = float(payload['frame_id'])
             inference_ms = float(payload.get('inference_ms', -1.0))
+            det_count    = len(payload.get('detections', []))
             latency_ms   = (receipt_t - send_t) * 1000.0
             overhead_ms  = latency_ms - inference_ms if inference_ms >= 0 else -1.0
         except (ValueError, KeyError, json.JSONDecodeError):
             latency_ms, inference_ms, overhead_ms = -1.0, -1.0, -1.0
+            det_count = -1
 
         navsat_age = self._navsat_age_ms()
 
         self._writer.writerow([
             self._run_id, f'{receipt_t:.6f}', self._mode,
-            self._uav_id, self._ground_count, size_b,
+            self._uav_id, self._ground_count, size_b, det_count,
             f'{latency_ms:.2f}', f'{inference_ms:.1f}',
             f'{overhead_ms:.2f}', f'{navsat_age:.1f}'])
         self._csv_file.flush()
