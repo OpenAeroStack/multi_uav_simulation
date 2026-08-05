@@ -13,6 +13,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RUN_USER="${SUDO_USER:-$USER}"
+RNG_RUN="${RNG_RUN:-1}"
 
 # Provides ARDUPILOT_HOME and other project-wide env vars
 source "$PROJECT_DIR/setup.sh"
@@ -40,6 +41,8 @@ SITL_PID=""
 AGENT_PID=""
 BRIDGE_PID=""
 POSPUB_PID=""
+
+echo "NS-3 RNG run : $RNG_RUN"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 0 — Cleanup
@@ -122,7 +125,7 @@ SNR_LOG="/tmp/ns3_snr.csv"
     exec ./ns3 run "three_uav_tapbridge_integrated \
         --tap0=tap-gcs --tap1=tap-uav1 --tap2=tap-uav2 --tap3=tap-uav3 \
         --simTime=0 --uavAltitude=30 \
-        --snrLogFile=$SNR_LOG --posLogPeriod=2.0"
+        --snrLogFile=$SNR_LOG --posLogPeriod=2.0 --rngRun=${RNG_RUN}"
 ) > "$NS3_LOG" 2>&1 &
 NS3_PID=$!
 echo "  ns-3 PID=$NS3_PID  log=$NS3_LOG"
