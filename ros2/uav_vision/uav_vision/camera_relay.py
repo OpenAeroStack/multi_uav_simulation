@@ -109,15 +109,20 @@ class CameraRelay(Node):
         self._latest_msg = None
 
         if self._mode == 'edge':
-            msg.header.frame_id = str(time.time())
+            t_publish = time.time()
+            msg.header.stamp.sec = int(t_publish)
+            msg.header.stamp.nanosec = int((t_publish % 1) * 1e9)
+            msg.header.frame_id = str(t_publish)
             self._pub.publish(msg)
 
         else:
             try:
                 cv_img = self._img_msg_to_numpy(msg)
+                t_encode_start = time.time()
                 ok, buf = cv2.imencode(
                     '.jpg', cv_img,
                     [cv2.IMWRITE_JPEG_QUALITY, self._quality])
+                t_encode_end = time.time()
                 if not ok:
                     self.get_logger().warning('JPEG encode failed — frame dropped')
                     return
@@ -125,8 +130,10 @@ class CameraRelay(Node):
                 out.header = msg.header
                 out.format = 'jpeg'
                 out.data = buf.tobytes()
-                # In ground mode, after creating the CompressedImage 'out':
-                out.header.frame_id = str(time.time())
+                # stamp = encode start, frame_id = encode end (send time)
+                out.header.stamp.sec = int(t_encode_start)
+                out.header.stamp.nanosec = int((t_encode_start % 1) * 1e9)
+                out.header.frame_id = str(t_encode_end)
                 self._pub.publish(out)
                 kb = len(out.data) / 1024
                 self.get_logger().info(

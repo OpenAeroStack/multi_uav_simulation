@@ -133,3 +133,5 @@ delivery probability under Phase B4's measured packet-loss rate
 given the ~105KB frame size at this altitude/scene complexity.
 Detection accuracy in ground mode could not be evaluated because
 no complete frames reached the detector.
+
+D1/D5/D8: Ground-mode byte-level delivery vs JPEG quality (confirmed reproducible via clean single-relay reruns): q50=29.6-30.0%, q20=56.1-56.4%, q10=95.7-99.7%, q5=100%. Edge mode: 100% throughout. Critically, byte-level delivery at q10 (~97%) is far higher than frame-level delivery observed via live topic monitoring (~10-15%), demonstrating that UDP's lack of partial-datagram delivery makes even modest per-packet loss catastrophic for large, multi-fragment frames — most bytes arrive, but complete frames rarely do.

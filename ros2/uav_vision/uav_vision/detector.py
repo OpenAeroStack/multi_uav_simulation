@@ -97,11 +97,12 @@ class Detector(Node):
 
         # Input topic depends on mode
         if self._mode == 'edge':
-            in_topic = f'/uav{self._uav_id}/camera/image_raw'
+            in_topic = f'/cluster/cam/uav{self._uav_id}'
             self._sub = self.create_subscription(
                 Image, in_topic, self._on_raw, qos)
             self.get_logger().info(
-                f'[Detector] EDGE mode: {in_topic} -> inference locally')
+                f'[Detector] EDGE mode: {in_topic} -> inference locally '
+                f'(throttled via camera_relay, rate-matched to ground)')
         else:
             in_topic = f'/relay/uav{self._uav_id}/compressed'
             self._sub = self.create_subscription(
@@ -142,7 +143,8 @@ class Detector(Node):
         buf = np.frombuffer(msg.data, dtype=np.uint8)
         return cv2.imdecode(buf, cv2.IMREAD_COLOR)
 
-    def _run_inference(self, img_bgr: np.ndarray, frame_id: str) -> None:
+    def _run_inference(self, img_bgr: np.ndarray, frame_id: str,
+                        compression_ms: float = -1.0, decode_ms: float = -1.0) -> None:
         """Run YOLO, publish detection JSON and optional annotated image."""
         self._frame_count += 1
         t0 = time.time()
@@ -168,9 +170,11 @@ class Detector(Node):
                                round(x2), round(y2)]})
 
         payload = json.dumps({
-            'frame_id':     frame_id,
-            'inference_ms': round(inference_ms, 1),
-            'detections':   detections})
+            'frame_id':       frame_id,
+            'inference_ms':   round(inference_ms, 1),
+            'compression_ms': round(compression_ms, 1),
+            'decode_ms':      round(decode_ms, 1),
+            'detections':     detections})
 
         msg_out      = String()
         msg_out.data = payload
@@ -211,20 +215,32 @@ class Detector(Node):
 
     def _on_raw(self, msg: Image) -> None:
         
-        """Edge mode: raw frame directly from Gazebo (no relay hop — detector
-        subscribes to the raw topic directly, so this IS the earliest point
-        we can stamp a wall-clock reference)."""
-        frame_id = str(time.time())
+        """Edge mode: throttled frame from camera_relay (rate-matched to
+        ground mode). frame_id/stamp were set by camera_relay at publish
+        time, so we reuse that rather than re-stamping here."""
+        frame_id = msg.header.frame_id if msg.header.frame_id else str(time.time())
         img = self._img_msg_to_numpy(msg)
-        self._run_inference(img, frame_id)
+        self._run_inference(img, frame_id, compression_ms=-1.0, decode_ms=-1.0)
 
     def _on_compressed(self, msg: CompressedImage) -> None:
         """Ground mode: compressed frame that already crossed wireless link."""
+        t_decode_start = time.time()
         img = self._compressed_to_numpy(msg)
+        t_decode_end = time.time()
         if img is None:
             self.get_logger().warning('JPEG decode failed — frame dropped')
             return
-        self._run_inference(img, msg.header.frame_id)
+        decode_ms = (t_decode_end - t_decode_start) * 1000.0
+
+        stamp_s = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        try:
+            send_t = float(msg.header.frame_id)
+            compression_ms = (send_t - stamp_s) * 1000.0 if stamp_s > 0 else -1.0
+        except ValueError:
+            compression_ms = -1.0
+
+        self._run_inference(img, msg.header.frame_id,
+                             compression_ms=compression_ms, decode_ms=decode_ms)
 
 
 def main(args=None):
