@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUN_USER="${SUDO_USER:-$USER}"
 
-SMALL_CITY_DIR="$HOME/simulation/small_city_gazebo_world"
+SMALL_CITY_DIR="$HOME/FYP/small_city_gazebo_world"
 
 if [[ ! -d "$SMALL_CITY_DIR" ]]; then
     echo "ERROR: Small city Gazebo directory not found: $SMALL_CITY_DIR" >&2
@@ -639,9 +639,10 @@ source_optional_overlay() {
 
 set +u
 source /opt/ros/humble/setup.bash
+source_optional_overlay "$HOME/FYP/ardu_ws/install/setup.bash"
 source_optional_overlay "$PROJECT_DIR/install/setup.bash"
 source_optional_overlay "$PROJECT_DIR/ros2/install/setup.bash"
-source_optional_overlay "$HOME/ardu_ws/install/setup.bash"
+
 set -u
 
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
@@ -846,7 +847,7 @@ wait_for_gazebo_fdm_ports() {
 
 echo "=== Starting Gazebo in the root namespace ==="
 
-SMALL_CITY_DIR="$HOME/simulation/small_city_gazebo_world"
+SMALL_CITY_DIR="$HOME/FYP/small_city_gazebo_world"
 WORLD_PATH="$PROJECT_DIR/worlds/city_3uav.world"
 
 if [[ ! -d "$SMALL_CITY_DIR" ]]; then
@@ -985,7 +986,7 @@ run_ros_in_root() {
     ' ros-root-shell \
     "$PROJECT_DIR/install/setup.bash" \
     "$PROJECT_DIR/ros2/install/setup.bash" \
-    "$HOME/ardu_ws/install/setup.bash" \
+    "$HOME/FYP/ardu_ws/install/setup.bash" \
     "$@"
 }
 
@@ -1469,7 +1470,7 @@ start_micro_ros_agent() {
             set -u
             exec ros2 run micro_ros_agent micro_ros_agent udp4 --port "$3"
         ' agent-shell \
-        "$HOME/ardu_ws/install/setup.bash" \
+        "$HOME/FYP/ardu_ws/install/setup.bash" \
         "$PROJECT_DIR/ros2/install/setup.bash" \
         "$port" \
         >"$log_file" 2>&1 &
@@ -1573,7 +1574,7 @@ run_ros_in_gcsns() {
             shift 3
             exec "$@"
         ' ros-shell \
-        "$HOME/ardu_ws/install/setup.bash" \
+        "$HOME/FYP/ardu_ws/install/setup.bash" \
         "$PROJECT_DIR/ros2/install/setup.bash" \
         "$ROS_DOMAIN_ID" "$@"
 }
@@ -1717,7 +1718,7 @@ start_drone_bridge() {
                 -p "mavlink_port:=$7" \
                 -p "takeoff_altitude:=$8"
         ' bridge-shell \
-        "$HOME/ardu_ws/install/setup.bash" \
+        "$HOME/FYP/ardu_ws/install/setup.bash" \
         "$PROJECT_DIR/ros2/install/setup.bash" \
         "$ROS_DOMAIN_ID" "$node_name" "$uav_number" \
         "$mavlink_host" "$mavlink_port" "$takeoff_altitude" \
@@ -1869,7 +1870,7 @@ start_city_mission() {
             export ROS_DOMAIN_ID="$3"
             exec ros2 run uav_controller city_mission
         ' mission-shell \
-        "$HOME/ardu_ws/install/setup.bash" \
+        "$HOME/FYP/ardu_ws/install/setup.bash" \
         "$PROJECT_DIR/ros2/install/setup.bash" \
         "$ROS_DOMAIN_ID" \
         >"$MISSION_LOG" 2>&1 &
