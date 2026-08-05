@@ -126,3 +126,10 @@ C3 ground	184	1.53 Hz	3788ms
 
 Phase C: DDS telemetry health under load. C1 baseline: 2.11Hz, max gap 1994ms. C0 (mission active, no vision): 2.28Hz, max gap 2243ms. C2 (edge): 2.06Hz, max gap 2355ms. C1/C0/C2 cluster closely — neither active navigation traffic nor edge-mode vision load meaningfully degrades GPS telemetry. C3 (ground): 1.53Hz (27% below baseline), max gap 3788ms (90% above baseline) — the only condition showing substantial degradation, consistent with ground mode's large compressed-frame payloads competing with telemetry for the same channel capacity. (One earlier C2 trial was excluded — contaminated by a concurrent metrics_logger process adding its own DDS discovery overhead.)
 
+
+Ground mode: ~0% of frames survived transport (0/N observed on
+/relay/uav1/compressed over 60s), consistent with the predicted
+delivery probability under Phase B4's measured packet-loss rate
+given the ~105KB frame size at this altitude/scene complexity.
+Detection accuracy in ground mode could not be evaluated because
+no complete frames reached the detector.
