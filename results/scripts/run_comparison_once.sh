@@ -6,6 +6,12 @@ FRAME_RATE_HZ="1.0"
 CONF_THRESHOLD="0.25"
 GROUND_JPEG_QUALITY="5"
 WARMUP_FRAMES="9"
+DDS_SETTLE_S="${DDS_SETTLE_S:-3}"
+POST_WARMUP_SETTLE_S="${POST_WARMUP_SETTLE_S:-15}"
+STABLE_ROWS_REQUIRED="${STABLE_ROWS_REQUIRED:-5}"
+STABLE_MIN_INTERVAL_S="${STABLE_MIN_INTERVAL_S:-0.70}"
+STABLE_MAX_INTERVAL_S="${STABLE_MAX_INTERVAL_S:-1.30}"
+STABILITY_TIMEOUT_S="${STABILITY_TIMEOUT_S:-90}"
 MEASUREMENT_DURATION="${4:-60}"
 TARGET_LATITUDE="6.079430"
 TARGET_LONGITUDE="80.193085"
@@ -231,6 +237,29 @@ wait_for_python_readiness "$METRICS" "$METRICS_LOG" "CSV:" 20 "metrics logger" "
 METRICS_PGID="$(ps -o pgid= -p "$METRICS_PY_PID" | tr -d ' ')"
 [[ -n "$METRICS_PGID" ]] || { echo "ERROR: unable to determine metrics logger process group." >&2; exit 1; }
 
+detection_info=""
+detection_match_deadline=$((SECONDS + 30))
+while true; do
+    detection_info="$(ros_in_gcs ros2 topic info -v /detections/uav1 2>&1)" || true
+    if grep -Eq 'Publisher count: [1-9][0-9]*' <<<"$detection_info" &&
+       grep -Eq 'Subscription count: [1-9][0-9]*' <<<"$detection_info"; then
+        break
+    fi
+    if (( SECONDS >= detection_match_deadline )); then
+        echo "ERROR: timed out waiting for detection DDS endpoint matching." >&2
+        echo "--- ros2 topic info -v /detections/uav1 ---" >&2
+        printf '%s\n' "$detection_info" >&2
+        echo "Detector log: $DETECTOR_LOG" >&2
+        echo "Metrics log: $METRICS_LOG" >&2
+        echo "Detector Python PID: $DETECTOR_PY_PID" >&2
+        echo "Metrics logger Python PID: $METRICS_PY_PID" >&2
+        exit 1
+    fi
+    sleep 0.2
+done
+echo "Detection DDS endpoints matched; settling for $DDS_SETTLE_S seconds before frame flow."
+sleep "$DDS_SETTLE_S"
+
 mapfile -t csv_files < <(find "$RAW_DIR" -maxdepth 1 -type f -name "metrics_uav1_${MODE}_${RUN_ID}_*.csv" -print)
 (( ${#csv_files[@]} == 1 )) || { echo "ERROR: expected exactly one metrics CSV for $RUN_ID." >&2; exit 1; }
 CSV_PATH="${csv_files[0]}"
@@ -254,18 +283,126 @@ wait_for_python_readiness "$RELAY" "$RELAY_LOG" "frame sent" 20 "camera relay" "
 RELAY_PGID="$(ps -o pgid= -p "$RELAY_PY_PID" | tr -d ' ')"
 [[ -n "$RELAY_PGID" ]] || { echo "ERROR: unable to determine camera relay process group." >&2; exit 1; }
 
-# The first nine processed frames are warm-up frames, based on Phase A4.
-# The official resource-monitoring window begins only after warm-up.
-# The metrics CSV retains warm-up rows; later analysis will exclude the first nine rows.
-while (( $(grep -cF "frame sent" "$RELAY_LOG" 2>/dev/null || true) < WARMUP_FRAMES )); do
+# Phase A4 established a minimum of nine processed warm-up frames. All startup
+# rows remain in the raw CSV and are excluded by the recorded official baseline.
+warmup_deadline=$((SECONDS + 60))
+while true; do
+    metrics_rows=$(( $(wc -l < "$CSV_PATH") - 1 ))
+    (( metrics_rows < 0 )) && metrics_rows=0
+    (( metrics_rows >= WARMUP_FRAMES )) && break
     sudo -n kill -0 "$RELAY_PY_PID" 2>/dev/null || { echo "ERROR: camera relay exited during warm-up." >&2; exit 1; }
+    if (( SECONDS >= warmup_deadline )); then
+        relay_sent_count="$(grep -cF "frame sent" "$RELAY_LOG" 2>/dev/null || true)"
+        detector_processed_count="$(grep -cF "[Detector] #" "$DETECTOR_LOG" 2>/dev/null || true)"
+        echo "ERROR: fewer than $WARMUP_FRAMES processed metrics rows arrived within 60 seconds." >&2
+        echo "Relay sent count: $relay_sent_count" >&2
+        echo "Detector processed count: $detector_processed_count" >&2
+        echo "Metrics CSV row count: $metrics_rows" >&2
+        echo "Relay log: $RELAY_LOG" >&2
+        echo "Detector log: $DETECTOR_LOG" >&2
+        echo "Metrics log: $METRICS_LOG" >&2
+        exit 1
+    fi
     sleep 0.2
 done
 ISO_WARMUP_END="$(date --iso-8601=seconds)"
+MINIMUM_WARMUP_SENT_COUNT="$(grep -cF "frame sent" "$RELAY_LOG" 2>/dev/null || true)"
+MINIMUM_WARMUP_CSV_ROWS="$metrics_rows"
+echo "Minimum warm-up complete: $WARMUP_FRAMES processed rows"
+
+settle_started=$SECONDS
+while (( SECONDS - settle_started < POST_WARMUP_SETTLE_S )); do
+    sudo -n kill -0 "$RELAY_PY_PID" 2>/dev/null || { echo "ERROR: camera relay exited during post-warm-up stabilization." >&2; exit 1; }
+    sleep 1
+    settle_elapsed=$((SECONDS - settle_started))
+    (( settle_elapsed > POST_WARMUP_SETTLE_S )) && settle_elapsed=$POST_WARMUP_SETTLE_S
+    echo "Post-warm-up stabilization: $settle_elapsed / $POST_WARMUP_SETTLE_S seconds"
+done
+
+STABILITY_START_CSV_ROW=$(( $(wc -l < "$CSV_PATH") - 1 ))
+(( STABILITY_START_CSV_ROW < 0 )) && STABILITY_START_CSV_ROW=0
+stability_deadline=$((SECONDS + STABILITY_TIMEOUT_S))
+last_stable_streak=-1
+while true; do
+    stable_streak="$(python3 - "$CSV_PATH" "$STABILITY_START_CSV_ROW" \
+        "$STABLE_MIN_INTERVAL_S" "$STABLE_MAX_INTERVAL_S" <<'PY'
+import csv
+import math
+import sys
+
+path, start_text, minimum_text, maximum_text = sys.argv[1:]
+start = int(start_text)
+minimum = float(minimum_text)
+maximum = float(maximum_text)
+with open(path, newline='') as handle:
+    all_rows = list(csv.DictReader(handle))
+rows = all_rows[start:]
+
+streak = 0
+previous_frame = None
+previous_timestamp = None
+if start > 0 and start <= len(all_rows):
+    try:
+        previous_frame = int(all_rows[start - 1]['frame_num'])
+        previous_timestamp = float(all_rows[start - 1]['timestamp_s'])
+    except (KeyError, TypeError, ValueError):
+        pass
+for row in rows:
+    try:
+        frame = int(row['frame_num'])
+        timestamp = float(row['timestamp_s'])
+    except (KeyError, TypeError, ValueError):
+        streak = 0
+        previous_frame = None
+        previous_timestamp = None
+        continue
+    valid = math.isfinite(timestamp)
+    if previous_frame is not None and previous_timestamp is not None:
+        interval = timestamp - previous_timestamp
+        valid = (valid and frame > previous_frame
+                 and timestamp > previous_timestamp
+                 and minimum <= interval <= maximum)
+    streak = streak + 1 if valid else 0
+    previous_frame = frame
+    previous_timestamp = timestamp
+print(streak)
+PY
+)"
+    if (( stable_streak != last_stable_streak )); then
+        echo "Stable-delivery streak: $stable_streak / $STABLE_ROWS_REQUIRED rows"
+        last_stable_streak=$stable_streak
+    fi
+    (( stable_streak >= STABLE_ROWS_REQUIRED )) && break
+    sudo -n kill -0 "$RELAY_PY_PID" 2>/dev/null || { echo "ERROR: camera relay exited during delivery stability validation." >&2; exit 1; }
+    if (( SECONDS >= stability_deadline )); then
+        relay_sent_count="$(grep -cF "frame sent" "$RELAY_LOG" 2>/dev/null || true)"
+        detector_processed_count="$(grep -cF "[Detector] #" "$DETECTOR_LOG" 2>/dev/null || true)"
+        metrics_rows=$(( $(wc -l < "$CSV_PATH") - 1 ))
+        echo "ERROR: stable metrics delivery was not confirmed within $STABILITY_TIMEOUT_S seconds." >&2
+        echo "Relay sent count: $relay_sent_count" >&2
+        echo "Detector processed count: $detector_processed_count" >&2
+        echo "Metrics CSV row count: $metrics_rows" >&2
+        echo "Relay log: $RELAY_LOG" >&2
+        echo "Detector log: $DETECTOR_LOG" >&2
+        echo "Metrics log: $METRICS_LOG" >&2
+        exit 1
+    fi
+    sleep 0.2
+done
+echo "Steady-state delivery confirmed"
+
+SENT_COUNT_AT_OFFICIAL_START="$(grep -cF "frame sent" "$RELAY_LOG" 2>/dev/null || true)"
+OFFICIAL_START_CSV_ROW=$(( $(wc -l < "$CSV_PATH") - 1 ))
+(( OFFICIAL_START_CSV_ROW < 0 )) && OFFICIAL_START_CSV_ROW=0
 
 ps -fp "$RELAY_PY_PID" "$DETECTOR_PY_PID"
 
 pidstat -h -u -r -p "${RELAY_PY_PID},${DETECTOR_PY_PID}" 1 "$MEASUREMENT_DURATION" >"$RESOURCE_LOG"
+SENT_COUNT_AT_MEASUREMENT_END="$(grep -cF "frame sent" "$RELAY_LOG" 2>/dev/null || true)"
+OFFICIAL_END_CSV_ROW=$(( $(wc -l < "$CSV_PATH") - 1 ))
+(( OFFICIAL_END_CSV_ROW < 0 )) && OFFICIAL_END_CSV_ROW=0
+MEASUREMENT_SENT_FRAMES=$((SENT_COUNT_AT_MEASUREMENT_END - SENT_COUNT_AT_OFFICIAL_START))
+MEASUREMENT_PROCESSED_FRAMES=$((OFFICIAL_END_CSV_ROW - OFFICIAL_START_CSV_ROW))
 ISO_MEASUREMENT_END="$(date --iso-8601=seconds)"
 
 # Preserve the required shutdown order while leaving all infrastructure untouched.
@@ -287,6 +424,18 @@ ISO warm-up-end time: $ISO_WARMUP_END
 ISO measurement-end time: $ISO_MEASUREMENT_END
 Measurement duration: $MEASUREMENT_DURATION seconds
 Warm-up frames: $WARMUP_FRAMES
+Relay sent count at warm-up end: $MINIMUM_WARMUP_SENT_COUNT
+Metrics CSV row count at warm-up end: $MINIMUM_WARMUP_CSV_ROWS
+Relay sent count at official start: $SENT_COUNT_AT_OFFICIAL_START
+Relay sent count at measurement end: $SENT_COUNT_AT_MEASUREMENT_END
+Metrics CSV row count at measurement end: $OFFICIAL_END_CSV_ROW
+minimum_warmup_rows=$WARMUP_FRAMES
+post_warmup_settle_s=$POST_WARMUP_SETTLE_S
+stable_rows_required=$STABLE_ROWS_REQUIRED
+stable_interval_range_s=$STABLE_MIN_INTERVAL_S-$STABLE_MAX_INTERVAL_S
+official_start_csv_row=$OFFICIAL_START_CSV_ROW
+official_end_csv_row=$OFFICIAL_END_CSV_ROW
+startup_rows_excluded=$OFFICIAL_START_CSV_ROW
 Frame rate: $FRAME_RATE_HZ Hz
 Confidence threshold: $CONF_THRESHOLD
 Ground JPEG quality: $JPEG_VALUE
@@ -310,22 +459,28 @@ GPS message after the run:
 $GPS_AFTER
 EOF
 
-SUMMARY="$(python3 - "$CSV_PATH" "$WARMUP_FRAMES" "$SENT_FRAMES" "$MODE" <<'PY'
+SUMMARY="$(python3 - "$CSV_PATH" "$OFFICIAL_START_CSV_ROW" "$OFFICIAL_END_CSV_ROW" "$SENT_FRAMES" "$MODE" "$MEASUREMENT_SENT_FRAMES" "$MEASUREMENT_PROCESSED_FRAMES" <<'PY'
 import csv
 import math
 import statistics
 import sys
 
-csv_path, warmup_text, sent_text, mode = sys.argv[1:]
-warmup = int(warmup_text)
+csv_path, start_text, end_text, sent_text, mode, measurement_sent_text, measurement_processed_text = sys.argv[1:]
+official_start = int(start_text)
+official_end = int(end_text)
 sent = int(sent_text)
+measurement_sent = int(measurement_sent_text)
+measurement_processed = int(measurement_processed_text)
 with open(csv_path, newline='') as handle:
     rows = list(csv.DictReader(handle))
-analysis = rows[warmup:]
+official_rows = rows[official_start:official_end]
+startup_rows_excluded = min(official_start, len(rows))
+official_analysis_rows = len(official_rows)
+late_rows = max(0, len(rows) - min(official_end, len(rows)))
 
 def values(column):
     result = []
-    for row in analysis:
+    for row in official_rows:
         try:
             value = float(row[column])
         except (KeyError, TypeError, ValueError):
@@ -352,24 +507,29 @@ pipeline = values('pipeline_latency_ms')
 inference = values('inference_ms')
 compression = values('compression_ms')
 decode = values('decode_ms')
-ratio = len(rows) / sent if sent else float('nan')
-ratio_label = 'complete processed-frame ratio' if mode == 'ground' else 'processed/sent ratio (local edge pipeline)'
+official_ratio = measurement_processed / measurement_sent if measurement_sent else float('nan')
+ratio_label = ('official complete processed-frame ratio' if mode == 'ground'
+               else 'official local edge processed/sent ratio')
 
 print('Run summary')
-print(f'  sent frames: {sent}')
-print(f'  all CSV data rows: {len(rows)}')
-print(f'  analysis rows after excluding first {warmup}: {len(analysis)}')
-print(f'  {ratio_label}: {ratio:.4f}' if math.isfinite(ratio) else f'  {ratio_label}: n/a')
+print(f'  total relay frames sent: {sent}')
+print(f'  total metrics rows: {len(rows)}')
+print(f'  startup/warm-up rows excluded: {startup_rows_excluded}')
+print(f'  official analysis rows used: {official_analysis_rows}')
+print(f'  late/shutdown rows excluded: {late_rows}')
+print(f'  official measurement frames sent: {measurement_sent}')
+print(f'  official measurement frames processed: {measurement_processed}')
+print(f'  {ratio_label}: {official_ratio:.4f}' if math.isfinite(official_ratio) else f'  {ratio_label}: n/a')
 print(f'  mean detection_count: {mean_text(detections)}')
 print(f'  minimum detection_count: {min(detections):.0f}' if detections else '  minimum detection_count: n/a')
 print(f'  maximum detection_count: {max(detections):.0f}' if detections else '  maximum detection_count: n/a')
-print(f'  mean pipeline_latency_ms after warm-up: {mean_text(pipeline)}')
-print(f'  median pipeline_latency_ms after warm-up: {percentile(pipeline, 0.5)}')
-print(f'  p95 pipeline_latency_ms after warm-up: {percentile(pipeline, 0.95)}')
-print(f'  mean inference_ms after warm-up: {mean_text(inference)}')
+print(f'  mean pipeline_latency_ms in official window: {mean_text(pipeline)}')
+print(f'  median pipeline_latency_ms in official window: {percentile(pipeline, 0.5)}')
+print(f'  p95 pipeline_latency_ms in official window: {percentile(pipeline, 0.95)}')
+print(f'  mean inference_ms in official window: {mean_text(inference)}')
 if mode == 'ground':
-    print(f'  mean compression_ms after warm-up: {mean_text(compression)}')
-    print(f'  mean decode_ms after warm-up: {mean_text(decode)}')
+    print(f'  mean compression_ms in official window: {mean_text(compression)}')
+    print(f'  mean decode_ms in official window: {mean_text(decode)}')
 print('Detection count is the number of YOLO detections in each processed frame. It is not precision or recall. Detection accuracy against manually labelled ground truth is reported separately in D4.')
 PY
 )"
@@ -378,14 +538,14 @@ printf '\n%s\n' "$SUMMARY" | tee -a "$METADATA"
 cat <<'EOF'
 
 Example matched sessions:
-Session 1 (infrastructure RNG_RUN=31):
-  bash results/scripts/run_edge_once.sh f_edge_01 31 60
+Session 1 (infrastructure RNG_RUN=1):
+  bash results/scripts/run_edge_once.sh f_edge_01 1 60
   Keep hovering, wait around 10 seconds, then:
-  bash results/scripts/run_ground_once.sh f_ground_q5_01 31 60
-Session 2 (infrastructure RNG_RUN=32):
-  bash results/scripts/run_ground_once.sh f_ground_q5_02 32 60
-  bash results/scripts/run_edge_once.sh f_edge_02 32 60
-Session 3 (infrastructure RNG_RUN=33):
-  bash results/scripts/run_edge_once.sh f_edge_03 33 60
-  bash results/scripts/run_ground_once.sh f_ground_q5_03 33 60
+  bash results/scripts/run_ground_once.sh f_ground_q5_01 1 60
+Session 2 (infrastructure RNG_RUN=2):
+  bash results/scripts/run_ground_once.sh f_ground_q5_02 2 60
+  bash results/scripts/run_edge_once.sh f_edge_02 2 60
+Session 3 (infrastructure RNG_RUN=3):
+  bash results/scripts/run_edge_once.sh f_edge_03 3 60
+  bash results/scripts/run_ground_once.sh f_ground_q5_03 3 60
 EOF

@@ -1,0 +1,105 @@
+Run ID: f_ground_q5_01_final_v6
+Mode: ground
+Expected NS-3 RNG run: 2
+ISO start time: 2026-08-06T02:03:57+05:30
+ISO warm-up-end time: 2026-08-06T02:04:56+05:30
+ISO measurement-end time: 2026-08-06T02:07:21+05:30
+Measurement duration: 60 seconds
+Warm-up frames: 9
+Relay sent count at warm-up end: 51
+Metrics CSV row count at warm-up end: 9
+Relay sent count at official start: 136
+Relay sent count at measurement end: 196
+Metrics CSV row count at measurement end: 106
+minimum_warmup_rows=9
+post_warmup_settle_s=15
+stable_rows_required=5
+stable_interval_range_s=0.70-1.30
+official_start_csv_row=61
+official_end_csv_row=106
+startup_rows_excluded=61
+Frame rate: 1.0 Hz
+Confidence threshold: 0.25
+Ground JPEG quality: 5
+Fixed target latitude: 6.079430
+Fixed target longitude: 80.193085
+Fixed target altitude: 25.0 m relative
+Detector namespace: gcsns
+Relay namespace: uav1ns
+Metrics namespace: gcsns
+Detector log: /home/multi_uav/FYP/multi_uav_simulation/results/phase_f_comparison/raw/detector_f_ground_q5_01_final_v6.log
+Metrics log: /home/multi_uav/FYP/multi_uav_simulation/results/phase_f_comparison/raw/metrics_f_ground_q5_01_final_v6.log
+Relay log: /home/multi_uav/FYP/multi_uav_simulation/results/phase_f_comparison/raw/relay_f_ground_q5_01_final_v6.log
+Metrics CSV: /home/multi_uav/FYP/multi_uav_simulation/results/phase_f_comparison/raw/metrics_uav1_ground_f_ground_q5_01_final_v6_20260806_020400.csv
+Resource log: /home/multi_uav/FYP/multi_uav_simulation/results/phase_e_resources/raw/resources_f_ground_q5_01_final_v6.txt
+Metadata: /home/multi_uav/FYP/multi_uav_simulation/results/phase_f_comparison/raw/metadata_f_ground_q5_01_final_v6.txt
+
+GPS message before the run:
+header:
+  stamp:
+    sec: 1785962057
+    nanosec: 641766000
+  frame_id: '0'
+status:
+  status: 2
+  service: 1
+latitude: 6.07943058013916
+longitude: 80.1930923461914
+altitude: 25.029998779296875
+position_covariance:
+- 0.09000000357627869
+- 0.0
+- 0.0
+- 0.0
+- 0.09000000357627869
+- 0.0
+- 0.0
+- 0.0
+- 0.09000000357627869
+position_covariance_type: 2
+---
+
+GPS message after the run:
+header:
+  stamp:
+    sec: 1785962267
+    nanosec: 644236000
+  frame_id: '0'
+status:
+  status: 2
+  service: 1
+latitude: 6.079429626464844
+longitude: 80.1930923461914
+altitude: 25.01999855041504
+position_covariance:
+- 0.09000000357627869
+- 0.0
+- 0.0
+- 0.0
+- 0.09000000357627869
+- 0.0
+- 0.0
+- 0.0
+- 0.09000000357627869
+position_covariance_type: 2
+---
+
+Run summary
+  total relay frames sent: 196
+  total metrics rows: 106
+  startup/warm-up rows excluded: 61
+  official analysis rows used: 45
+  late/shutdown rows excluded: 0
+  official measurement frames sent: 60
+  official measurement frames processed: 45
+  official complete processed-frame ratio: 0.7500
+  mean detection_count: 0.29
+  minimum detection_count: 0
+  maximum detection_count: 3
+  mean pipeline_latency_ms in official window: 498.40
+  median pipeline_latency_ms in official window: 499.83
+  p95 pipeline_latency_ms in official window: 554.42
+  mean inference_ms in official window: 50.86
+  mean compression_ms in official window: 2.22
+  mean decode_ms in official window: 1.71
+Detection count is the number of YOLO detections in each processed frame. It is not precision or recall. Detection accuracy against manually labelled ground truth is reported separately in D4.

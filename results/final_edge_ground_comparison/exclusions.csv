@@ -1,0 +1,8 @@
+run_id,mode,reason_excluded,artifact_status,notes
+edge_final_smoke_02,edge,short smoke test,complete,10-second diagnostic run; retained in original directories
+edge_qos_smoke_01,edge,QoS diagnostic run,complete,20-second smoke run; retained in original directories
+f_edge_01,edge,not selected as an official run,complete,superseded by selected final retry
+f_edge_01_final,edge,superseded retry,complete,superseded by f_edge_01_final_v2
+f_ground_q5_01_final,ground,superseded retry,complete,superseded by f_ground_q5_01_final_v4
+f_ground_q5_01_final_v2,ground,not selected as an official run,metadata missing,logs CSV and resource file exist but no metadata file
+f_ground_q5_02_final,ground,not selected as an official run,metadata missing,logs CSV and resource file exist but no metadata file

@@ -60,26 +60,38 @@ class CameraRelay(Node):
         self._sent_count = 0
         self._min_interval = 1.0 / self._rate_hz
 
-        qos = QoSProfile(
+        camera_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1)
+        edge_output_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1)
+        ground_output_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
             depth=1)
 
         in_topic = f'/uav{self._uav_id}/camera/image_raw'
-        self._sub = self.create_subscription(Image, in_topic, self._on_frame, qos)
+        self._sub = self.create_subscription(
+            Image, in_topic, self._on_frame, camera_qos)
 
         if self._mode == 'edge':
             out_topic = f'/cluster/cam/uav{self._uav_id}'
-            self._pub = self.create_publisher(Image, out_topic, qos)
+            self._pub = self.create_publisher(Image, out_topic, edge_output_qos)
             self.get_logger().info(
                 f'[UAV{self._uav_id}] EDGE mode: {in_topic} -> {out_topic} '
                 f'at {self._rate_hz:.1f} Hz (raw, local)')
+            self.get_logger().info('EDGE output QoS: RELIABLE')
         else:
             out_topic = f'/relay/uav{self._uav_id}/compressed'
-            self._pub = self.create_publisher(CompressedImage, out_topic, qos)
+            self._pub = self.create_publisher(
+                CompressedImage, out_topic, ground_output_qos)
             self.get_logger().info(
                 f'[UAV{self._uav_id}] GROUND mode: {in_topic} -> {out_topic} '
                 f'at {self._rate_hz:.1f} Hz, JPEG quality={self._quality}')
+            self.get_logger().info('GROUND output QoS: BEST_EFFORT')
 
         self._out_topic = out_topic
         self.create_timer(self._min_interval, self._publish)

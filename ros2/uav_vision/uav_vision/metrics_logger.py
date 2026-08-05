@@ -79,7 +79,11 @@ class MetricsLogger(Node):
             'overhead_ms', 'navsat_age_ms'])
         self._csv_file.flush()
 
-        qos = QoSProfile(
+        detection_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10)
+        navsat_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
             depth=1)
@@ -88,7 +92,7 @@ class MetricsLogger(Node):
         # result, and that's the point we actually want to compare.
         self._det_sub = self.create_subscription(
             String, f'/detections/uav{self._uav_id}',
-            self._on_detection, qos)
+            self._on_detection, detection_qos)
     
 
         # DDS health monitor — track navsat arrival rate
@@ -96,7 +100,7 @@ class MetricsLogger(Node):
         self._navsat_sub = self.create_subscription(
             NavSatFix,
             f'/ap/v{self._uav_id}/navsat',
-            self._on_navsat, qos)
+            self._on_navsat, navsat_qos)
 
         self.get_logger().info(
             f'[MetricsLogger] UAV{self._uav_id} | '

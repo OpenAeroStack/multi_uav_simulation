@@ -1,0 +1,241 @@
+Linux 5.15.0-186-generic (lenovo) 	08/06/2026 	_x86_64_	(24 CPU)
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:05 AM  1002     79980   49.50    0.99    0.00    0.00   50.50     8  14580.20      0.00 9167820  797008   2.45  python3
+01:50:05 AM  1002     80904    0.00    1.98    0.00    0.00    1.98    14      0.99      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:06 AM  1002     79980   47.00    6.00    0.00    0.00   53.00    10  15421.00      0.00 9167820  796936   2.45  python3
+01:50:06 AM  1002     80904    3.00    0.00    0.00    0.00    3.00    18      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:07 AM  1002     79980   72.00    1.00    0.00    0.00   73.00     8  15167.00      0.00 9167820  796828   2.45  python3
+01:50:07 AM  1002     80904    3.00    0.00    0.00    0.00    3.00    10      3.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:08 AM  1002     79980   49.00    9.00    0.00    0.00   58.00    10  14726.00      0.00 9167820  796896   2.45  python3
+01:50:08 AM  1002     80904    2.00    1.00    0.00    0.00    3.00    12      4.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:09 AM  1002     79980   58.00    3.00    0.00    0.00   61.00    10  14726.00      0.00 9167820  797252   2.45  python3
+01:50:09 AM  1002     80904    3.00    0.00    0.00    0.00    3.00     8      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:10 AM  1002     79980   45.00    1.00    0.00    0.00   46.00    10  15421.00      0.00 9167820  796912   2.45  python3
+01:50:10 AM  1002     80904    2.00    1.00    0.00    0.00    3.00    12      1.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:11 AM  1002     79980   47.00    3.00    0.00    0.00   50.00    10  14726.00      0.00 9167820  797532   2.46  python3
+01:50:11 AM  1002     80904    2.00    2.00    0.00    0.00    4.00    12      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:12 AM  1002     79980   36.00    4.00    0.00    0.00   40.00    10  14726.00      0.00 9167820  797596   2.46  python3
+01:50:12 AM  1002     80904    1.00    1.00    0.00    0.00    2.00    12      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:13 AM  1002     79980   49.00    1.00    0.00    0.00   50.00    10  15421.00      0.00 9167820  797516   2.46  python3
+01:50:13 AM  1002     80904    1.00    1.00    0.00    0.00    2.00    12      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:14 AM  1002     79980   45.00    6.00    0.00    0.00   51.00    10  14585.00      0.00 9167820  797120   2.45  python3
+01:50:14 AM  1002     80904    1.00    0.00    0.00    0.00    1.00    12      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:15 AM  1002     79980   62.00    1.00    0.00    0.00   63.00    10  15422.00      0.00 9183120  812872   2.50  python3
+01:50:15 AM  1002     80904    2.00    1.00    0.00    0.00    3.00    17      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:16 AM  1002     79980   48.00    3.00    0.00    0.00   51.00    10  11596.00      0.00 9167820  796800   2.45  python3
+01:50:16 AM  1002     80904    1.00    1.00    0.00    0.00    2.00     8      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:17 AM  1002     79980   44.00    0.00    0.00    0.00   44.00    10  14726.00      0.00 9167820  796864   2.45  python3
+01:50:17 AM  1002     80904    2.00    1.00    0.00    0.00    3.00    14      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:18 AM  1002     79980   62.00    2.00    0.00    0.00   64.00    10  14726.00      0.00 9167820  796928   2.45  python3
+01:50:18 AM  1002     80904    2.00    0.00    0.00    0.00    2.00     2      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:19 AM  1002     79980   52.00    6.00    0.00    0.00   58.00    10  14146.00      0.00 9167820  796956   2.45  python3
+01:50:19 AM  1002     80904    1.00    1.00    0.00    0.00    2.00    14      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:20 AM  1002     79980   64.00    7.00    0.00    0.00   71.00    12  14402.00      0.00 9167820  797284   2.45  python3
+01:50:20 AM  1002     80904    1.00    1.00    0.00    0.00    2.00     2      1.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:21 AM  1002     79980   67.00    3.00    0.00    0.00   70.00    10  17754.00      0.00 9167820  797184   2.45  python3
+01:50:21 AM  1002     80904    1.00    1.00    0.00    0.00    2.00     2      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:22 AM  1002     79980   65.00    4.00    0.00    0.00   69.00    10  15421.00      0.00 9167820  797108   2.45  python3
+01:50:22 AM  1002     80904    1.00    1.00    0.00    0.00    2.00     3      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:23 AM  1002     79980   42.00    2.00    0.00    0.00   44.00     8  14585.00      0.00 9167820  796896   2.45  python3
+01:50:23 AM  1002     80904    0.00    1.00    0.00    0.00    1.00     2      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:24 AM  1002     79980   42.00    4.00    0.00    0.00   46.00    10  14585.00      0.00 9167820  796764   2.45  python3
+01:50:24 AM  1002     80904    1.00    0.00    0.00    0.00    1.00     4      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:25 AM  1002     79980   55.00    5.00    0.00    0.00   60.00    10  14585.00      0.00 9167820  797424   2.46  python3
+01:50:25 AM  1002     80904    2.00    1.00    0.00    0.00    3.00    23      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:26 AM  1002     79980   44.00    6.00    0.00    0.00   50.00    10  14726.00      0.00 9167820  797224   2.45  python3
+01:50:26 AM  1002     80904    1.00    0.00    0.00    0.00    1.00     8      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:27 AM  1002     79980   72.00    6.00    0.00    0.00   78.00    12  14586.00      0.00 9167820  797092   2.45  python3
+01:50:27 AM  1002     80904    1.00    2.00    0.00    0.00    3.00    19      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:28 AM  1002     79980   39.00    4.00    0.00    0.00   43.00    12  14585.00      0.00 9167820  796964   2.45  python3
+01:50:28 AM  1002     80904    1.00    0.00    0.00    0.00    1.00    22      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:29 AM  1002     79980   49.00    0.00    0.00    0.00   49.00    12  14402.00      0.00 9167820  797024   2.45  python3
+01:50:29 AM  1002     80904    2.00    0.00    0.00    0.00    2.00     0      1.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:30 AM  1002     79980   68.00    1.00    0.00    0.00   69.00    12  17754.00      0.00 9167820  797452   2.46  python3
+01:50:30 AM  1002     80904    1.00    1.00    0.00    0.00    2.00    18      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:31 AM  1002     79980   57.00    0.00    0.00    0.00   57.00    14  14726.00      0.00 9167820  797252   2.45  python3
+01:50:31 AM  1002     80904    2.00    0.00    0.00    0.00    2.00    17      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:32 AM  1002     79980   65.00    1.00    0.00    0.00   66.00    14  14726.00      0.00 9167820  797080   2.45  python3
+01:50:32 AM  1002     80904    1.00    1.00    0.00    0.00    2.00    21      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:33 AM  1002     79980   60.00    3.00    0.00    0.00   63.00     8  15166.00      0.00 9167820  797220   2.45  python3
+01:50:33 AM  1002     80904    1.00    1.00    0.00    0.00    2.00     0      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:34 AM  1002     79980   54.00    1.00    0.00    0.00   55.00    14  14727.00      0.00 9167820  797272   2.45  python3
+01:50:34 AM  1002     80904    1.00    0.00    0.00    0.00    1.00    17      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:35 AM  1002     79980   57.00    0.00    0.00    0.00   57.00     8  14586.00      0.00 9167820  796876   2.45  python3
+01:50:35 AM  1002     80904    2.00    1.00    0.00    0.00    3.00     6      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:36 AM  1002     79980   46.00    5.00    0.00    0.00   51.00     8  14726.00      0.00 9167820  797208   2.45  python3
+01:50:36 AM  1002     80904    0.00    1.00    0.00    0.00    1.00    10      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:37 AM  1002     79980   54.00    7.00    0.00    0.00   61.00     8  14726.00      0.00 9167820  797272   2.45  python3
+01:50:37 AM  1002     80904    1.00    1.00    0.00    0.00    2.00    10      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:38 AM  1002     79980   49.00    1.00    0.00    0.00   50.00     8  14726.00      0.00 9167820  797336   2.46  python3
+01:50:38 AM  1002     80904    1.00    0.00    0.00    0.00    1.00     6      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:39 AM  1002     79980   41.00    0.00    0.00    0.00   41.00     8  14726.00      0.00 9182100  811680   2.50  python3
+01:50:39 AM  1002     80904    2.00    0.00    0.00    0.00    2.00    14      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:40 AM  1002     79980   58.00    2.00    0.00    0.00   60.00     8  11156.00      0.00 9194468  823656   2.54  python3
+01:50:40 AM  1002     80904    1.00    1.00    0.00    0.00    2.00    14      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:41 AM  1002     79980   41.00    0.00    0.00    0.00   41.00     8   8705.00      0.00 9196892  825788   2.54  python3
+01:50:41 AM  1002     80904    1.00    1.00    0.00    0.00    2.00    21      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:42 AM  1002     79980   54.00    3.00    0.00    0.00   57.00     8  14401.00      0.00 9167820  797360   2.46  python3
+01:50:42 AM  1002     80904    2.00    0.00    0.00    0.00    2.00    10      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:43 AM  1002     79980   46.00    6.00    0.00    0.00   52.00     8  18449.00      0.00 9167820  797120   2.45  python3
+01:50:43 AM  1002     80904    2.00    0.00    0.00    0.00    2.00     0      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:44 AM  1002     79980   46.00    0.00    0.00    0.00   46.00     8  14726.00      0.00 9167820  796948   2.45  python3
+01:50:44 AM  1002     80904    1.00    1.00    0.00    0.00    2.00    19      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:45 AM  1002     79980   56.00    4.00    0.00    0.00   60.00    10  14726.00      0.00 9167820  797008   2.45  python3
+01:50:45 AM  1002     80904    1.00    0.00    0.00    0.00    1.00    14      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:46 AM  1002     79980   60.00    2.00    0.00    0.00   62.00    12  14726.00      0.00 9167820  796808   2.45  python3
+01:50:46 AM  1002     80904    2.00    1.00    0.00    0.00    3.00    17      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:47 AM  1002     79980   48.00    3.00    0.00    0.00   51.00    12  14727.00      0.00 9167820  797136   2.45  python3
+01:50:47 AM  1002     80904    1.00    0.00    0.00    0.00    1.00     6      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:48 AM  1002     79980   49.00    3.00    0.00    0.00   52.00    10  17754.00      0.00 9167820  797040   2.45  python3
+01:50:48 AM  1002     80904    1.00    1.00    0.00    0.00    2.00    10      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:49 AM  1002     79980   38.00    2.00    0.00    0.00   40.00    10  14726.00      0.00 9167820  797396   2.46  python3
+01:50:49 AM  1002     80904    1.00    1.00    0.00    0.00    2.00    16      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:50 AM  1002     79980   49.00    1.00    0.00    0.00   50.00    10  14726.00      0.00 9167820  797196   2.45  python3
+01:50:50 AM  1002     80904    1.00    0.00    0.00    0.00    1.00    10      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:51 AM  1002     79980   45.00    0.00    0.00    0.00   45.00    10  17754.00      0.00 9167820  797388   2.46  python3
+01:50:51 AM  1002     80904    2.00    0.00    0.00    0.00    2.00     6      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:52 AM  1002     79980   76.00    4.00    0.00    0.00   80.00    10  14726.00      0.00 9173940  803308   2.47  python3
+01:50:52 AM  1002     80904    1.00    1.00    0.00    0.00    2.00     6      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:53 AM  1002     79980   38.00    2.00    0.00    0.00   40.00    10  16224.00      0.00 9167820  797368   2.46  python3
+01:50:53 AM  1002     80904    2.00    1.00    0.00    0.00    3.00    22      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:54 AM  1002     79980   41.00    4.00    0.00    0.00   45.00    10  13706.00      0.00 9167820  797304   2.45  python3
+01:50:54 AM  1002     80904    1.00    1.00    0.00    0.00    2.00    10      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:55 AM  1002     79980   50.00    3.00    0.00    0.00   53.00    10  13706.00      0.00 9182100  811520   2.50  python3
+01:50:55 AM  1002     80904    0.00    0.00    0.00    0.00    0.00    10      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:56 AM  1002     79980   57.00    1.00    0.00    0.00   58.00    10  10781.00      0.00 9182100  811280   2.50  python3
+01:50:56 AM  1002     80904    2.00    1.00    0.00    0.00    3.00     8      1.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:57 AM  1002     79980   60.00    1.00    0.00    0.00   61.00    10   9116.00      0.00 9196380  825692   2.54  python3
+01:50:57 AM  1002     80904    1.00    1.00    0.00    0.00    2.00     5      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:58 AM  1002     79980   51.00    0.00    0.00    0.00   51.00    10  13706.00      0.00 9167820  797272   2.45  python3
+01:50:58 AM  1002     80904    1.00    0.00    0.00    0.00    1.00     4      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:50:59 AM  1002     79980   54.00    4.00    0.00    0.00   58.00    10  14727.00      0.00 9167820  797096   2.45  python3
+01:50:59 AM  1002     80904    1.00    1.00    0.00    0.00    2.00    17      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:51:00 AM  1002     79980   70.00    3.00    0.00    0.00   73.00    14  15625.00      0.00 9167820  797068   2.45  python3
+01:51:00 AM  1002     80904    2.00    0.00    0.00    0.00    2.00    14      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:51:01 AM  1002     79980   57.00    1.00    0.00    0.00   58.00    14  14726.00      0.00 9167820  797124   2.45  python3
+01:51:01 AM  1002     80904    2.00    1.00    0.00    0.00    3.00    22      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:51:02 AM  1002     79980   67.00    6.00    0.00    0.00   73.00     4  14585.00      0.00 9167820  796728   2.45  python3
+01:51:02 AM  1002     80904    2.00    0.00    0.00    0.00    2.00     4      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:51:03 AM  1002     79980   54.00    3.00    0.00    0.00   57.00    14  13706.00      0.00 9167820  797188   2.45  python3
+01:51:03 AM  1002     80904    1.00    1.00    0.00    0.00    2.00     8      0.00      0.00 2072060  169864   0.52  python3
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+01:51:04 AM  1002     79980   71.00    7.00    0.00    0.00   78.00    14  13706.00      0.00 9167820  797416   2.46  python3
+01:51:04 AM  1002     80904    1.00    1.00    0.00    0.00    2.00     8      0.00      0.00 2072060  169864   0.52  python3

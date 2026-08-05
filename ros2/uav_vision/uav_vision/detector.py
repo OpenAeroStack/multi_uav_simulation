@@ -92,23 +92,32 @@ class Detector(Node):
 
         self._frame_count = 0
 
-        qos = QoSProfile(
+        edge_input_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1)
+        ground_input_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
             depth=1)
+        detection_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10)
 
         # Input topic depends on mode
         if self._mode == 'edge':
             in_topic = f'/cluster/cam/uav{self._uav_id}'
             self._sub = self.create_subscription(
-                Image, in_topic, self._on_raw, qos)
+                Image, in_topic, self._on_raw, edge_input_qos)
             self.get_logger().info(
                 f'[Detector] EDGE mode: {in_topic} -> inference locally '
                 f'(throttled via camera_relay, rate-matched to ground)')
         else:
             in_topic = f'/relay/uav{self._uav_id}/compressed'
             self._sub = self.create_subscription(
-                CompressedImage, in_topic, self._on_compressed, qos)
+                CompressedImage, in_topic, self._on_compressed,
+                ground_input_qos)
             self.get_logger().info(
                 f'[Detector] GROUND mode: {in_topic} -> inference at GCS')
 
@@ -116,7 +125,8 @@ class Detector(Node):
         det_topic   = f'/detections/uav{self._uav_id}'
         debug_topic = f'/debug/uav{self._uav_id}/annotated'
 
-        self._det_pub = self.create_publisher(String, det_topic, 10)
+        self._det_pub = self.create_publisher(
+            String, det_topic, detection_qos)
         if self._debug:
             self._debug_pub = self.create_publisher(Image, debug_topic, 1)
         else:

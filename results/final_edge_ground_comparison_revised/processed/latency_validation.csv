@@ -1,0 +1,7 @@
+session,rng_run,expected_mode,observed_mode,run_id,official_analysis_rows,latency_rows_above_500_ms,latency_rows_above_1000_ms,latency_rows_above_2000_ms,maximum_latency_ms,validation_flags
+1,1,edge,edge,f_edge_01_final_v4,60,6,3,2,3330.7400,latency_exceeds_2000ms
+1,1,ground,edge,f_ground_q5_01_final_v7,60,6,0,0,543.6900,mode_mismatch;ground_jpeg_quality_not_5
+2,2,ground,ground,f_ground_q5_02_final_v3,,,,,,metadata_missing;official_boundaries_unavailable;resource_file_missing
+2,2,edge,ground,f_edge_02_final_v2,58,32,0,0,563.7600,mode_mismatch;edge_jpeg_quality_not_na
+3,3,edge,ground,f_edge_03_final_v2,41,24,0,0,590.5800,mode_mismatch;edge_jpeg_quality_not_na;mean_interarrival_outside_0.8_to_1.2s
+3,3,ground,edge,f_ground_q5_03_final_v3,60,3,0,0,547.0700,mode_mismatch;ground_jpeg_quality_not_5
