@@ -57,6 +57,7 @@ class CameraRelay(Node):
             self._mode = 'edge'
 
         self._latest_msg = None
+        self._sent_count = 0
         self._min_interval = 1.0 / self._rate_hz
 
         qos = QoSProfile(
@@ -114,6 +115,10 @@ class CameraRelay(Node):
             msg.header.stamp.nanosec = int((t_publish % 1) * 1e9)
             msg.header.frame_id = str(t_publish)
             self._pub.publish(msg)
+            self._sent_count += 1
+            self.get_logger().info(
+                f'[UAV{self._uav_id}] edge frame sent '
+                f'#{self._sent_count:04d}')
 
         else:
             try:
@@ -135,9 +140,11 @@ class CameraRelay(Node):
                 out.header.stamp.nanosec = int((t_encode_start % 1) * 1e9)
                 out.header.frame_id = str(t_encode_end)
                 self._pub.publish(out)
+                self._sent_count += 1
                 kb = len(out.data) / 1024
                 self.get_logger().info(
-                    f'[UAV{self._uav_id}] ground frame sent: {kb:.1f} KB')
+                    f'[UAV{self._uav_id}] ground frame sent '
+                    f'#{self._sent_count:04d}: {kb:.1f} KB')
             except Exception as e:
                 self.get_logger().error(f'Compression error: {e}')
 

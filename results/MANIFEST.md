@@ -135,3 +135,31 @@ Detection accuracy in ground mode could not be evaluated because
 no complete frames reached the detector.
 
 D1/D5/D8: Ground-mode byte-level delivery vs JPEG quality (confirmed reproducible via clean single-relay reruns): q50=29.6-30.0%, q20=56.1-56.4%, q10=95.7-99.7%, q5=100%. Edge mode: 100% throughout. Critically, byte-level delivery at q10 (~97%) is far higher than frame-level delivery observed via live topic monitoring (~10-15%), demonstrating that UDP's lack of partial-datagram delivery makes even modest per-packet loss catastrophic for large, multi-fragment frames — most bytes arrive, but complete frames rarely do.
+
+
+
+D4 COUNT-BASED DETECTION RESULTS
+==================================================================
+Representation    Precision     Recall         F1   Exact count
+------------------------------------------------------------------
+Edge/raw              0.878      0.811      0.843         0.557
+Ground/q5             1.000      0.172      0.293         0.426
+==================================================================
+Detailed CSV: results/phase_d_application/processed/d4_detection_details_d4_raw_vs_q5_01_20260805_221850.csv
+Summary CSV:  results/phase_d_application/processed/d4_detection_summary_d4_raw_vs_q5_01_20260805_221850.csv
+Mean q5 payload: 18.0 KiB
+Mean q5 encode/decode: 1.36 / 1.36 ms
+
+Detection performance was evaluated offline using identical manually labelled camera frames for both processing configurations. Edge processing applied YOLOv8n directly to the original lossless frames, while the viable ground configuration applied JPEG compression at quality 5 before inference. At a fixed confidence threshold of 0.25, edge processing achieved a precision of 0.878, recall of 0.811, and F1-score of 0.843. Ground processing at quality 5 achieved a precision of 1.000 but recall of only 0.172, resulting in an F1-score of 0.293. This indicates that aggressive compression prevented false positive over-counting but removed sufficient visual detail to cause most visible humans to be missed. Although quality 5 reduced the mean payload to 18.0 KiB and previously achieved reliable transport, it imposed a substantial application-level accuracy penalty.
+
+
+D4: Count-based human-detection evaluation on identical manually
+labelled camera frames. Edge used original lossless PNG frames;
+ground used JPEG q5 versions of the same frames. YOLOv8n,
+imgsz=960, confidence=0.25, person class only. Preliminary result:
+edge precision=0.878, recall=0.811, F1=0.843; ground-q5
+precision=1.000, recall=0.172, F1=0.293. Mean q5 payload=18.0 KiB;
+encode/decode=1.36/1.36ms. Verify and remove possible duplicate
+ground-truth row before accepting final values.
+
+

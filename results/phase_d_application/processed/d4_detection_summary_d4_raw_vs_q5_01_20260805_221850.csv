@@ -1,0 +1,3 @@
+run_id,representation,frames,confidence_threshold,jpeg_quality,tp,fp,fn,precision,recall,f1,mean_confidence,exact_count_accuracy,mean_inference_ms,median_inference_ms,p95_inference_ms,mean_payload_bytes,mean_encode_ms,mean_decode_ms
+d4_raw_vs_q5_01,edge_raw,61,0.250000,n/a,137,19,32,0.878205,0.810651,0.843077,0.497774,0.557377,43.860739,45.118176,49.965423,n/a,n/a,n/a
+d4_raw_vs_q5_01,ground_q5,61,0.250000,5,29,0,140,1.000000,0.171598,0.292929,0.328418,0.426230,39.033007,37.928528,46.807123,18458.262295,1.357976,1.360334

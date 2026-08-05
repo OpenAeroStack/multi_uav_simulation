@@ -74,7 +74,8 @@ class MetricsLogger(Node):
         self._writer.writerow([
             'run_id', 'timestamp_s', 'mode', 'uav_id', 'frame_num',
             'size_bytes', 'detection_count', 'latency_ms', 'inference_ms',
-            'compression_ms', 'decode_ms', 'wireless_transit_ms',
+            'compression_ms', 'decode_ms', 'pipeline_latency_ms',
+            'wireless_transit_ms',
             'overhead_ms', 'navsat_age_ms'])
         self._csv_file.flush()
 
@@ -125,6 +126,12 @@ class MetricsLogger(Node):
             decode_ms      = float(payload.get('decode_ms', -1.0))
             det_count      = len(payload.get('detections', []))
             latency_ms     = (receipt_t - send_t) * 1000.0
+            if latency_ms >= 0:
+                pipeline_latency_ms = latency_ms
+                if compression_ms >= 0:
+                    pipeline_latency_ms += compression_ms
+            else:
+                pipeline_latency_ms = -1.0
             overhead_ms    = latency_ms - inference_ms if inference_ms >= 0 else -1.0
             # Ground: overhead = transit + decode (compression already excluded from
             # latency_ms since send_t is stamped post-encode) -> subtract decode_ms.
@@ -139,6 +146,7 @@ class MetricsLogger(Node):
                 wireless_transit_ms = -1.0
         except (ValueError, KeyError, json.JSONDecodeError):
             latency_ms, inference_ms, overhead_ms = -1.0, -1.0, -1.0
+            pipeline_latency_ms = -1.0
             compression_ms, decode_ms, wireless_transit_ms = -1.0, -1.0, -1.0
             det_count = -1
 
@@ -148,13 +156,15 @@ class MetricsLogger(Node):
             self._run_id, f'{receipt_t:.6f}', self._mode,
             self._uav_id, self._ground_count, size_b, det_count,
             f'{latency_ms:.2f}', f'{inference_ms:.1f}',
-            f'{compression_ms:.1f}', f'{decode_ms:.1f}', f'{wireless_transit_ms:.2f}',
+            f'{compression_ms:.1f}', f'{decode_ms:.1f}',
+            f'{pipeline_latency_ms:.2f}', f'{wireless_transit_ms:.2f}',
             f'{overhead_ms:.2f}', f'{navsat_age:.1f}'])
         self._csv_file.flush()
 
         self.get_logger().info(
             f'[{self._mode}] #{self._ground_count:04d} | '
             f'latency={latency_ms:.0f}ms | inference={inference_ms:.0f}ms | '
+            f'pipeline={pipeline_latency_ms:.0f}ms | '
             f'overhead={overhead_ms:.0f}ms | navsat_age={navsat_age:.0f}ms')
     
     def destroy_node(self):

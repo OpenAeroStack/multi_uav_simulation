@@ -79,7 +79,9 @@ class Detector(Node):
             str(self.get_parameter('target_classes').value).split(',')]
 
         # Load YOLO model
-        self.get_logger().info(f'[Detector] Loading model: {model_path}')
+        self.get_logger().info(
+            f'[Detector] Loading model: {model_path}, '
+            f'confidence threshold={self._conf}')
         try:
             from ultralytics import YOLO
             self._model = YOLO(model_path)
@@ -152,7 +154,7 @@ class Detector(Node):
         results = self._model(
         img_bgr,
         imgsz=960,
-        conf=0.25,
+        conf=self._conf,
         classes=self._target_classes,
         verbose=False
         )
