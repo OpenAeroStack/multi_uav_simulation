@@ -28,6 +28,17 @@ HOME_GPS="6.0790684,80.1915283,0.00,0"
 WORLD_PATH="$PROJECT_DIR/worlds/small_city_single_uav_netns.world"
 DDS_PARM="$PROJECT_DIR/params/uav1_dds_netns.parm"
 
+# ── HITL: the Pi edge node's two links over one cable (see STEP 1c) ─────────
+# Auto-detect the Pi-facing NIC; override by exporting PI_LINK_IF beforehand.
+PI_LINK_IF="${PI_LINK_IF:-$(ls /sys/class/net 2>/dev/null | grep -m1 '^enx' || true)}"
+CAM_VLAN=10          # unimpaired camera link  (behaves like a camera cable)
+RF_VLAN=42           # impaired radio link     (goes through ns-3)
+CAM_VLAN_IF="eth-cam"
+RF_VLAN_IF="eth-rf"
+CAM_HOST_IP="10.0.0.1"
+CAM_PI_IP="10.0.0.2"
+RF_PI_IP="10.42.0.12"   # the Pi is UAV2 on the wireless subnet
+
 TAP_READY_TIMEOUT=30
 AGENT_READY_TIMEOUT=20
 DDS_GPS_TIMEOUT=90
@@ -51,10 +62,11 @@ done
 for ns in gcsns uav1ns; do
     sudo ip netns del "$ns" 2>/dev/null || true
 done
-for br in br-gcs br-uav1; do
+for br in br-gcs br-uav1 br-uav2; do
     sudo ip link del "$br" type bridge 2>/dev/null || true
 done
-for link in tap-gcs tap-uav1 tap-uav2 tap-uav3 veth0h veth1h sim1h; do
+for link in tap-gcs tap-uav1 tap-uav2 tap-uav3 veth0h veth1h sim1h \
+            eth-cam eth-rf; do
     sudo ip link del "$link" 2>/dev/null || true
 done
 sleep 2
@@ -85,12 +97,61 @@ setup_ns() {
 setup_ns gcsns  tap-gcs  br-gcs  veth0h veth0n 10.42.0.10/24
 setup_ns uav1ns tap-uav1 br-uav1 veth1h veth1n 10.42.0.11/24
 
-echo "=== [1b] Dummy TAPs for unused UAV2/UAV3 slots (ns-3 binary requires them) ==="
+echo "=== [1b] TAPs for the UAV2/UAV3 slots (ns-3 binary requires all four) ==="
 for tap in tap-uav2 tap-uav3; do
     sudo ip tuntap add dev "$tap" mode tap user "$RUN_USER" 2>/dev/null || true
     sudo ip link set "$tap" up
-    echo "  $tap up (bare, unbridged, unused)"
 done
+echo "  tap-uav2 up (UAV2 slot — the Pi edge node attaches here, see 1c)"
+echo "  tap-uav3 up (bare, unbridged, unused)"
+echo ""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 1c — HITL: attach the Raspberry Pi as UAV2 on the IMPAIRED link
+# ═══════════════════════════════════════════════════════════════════════════
+# The Pi has ONE ethernet port but needs TWO logically separate links:
+#
+#   VLAN 10 -> 10.0.0.x   camera in.  Behaves like the ribbon cable between a
+#                         camera module and the companion computer inside one
+#                         airframe, so it must NOT be impaired and must never
+#                         enter a bridge ns-3 can see.
+#   VLAN 42 -> 10.42.0.x  detections out. This IS the radio, so it goes
+#                         br-uav2 -> tap-uav2 -> ns-3 -> tap-gcs -> gcsns.
+#
+# 802.1Q keeps them separate over the single cable. The routing then enforces
+# itself: Gazebo can only reach the Pi at 10.0.0.2, and gcsns can only reach it
+# at 10.42.0.12, so neither can take the wrong path even by accident.
+#
+# Skipped automatically when no Pi-facing NIC is present, so host-only runs are
+# unaffected.
+echo "=== [1c] HITL: Pi edge node as UAV2 on the impaired link ==="
+if [[ -n "$PI_LINK_IF" ]] && [[ -d "/sys/class/net/$PI_LINK_IF" ]]; then
+    sudo modprobe 8021q 2>/dev/null || true
+
+    # br-uav2 joins the Pi's radio VLAN to ns-3's UAV2 node.
+    sudo ip link add name br-uav2 type bridge 2>/dev/null || true
+    sudo ip link set tap-uav2 master br-uav2
+    sudo ip link set br-uav2 up
+
+    # The camera address must live on the VLAN, not the parent: anything left
+    # on the untagged parent would not reach the Pi's tagged sub-interface.
+    sudo ip addr del "$CAM_HOST_IP/24" dev "$PI_LINK_IF" 2>/dev/null || true
+    sudo ip link add link "$PI_LINK_IF" name "$CAM_VLAN_IF" type vlan id "$CAM_VLAN" 2>/dev/null || true
+    sudo ip addr add "$CAM_HOST_IP/24" dev "$CAM_VLAN_IF" 2>/dev/null || true
+    sudo ip link set "$CAM_VLAN_IF" up
+
+    # Radio VLAN carries no host IP — it is a pure L2 leg into the bridge.
+    sudo ip link add link "$PI_LINK_IF" name "$RF_VLAN_IF" type vlan id "$RF_VLAN" 2>/dev/null || true
+    sudo ip link set "$RF_VLAN_IF" up
+    sudo ip link set "$RF_VLAN_IF" master br-uav2
+
+    sudo ip link set "$PI_LINK_IF" up
+    echo "  $PI_LINK_IF: VLAN $CAM_VLAN -> $CAM_VLAN_IF ($CAM_HOST_IP) unimpaired camera link"
+    echo "  $PI_LINK_IF: VLAN $RF_VLAN -> $RF_VLAN_IF -> br-uav2 -> tap-uav2 -> ns-3"
+    echo "  Pi should hold ${CAM_PI_IP}/24 on VLAN $CAM_VLAN and ${RF_PI_IP}/24 on VLAN $RF_VLAN"
+else
+    echo "  skipped — no Pi-facing NIC (PI_LINK_IF='$PI_LINK_IF'); host-only run"
+fi
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -356,7 +417,9 @@ cleanup() {
     sudo ip netns del uav1ns 2>/dev/null || true
     sudo ip link del br-gcs type bridge 2>/dev/null || true
     sudo ip link del br-uav1 type bridge 2>/dev/null || true
-    for l in tap-gcs tap-uav1 tap-uav2 tap-uav3 veth0h veth1h sim1h; do
+    sudo ip link del br-uav2 type bridge 2>/dev/null || true
+    for l in tap-gcs tap-uav1 tap-uav2 tap-uav3 veth0h veth1h sim1h \
+             eth-cam eth-rf; do
         sudo ip link del "$l" 2>/dev/null || true
     done
     exit

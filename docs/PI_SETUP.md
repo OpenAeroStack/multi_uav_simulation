@@ -21,12 +21,18 @@ impaired link for the real HITL measurement).
 
 ## What you need (hardware)
 
-- Raspberry Pi 5 (4 GB or 8 GB).
-- **Official 27 W USB-C PD power supply** (the Pi 5 is picky — underpowered supplies cause
-  random reboots that look like software bugs).
-- **microSD card** (32 GB+, decent brand) — or an NVMe HAT + SSD if you have one.
+- **Raspberry Pi 4B** (4 GB or 8 GB) — *not* a Pi 5; see the note above.
+- **Official 15 W USB-C power supply** (underpowered supplies cause random reboots that
+  look like software bugs).
+- **microSD card** (32 GB+, decent brand).
 - A second computer (your host PC works) to **flash** the card.
-- **USB-Gigabit-Ethernet adapter** for the Pi↔host link (used in Phase 4/5).
+- **USB-Gigabit-Ethernet adapter for the HOST.** The Pi 4B has a built-in gigabit port, but
+  the host laptop has no RJ45. Buy a **USB 3.0** adapter with an RTL8153 or AX88179 chipset —
+  a cheap QTS1081B managed only 4.5 Mbps with 24% loss here, and `ethtool` misreported it as
+  100 Mbps full-duplex. **Trust `iperf3`, not `ethtool`:** link speed is what the NIC claims,
+  throughput is what it delivers. A working adapter gives ~834 Mbps steady.
+- **Cat6 cable**, host ↔ Pi direct. One cable is enough — Phase 5 splits it into two logical
+  links with VLANs.
 - For first boot, either: a monitor + USB keyboard, **or** go fully headless (we enable
   SSH during flashing — recommended, no monitor needed).
 
@@ -122,11 +128,74 @@ pip install --upgrade pip
 # inference crashes with "Illegal instruction" (SIGILL). The +cpu wheels fix it.
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 pip install ultralytics
+# PIN these two — see the warning below. ultralytics pulls newer versions that
+# break cv_bridge, so install them AFTER ultralytics to force the downgrade.
+pip install "numpy==1.26.4" "opencv-python==4.10.0.84"
 # grab the small model weights (same one the host uses)
 python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"   # downloads yolov8n.pt to CWD
 ```
 > `--system-site-packages` lets the venv's python also import ROS's `rclpy`, `cv2`, `numpy`
 > from `/opt/ros`, so the detector node can run with venv python (same trick as the host).
+
+> ### ⚠ Never run `pip install -U` in this venv
+>
+> `cv_bridge` is a **compiled C++ extension** built against specific NumPy and OpenCV
+> versions. Two separate upgrades break it, and neither failure is ARM-specific:
+>
+> | Upgrade | Error | Why |
+> |---|---|---|
+> | NumPy ≥ 2.0 | `AttributeError: _ARRAY_API not found` | built against the NumPy 1.x C ABI |
+> | OpenCV 5.0 | `KeyError: 16` in `cv2_to_imgmsg` | OpenCV 5 changed the `CV_8UC3` constants cv_bridge reads to build its type table (16 *is* `CV_8UC3`) |
+>
+> The two are linked: **`opencv-python >= 4.11` requires `numpy >= 2`**, so only the older
+> pair can coexist. Installing `opencv-python<5` on its own silently pulls NumPy 2 back in —
+> pin both together, as above.
+>
+> This pair is exactly what the host has, which is why detector code developed there
+> "just worked" until it was moved to the Pi.
+>
+> Verify with:
+> ```bash
+> source /opt/ros/humble/setup.bash
+> ~/yolo_env/bin/python -c "
+> import numpy, cv2; print(numpy.__version__, cv2.__version__)
+> from cv_bridge import CvBridge; import numpy as np
+> b = CvBridge()
+> print(b.cv2_to_imgmsg(np.zeros((4,4,3), np.uint8), 'bgr8').encoding, 'OK')"
+> ```
+> Expect `1.26.4 4.10.0 bgr8 OK`. Test **both** directions — reading worked fine while
+> writing was broken, so an import check alone is not enough.
+
+### 3.4b Optional — NCNN for ~2× faster inference
+
+NCNN is ARM-NEON optimised and is what ultralytics benchmarks as fastest on Raspberry Pi.
+Measured on this Pi 4B: **2,540 ms → ~1,000 ms per frame** at the same input size.
+
+```bash
+pip install ncnn
+```
+
+Export on the **host** (faster, and the `pnnx` converter ships an x86 wheel) and copy over —
+NCNN's `.param`/`.bin` files are architecture-independent:
+
+```bash
+# on the HOST:
+venv/bin/python -c "
+from ultralytics import YOLO
+YOLO('yolov8n.pt').export(format='ncnn', imgsz=[544,960], half=False)"
+scp -r yolov8n_ncnn_model/ anton@10.0.0.2:/home/anton/models/
+```
+
+> **`imgsz` must match what the detector runs**, and the order is `[height, width]`.
+> NCNN bakes in a **fixed input shape**; a plain `imgsz=960` produces a *square* 960×960
+> input (19.9 GFLOPS, 43% grey padding) instead of the rectangular 960×544 that a 1280×720
+> frame actually letterboxes to (11.3 GFLOPS). A mismatch is silently ignored, not raised.
+>
+> **`half=False`** — the Cortex-A72 has no fp16 SIMD, the same gap that causes the
+> CUDA-torch SIGILL above.
+
+Then just point the detector at the directory instead of the `.pt` file; no code change is
+needed, since `YOLO()` accepts an NCNN model directory.
 
 ### 3.5 Get the code onto the Pi + build
 
@@ -161,57 +230,179 @@ the edge-vs-ground comparison is about.)
 
 ---
 
-## Phase 4 — Wire the Pi in the EASY way (no ns-3 yet)
+## Phase 4 — Camera over the wired link ✅ DONE (2026-08-05)
 
-Prove the **compute path** first with one plain wired link and flat DDS — no impairment.
+Static addresses on both ends of the cable. **Make them persistent** — every hand-added
+address on this project eventually vanished, because a network manager reconciles the kernel
+against its own config and deletes anything it did not create.
 
-1. Cable the Pi to the host via the **USB-Gigabit-Ethernet adapter**. Give both ends static
-   IPs on a private subnet, e.g. host `192.168.50.1/24`, Pi `192.168.50.2/24`. Confirm
-   `ping` both ways.
-2. Same ROS domain on both: `export ROS_DOMAIN_ID=0` (host and Pi).
-3. On the **host**, run Gazebo + SITL as usual (`make gazebo`, `make sitl`) so
-   `/uav1/camera/image_raw` (or a uav2 camera) is publishing, and run `gcs_receiver` on the
-   host.
-4. On the **Pi**, run the edge nodes against the host's camera topic:
-   ```bash
-   source ~/yolo_env/bin/activate
-   ros2 run uav_vision camera_relay --ros-args -p uav_id:=2 -p processing_mode:=edge -p frame_rate_hz:=2.0
-   # separate shell:
-   python ~/multi_uav_simulation/install/uav_vision/lib/uav_vision/detector \
-       --ros-args -p uav_id:=2 -p processing_mode:=edge -p model_path:=$HOME/yolo_env/yolov8n.pt
-   ```
-**Success:** the Pi detects people in the SITL feed and detections appear on the host's
-`gcs_receiver`. No `fastdds_udp_only.xml` needed — separate machines already use UDP.
+The two machines need **different tools**:
 
-> Discovery over a single wired link is usually fine with default multicast. If nodes don't
-> find each other, set unicast peers (FastDDS `ROS_STATIC_PEERS` / a discovery XML) — see
-> the "hard problems" note in `docs/HITL_INTEGRATION_PLAN.md`.
+```bash
+# HOST (Ubuntu Desktop → NetworkManager). Name comes from the MAC, so a
+# different adapter means a different profile.
+nmcli connection show                       # find the wired profile name
+sudo nmcli connection modify "Wired connection 2" ipv4.method manual \
+     ipv4.addresses 10.0.0.1/24 ipv4.never-default yes ipv6.method disabled
+sudo nmcli connection up "Wired connection 2"
+```
+
+```bash
+# PI (Ubuntu Server → systemd-networkd / netplan)
+sudo tee /etc/netplan/99-cat6-link.yaml >/dev/null <<'EOF'
+network:
+  version: 2
+  ethernets:
+    eth0:
+      dhcp4: no
+      dhcp6: no
+      addresses: [10.0.0.2/24]
+EOF
+sudo chmod 600 /etc/netplan/99-cat6-link.yaml
+sudo netplan try          # auto-reverts in 120 s if it breaks your SSH
+```
+
+`ipv4.never-default yes` matters — without it NM may route all traffic down the cable and
+break WiFi. No gateway or DNS on either side: this is a private point-to-point link.
+
+**Kernel socket buffers — mandatory on both machines.** A 1280×720 RGB frame is 2.76 MB,
+about 1,900 UDP fragments. The default 208 KB receive buffer holds ~7% of one frame, so
+reassembly never completes and the subscriber **silently receives nothing** — the topic
+appears in `ros2 topic list` but no data ever arrives.
+
+```bash
+sudo tee /etc/sysctl.d/60-ros2-dds.conf >/dev/null <<'EOF'
+net.core.rmem_max = 536870912
+net.core.rmem_default = 134217728
+net.ipv4.ipfrag_high_thresh = 134217728
+EOF
+sudo sysctl --system
+```
+
+**Pin DDS to the cable.** Both machines are on WiFi *and* Ethernet, and Fast DDS otherwise
+announces a locator on every interface — the camera can end up on WiFi, where large samples
+fragment and are dropped. Use `config/fastdds_hitl_eth.xml` on both:
+
+```bash
+export FASTRTPS_DEFAULT_PROFILES_FILE=$HOME/uav2_ws/config/fastdds_hitl_eth.xml
+```
+
+> **Fast DDS 2.6 reads the interface list once**, at participant creation, with no dynamic
+> detection. An address assigned *after* a process starts can never be used by it — so
+> bring the addresses up **before** launching Gazebo, and restart anything that started
+> earlier.
+
+**Verified result:** 19.8 Hz at the Pi, 481 Mbps, 42,544 pkt/s, **0 dropped packets**.
 
 ---
 
-## Phase 5 — Insert the ns-3 impaired link (full HITL)
+## Phase 5 — Detections across the ns-3 impaired link ✅ DONE (2026-08-05)
 
-Replace the `uav2ns` veth in bridge `br-uav2` with the **physical USB-Ethernet NIC** facing
-the Pi, so Pi→GCS detections ride the simulated Wi-Fi:
+The Pi has one Ethernet port but needs two links, so `eth0` is split with 802.1Q VLANs:
 
-- Pi wireless IP `10.42.0.12` (routed through host `br-uav2 → tap-uav2 → ns-3`).
-- Pi sensor IP `172.31.2.2` (direct, unimpaired — carries the camera).
-- The GCS lives only on `10.42.0.x`, so DDS routes detections through ns-3 automatically —
-  same trick the namespaces use.
-- **Clock sync:** run `chrony` (or PTP) between Pi and host, or the `metrics_logger`
-  latency numbers (receipt_wall − send_wall across two machines) are meaningless.
+| VLAN | Pi interface | Address | Carries | Impaired? |
+|---|---|---|---|---|
+| 10 | `eth0.10` | `10.0.0.2` | camera **in** | ❌ plain cable |
+| 42 | `eth0.42` | `10.42.0.12` | detections **out** | ✅ via ns-3 |
 
-See `docs/HITL_INTEGRATION_PLAN.md` §Phase 5–6 for the bridge-rewire details and the
-edge-vs-ground data collection.
+The Pi occupies the **UAV2 slot** of the 4-node ns-3 binary (node 0 = GCS, node 1 = SITL,
+node 2 = the Pi). On the host, VLAN 42 is bridged into `br-uav2 → tap-uav2 → ns-3`.
+
+Run the host launcher **first** (it creates `br-uav2` and the host-side VLANs), then on the
+Pi:
+
+```bash
+sudo bash ~/pi_hitl_link.sh
+```
+
+Verify **both** paths — this is the test that proves the split is real:
+
+```bash
+ping -c 3  10.0.0.1        # camera link  → ~2 ms
+ping -c 30 10.42.0.10      # radio link   → ~59 ms, high jitter
+```
+
+Measured: camera 2.2 ms / 0.8 ms jitter; radio min 3.3, avg 59.0, max 158.0 ms, 40.8 ms
+jitter, 0% loss. Use **≥30 pings** — the first packet includes ARP across the simulated
+channel and a 2-ping sample reported a misleading 167 ms average.
+
+> If the radio link answers as fast as the cable, detections are **not** crossing ns-3 and
+> every latency number will be meaningless.
+
+> **⚠ Not persistent.** `pi_hitl_link.sh` uses plain `ip` commands, so a Pi reboot drops
+> back to untagged `eth0` while the host still expects VLAN 10. The symptom is
+> `Destination Host Unreachable` with the carrier up and the link at 1000 Mbps. Re-run the
+> script after every reboot until it is moved into netplan with a `vlans:` section.
+
+**Clock sync is still outstanding** — run `chrony` between the Pi and host before
+collecting any latency data, or `metrics_logger`'s `receipt_wall − send_wall` across two
+unsynchronised clocks produces plausible-looking nonsense.
+
+---
+
+## Running the detector on the Pi
+
+```bash
+ssh anton@10.0.0.2
+source /opt/ros/humble/setup.bash
+export FASTRTPS_DEFAULT_PROFILES_FILE=$HOME/uav2_ws/config/fastdds_hitl_eth.xml
+
+~/yolo_env/bin/python ~/yolo_detect_node.py --ros-args \
+    -p model_path:=/home/anton/models/yolov8n.pt \
+    -p show_window:=False
+```
+
+`show_window:=False` is required — the Pi is headless and `cv2.imshow` has no display.
+Swap `model_path` to `/home/anton/models/yolov8n_ncnn_model` for the NCNN build.
+
+> **Sensor subscriptions must use `BEST_EFFORT`, depth 1.** Gazebo's camera publisher is
+> `RELIABLE`; a `RELIABLE` subscriber makes it wait for an acknowledgement of every frame,
+> and the Pi (≈1 fps) dragged the **whole simulation's camera down to 0.27 Hz**. Worse, when
+> the Pi rebooted mid-run its unacknowledged samples left the publisher stalled at its
+> retransmission heartbeat. A frame that arrives late is worthless anyway.
+
+> **The Pi has its own copy of the code.** `~/uav2_ws/src/uav_vision` does not track the
+> host repo. After any edit on the host:
+> ```bash
+> rsync -av ros2/uav_vision/ anton@10.0.0.2:~/uav2_ws/src/uav_vision/
+> ssh anton@10.0.0.2 'cd ~/uav2_ws && source /opt/ros/humble/setup.bash && \
+>     colcon build --packages-select uav_vision'
+> ```
+> Stale code once left the detector subscribed to a topic nobody published — it started
+> cleanly and then sat silent.
+
+---
+
+## Measured performance (Pi 4B)
+
+| Engine | imgsz | Per frame | Rate |
+|---|---|---|---|
+| PyTorch | 960×544 | **2,540 ms** | 0.39 fps |
+| PyTorch | 640×384 | ~1,100 ms | 0.9 fps |
+| **NCNN** | 960×544 | **~1,000 ms** | 0.74 fps |
+| NCNN | 640×384 | ~470 ms *(predicted)* | — |
+
+Resolution and engine effects are separable and roughly multiplicative; inference scales
+close to linearly with pixel count.
+
+The same model runs in **623 ms on a static image** but ~1,343 ms in the live pipeline — the
+Pi loses roughly half its inference capacity to deserialising camera frames it discards.
+Throttling the camera at source (`update_rate` 20 → 5 in the model SDF) recovered a quarter
+of that. `camera_relay`'s `frame_rate_hz` cannot: it throttles *after* receipt, so the bytes
+have already crossed the link.
 
 ---
 
 ## Quick reference — where things run
 
-| Component | Host PC | Raspberry Pi 5 (UAV2) |
+| Component | Host PC | Raspberry Pi 4B (UAV2) |
 |---|---|---|
 | Gazebo + camera | ✅ | |
 | ArduPilot SITL (autopilot) | ✅ | |
 | ns-3 wireless channel | ✅ | |
-| `gcs_receiver` + `metrics_logger` | ✅ | |
-| `camera_relay` + `detector` (edge YOLO) | | ✅ |
+| `gcs_receiver` (inside `gcsns`) | ✅ | |
+| `yolo_detect_node.py` (edge YOLO) | | ✅ |
+| Address on the camera VLAN | `10.0.0.1` (`eth-cam`) | `10.0.0.2` (`eth0.10`) |
+| Address on the radio VLAN | `10.42.0.10` (in `gcsns`) | `10.42.0.12` (`eth0.42`) |
+
+See `docs/HITL_RUNBOOK.pdf` for the full command sequence and a troubleshooting table.

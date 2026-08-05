@@ -15,7 +15,7 @@
     * the Pi wastes discovery on host addresses it can never route to
       (172.31.1.1, 10.42.0.x, the tap-* / br-* devices);
     * the 421 Mbps camera stream can end up on WiFi, where large samples
-      fragment and are dropped -- the "Pi received 0 frames" failure.
+      fragment and are dropped: the "Pi received 0 frames" failure.
   The interfaceWhiteList below pins DDS to the wired link only.
 
   Non-existent addresses in the list are simply never matched, which is why
@@ -32,7 +32,7 @@
   ── IMPORTANT ──────────────────────────────────────────────────────────────
   FastDDS reads the interface list ONCE, when a participant is created.
   Humble ships FastDDS 2.6, which has NO dynamic interface detection. Any
-  process started BEFORE 10.0.0.x was assigned cannot use it -- restart the
+  process started BEFORE 10.0.0.x was assigned cannot use it; restart the
   process after the addresses exist.
 
   Requires raised kernel socket buffers on BOTH machines (a 1280x720 RGB
@@ -52,8 +52,12 @@
              The address that does not exist on a given machine is ignored. -->
         <interfaceWhiteList>
           <address>127.0.0.1</address>
-          <address>10.0.0.1</address>   <!-- host  : enx00e04c680050 -->
-          <address>10.0.0.2</address>   <!-- Pi 4B : eth0            -->
+          <!-- Camera link, VLAN 10 — unimpaired, never touches ns-3 -->
+          <address>10.0.0.1</address>    <!-- host : eth-cam   -->
+          <address>10.0.0.2</address>    <!-- Pi   : eth0.10   -->
+          <!-- Radio link, VLAN 42 — goes through ns-3 -->
+          <address>10.42.0.10</address>  <!-- gcsns: veth0n    -->
+          <address>10.42.0.12</address>  <!-- Pi   : eth0.42, the UAV2 slot -->
         </interfaceWhiteList>
 
         <!-- Sized for 2.76 MB image samples. These are the DDS-level buffers;

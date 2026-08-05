@@ -4617,7 +4617,5 @@
         <static>true</static>
       </include>
     </model>
-    
-
   </world>
 </sdf>

@@ -247,14 +247,23 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== [5/6] gcs_receiver on the host ==="
 : > "$GCS_LOG"
+# Runs INSIDE gcsns (10.42.0.10), not the root namespace. That is the whole
+# point of the experiment: from there the only route back to the Pi is
+# gcsns -> br-gcs -> tap-gcs -> ns-3 -> tap-uav2 -> br-uav2 -> the Pi's VLAN 42
+# leg, so every detection message crosses the simulated radio and picks up its
+# loss and latency. In the root namespace it would instead reach the Pi over
+# the direct 10.0.0.x cable with no impairment at all, and the numbers would be
+# meaningless.
+#
 # uav_vision is built into <repo>/install, NOT <repo>/ros2/install — the latter
 # only carries uav_controller. Sourcing the wrong overlay gives
 # "Package 'uav_vision' not found" and gcs_receiver silently never starts.
-FASTRTPS_DEFAULT_PROFILES_FILE="$DDS_PROFILE" \
-bash -lc "source /opt/ros/humble/setup.bash && \
-          source '$PROJECT_DIR/install/setup.bash' && \
-          exec ros2 run uav_vision gcs_receiver --ros-args \
-               -p uav_id:=1 -p processing_mode:=edge" \
+sudo ip netns exec gcsns sudo -H -u "${SUDO_USER:-$USER}" \
+    env FASTRTPS_DEFAULT_PROFILES_FILE="$DDS_PROFILE" \
+    bash -lc "source /opt/ros/humble/setup.bash && \
+              source '$PROJECT_DIR/install/setup.bash' && \
+              exec ros2 run uav_vision gcs_receiver --ros-args \
+                   -p uav_id:=1 -p processing_mode:=edge" \
     > "$GCS_LOG" 2>&1 &
 PIDS+=("$!")
 sleep 3

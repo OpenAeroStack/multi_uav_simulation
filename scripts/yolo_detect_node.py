@@ -28,6 +28,7 @@ import cv2
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 from ultralytics import YOLO
@@ -51,9 +52,34 @@ class YoloHumanDetector(Node):
         self.bridge = CvBridge()
         self.model = YOLO(model_path)
 
-        self.sub = self.create_subscription(Image, image_topic, self.on_image, 10)
+        # BEST_EFFORT, depth 1 — NOT the default RELIABLE/depth-10.
+        #
+        # Gazebo's camera publisher is RELIABLE, so a RELIABLE subscriber makes
+        # it wait for this node to acknowledge every frame. The Pi needs ~1 s per
+        # frame and also sends a 2.76 MB annotated image back, so the publisher
+        # was throttled to the Pi's speed and the whole simulation's camera fell
+        # to ~0.27 Hz. Worse, when the Pi rebooted mid-run the unacknowledged
+        # samples kept the publisher stalled at its retransmission heartbeat.
+        #
+        # BEST_EFFORT with depth 1 means the publisher never blocks and this node
+        # always works on the newest frame instead of a queue of stale ones —
+        # which is what you want for real-time detection anyway, since a frame
+        # that arrives a second late is worthless.
+        qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
+                         history=HistoryPolicy.KEEP_LAST,
+                         depth=1)
+        self.sub = self.create_subscription(Image, image_topic, self.on_image, qos)
         self.img_pub = self.create_publisher(Image, "/uav1/camera/annotated", 10)
         self.det_pub = self.create_publisher(String, "/uav1/detections/humans", 10)
+
+        # Second publisher on uav_vision's topic, so the results actually reach
+        # the ground station. gcs_receiver and metrics_logger subscribe to
+        # /detections/uavN; without this the Pi publishes to nobody and the GCS
+        # listens to nothing — two nodes talking past each other.
+        # The payload carries frame_id and inference_ms as well as the boxes,
+        # matching uav_vision/detector.py, so the downstream latency and
+        # message-size measurements stay comparable between the two detectors.
+        self.gcs_pub = self.create_publisher(String, "/detections/uav1", 10)
 
         self.frame_count = 0
         self.get_logger().info(f"Listening on {image_topic}, detecting humans...")
@@ -80,6 +106,21 @@ class YoloHumanDetector(Node):
             for b in result.boxes
         ]
         self.det_pub.publish(String(data=json.dumps(humans)))
+
+        # Same detections in uav_vision's schema, for the ground station.
+        # frame_id is stamped here rather than at capture because this node has
+        # no access to the camera's send time — it is a receipt reference, and
+        # only meaningful for cross-machine latency once the two clocks are
+        # synchronised (chrony), which they are not yet.
+        self.gcs_pub.publish(String(data=json.dumps({
+            "frame_id": str(time.time()),
+            "inference_ms": round(inference_ms, 1),
+            "detections": [
+                {"class": "person",
+                 "confidence": round(h["conf"], 3),
+                 "bbox": [round(v) for v in h["box"]]}
+                for h in humans],
+        })))
 
         # Log EVERY frame, not just the ones with hits: a run of zero-detection
         # frames still carries the timing data the edge-vs-ground comparison
