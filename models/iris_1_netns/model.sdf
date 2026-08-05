@@ -616,6 +616,17 @@
              WAS: 1.0472 (60 deg). -->
         <pose>0 0 0 0 0.7854 0</pose>
         <camera>
+          <!-- 0.6 rad = 34.4 deg. Zoomed IN from the original 0.9 rad (51.6 deg)
+               because the wider view was producing false-positive "people" on
+               city texture. Narrowing helps twice over: the same 1280 px now
+               cover 21.9 m of ground instead of 34.2 m, so a person at 25 m
+               altitude goes from ~34 px to ~53 px tall (well clear of the
+               ~20-30 px YOLOv8n needs), AND far less building/road clutter is
+               in frame to be mistaken for a person.
+               Cost: the ground band narrows to 17.6-35.5 m ahead of the drone,
+               so the flight path has to pass closer to the target. The 5
+               person_standing models span only ~2 m, so they still fit easily.
+               WAS: 0.9 -->
           <horizontal_fov>0.9</horizontal_fov>
           <image>
             <width>1280</width>
@@ -628,7 +639,21 @@
           </clip>
         </camera>
         <always_on>1</always_on>
-        <update_rate>20</update_rate>
+        <!-- 5 Hz, throttled at SOURCE. The Pi 4B edge node processes ~0.74 fps
+             (NCNN, 1343 ms/frame), so at the previous 20 Hz it discarded ~96%
+             of frames - but still paid the full cost of receiving them: 2.76 MB
+             deserialised plus a 2.76 MB RGB->BGR copy, ~2150 UDP fragments per
+             frame, 481 Mbps on the link. That work competes with YOLO for the
+             same four cores: the identical model on a static image runs in
+             623 ms, versus 1343 ms inside the live pipeline - roughly half the
+             Pi's inference performance lost to sensor bandwidth it never uses.
+             5 Hz still feeds the detector ~7x faster than it can consume, and
+             drops the link to ~120 Mbps.
+             NOTE camera_relay's frame_rate_hz cannot do this - it throttles
+             AFTER receipt, so the bytes have already crossed the link and been
+             deserialised. Only the sensor's own update_rate reduces the load.
+             WAS: 20 -->
+        <update_rate>5</update_rate>
         <visualize>1</visualize>
         <plugin name="camera_controller" filename="libgazebo_ros_camera.so">
           <ros>
