@@ -1,0 +1,2 @@
+d4_edge_raw_precision,d4_edge_raw_recall,d4_edge_raw_f1,d4_edge_raw_exact_count_accuracy,d4_ground_q5_precision,d4_ground_q5_recall,d4_ground_q5_f1,d4_ground_q5_exact_count_accuracy,phase_f_edge_mean_processed_frame_ratio,phase_f_ground_mean_processed_frame_ratio,phase_f_edge_run_median_latencies_ms,phase_f_edge_mean_of_run_medians_ms,phase_f_ground_run_median_latencies_ms,phase_f_ground_mean_of_run_medians_ms
+0.878205,0.810651,0.843077,0.557377,1.000000,0.171598,0.292929,0.426230,1.0000,0.7667,174.98;168.00;204.24,182.4050,502.88;510.83;509.86,507.8583

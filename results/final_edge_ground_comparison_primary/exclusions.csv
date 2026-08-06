@@ -1,0 +1,24 @@
+run_id,reason_excluded
+edge_final_smoke_02,short smoke test
+edge_qos_smoke_01,short smoke test
+f_edge_01,startup queue diagnostic
+f_edge_01_final,superseded by revised protocol
+f_edge_01_final_v2,superseded by revised protocol
+f_edge_01_final_v3,superseded by final primary run
+f_edge_01_final_v4,superseded by final primary run
+f_edge_01_primary,incomplete metadata
+f_edge_02_final,superseded by final primary run
+f_edge_02_final_v2,mode mismatch and superseded by final primary run
+f_edge_03_final,not selected for final comparison
+f_edge_03_primary,incomplete metadata
+f_ground_q5_01_final,superseded by revised protocol
+f_ground_q5_01_final_v2,incomplete metadata
+f_ground_q5_01_final_v4,superseded by revised protocol
+f_ground_q5_01_final_v5,incomplete metadata
+f_ground_q5_01_final_v6,not selected for final comparison
+f_ground_q5_01_final_v7,mode mismatch and superseded by final primary run
+f_ground_q5_02_final,incomplete metadata
+f_ground_q5_02_final_v2,superseded by final primary run
+f_ground_q5_02_final_v3,incomplete metadata
+f_ground_q5_03_final,not selected for final comparison
+f_ground_q5_03_final_v2,incomplete metadata
