@@ -588,8 +588,8 @@
         <controlVelocitySlowdownSim>1</controlVelocitySlowdownSim>
       </control>
     </plugin>
-
-    <!-- Camera sensor on gimbal tilt link → publishes to ROS2 -->
+    
+  <!-- Camera sensor on gimbal tilt link → publishes to ROS2 -->
     <link name="camera_link">
       <pose>0 -0.01 0.070 0 0 0</pose>
       <inertial>
@@ -639,3 +639,5 @@
 
   </model>
 </sdf>
+
+   
