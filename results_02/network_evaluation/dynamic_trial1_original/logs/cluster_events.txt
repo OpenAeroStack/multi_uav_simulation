@@ -1,0 +1,10 @@
+data: '{"epoch": 7, "new_backup": 3, "new_primary": 1, "old_backup": 2, "old_primary": 1, "reason": "backup_reselected"}'
+---
+data: '{"epoch": 8, "new_backup": 2, "new_primary": 1, "old_backup": 3, "old_primary": 1, "reason": "backup_reselected"}'
+---
+data: '{"epoch": 9, "new_backup": 3, "new_primary": 1, "old_backup": 2, "old_primary": 1, "reason": "backup_reselected"}'
+---
+data: '{"epoch": 10, "new_backup": 2, "new_primary": 1, "old_backup": 3, "old_primary": 1, "reason": "backup_reselected"}'
+---
+data: '{"epoch": 11, "new_backup": 3, "new_primary": 1, "old_backup": 2, "old_primary": 1, "reason": "backup_reselected"}'
+---
