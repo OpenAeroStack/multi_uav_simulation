@@ -1,0 +1,32 @@
+==============================================================
+MULTI-UAV BRIDGE AND TAP CONFIGURATION
+Recorded: 2026-08-06 17:53:00
+==============================================================
+
+-------------------- GCS --------------------
+Bridge : br-gcs             State: up
+Member : veth-gcs-host      Master: br-gcs
+Member : tap-gcs            Master: br-gcs
+TAP MAC: 02:aa:00:00:00:10  State: up  Carrier: 1
+
+-------------------- UAV1 --------------------
+Bridge : br-uav1            State: up
+Member : veth-uav1-host     Master: br-uav1
+Member : tap-uav1           Master: br-uav1
+TAP MAC: 02:aa:00:00:00:11  State: up  Carrier: 1
+
+-------------------- UAV2 --------------------
+Bridge : br-uav2            State: up
+Member : veth-uav2-host     Master: br-uav2
+Member : tap-uav2           Master: br-uav2
+TAP MAC: 02:aa:00:00:00:12  State: up  Carrier: 1
+
+-------------------- UAV3 --------------------
+Bridge : br-uav3            State: up
+Member : veth-uav3-host     Master: br-uav3
+Member : tap-uav3           Master: br-uav3
+TAP MAC: 02:aa:00:00:00:13  State: up  Carrier: 1
+
+==============================================================
+All four bridge-to-TAP connections were inspected.
+==============================================================

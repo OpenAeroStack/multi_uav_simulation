@@ -1,0 +1,19 @@
+
+Files:             network_data_0.db3
+Bag size:          485.2 KiB
+Storage id:        sqlite3
+Duration:          119.834679117s
+Start:             Aug  6 2026 16:36:25.674448721 (1786014385.674448721)
+End:               Aug  6 2026 16:38:25.509127838 (1786014505.509127838)
+Messages:          4363
+Topic information: Topic: /link_obstacle_loss | Type: std_msgs/msg/Float32MultiArray | Count: 1197 | Serialization Format: cdr
+                   Topic: /cluster/assignment | Type: std_msgs/msg/String | Count: 70 | Serialization Format: cdr
+                   Topic: /cluster/backup_ch | Type: std_msgs/msg/Int32 | Count: 70 | Serialization Format: cdr
+                   Topic: /cluster/event | Type: std_msgs/msg/String | Count: 10 | Serialization Format: cdr
+                   Topic: /clock | Type: rosgraph_msgs/msg/Clock | Count: 1197 | Serialization Format: cdr
+                   Topic: /cluster/primary_ch | Type: std_msgs/msg/Int32 | Count: 70 | Serialization Format: cdr
+                   Topic: /ns3_link_snr | Type: std_msgs/msg/Float32MultiArray | Count: 240 | Serialization Format: cdr
+                   Topic: /cluster/scores | Type: std_msgs/msg/Float32MultiArray | Count: 70 | Serialization Format: cdr
+                   Topic: /ns3_link_rssi | Type: std_msgs/msg/Float32MultiArray | Count: 240 | Serialization Format: cdr
+                   Topic: /uav_world_positions | Type: std_msgs/msg/Float32MultiArray | Count: 1199 | Serialization Format: cdr
+
