@@ -1,0 +1,5 @@
+# Draft Conclusion
+
+Under the tested configuration, Edge processing completed 100% of locally published official frames, whereas Ground completed approximately 76.7% of compressed frames on average. Edge also achieved substantially lower run-level median pipeline latency: the Ground mean was 2.78 times the Edge mean. YOLO inference time was similar between modes, and the 4.64 ms mean compression-plus-decoding overhead was insufficient by itself to account for the observed latency gap.
+
+The D4 results showed that JPEG quality 5 substantially reduced recall and F1 relative to raw imagery, despite retaining high precision. Edge required higher mean CPU utilization on the simulation host, while RSS remained comparatively similar. These results indicate that Edge processing is the preferred architecture for latency-sensitive perception under the evaluated conditions. Ground processing may remain appropriate where aerial compute resources are constrained and communication reliability and image quality are sufficient for the application.

@@ -1,0 +1,7 @@
+# Draft Limitations
+
+The experiment used only three independent repetitions per processing mode, limiting the strength and generalizability of cross-mode comparisons. Testing used one fixed UAV position and externally commanded yaw, one scene, and one person-detection workload. The final Ground comparison used only JPEG quality 5 and one configured Wi-Fi scenario; other compression levels, traffic loads, channel conditions, and mobility patterns may produce different results.
+
+The evaluation used SITL and network simulation rather than physical UAV flight. Edge and Ground processing were represented with namespaces on the same simulation host. CPU and RSS therefore measure simulation-host process demand, not onboard processor utilization, physical energy use, or battery endurance. No direct energy or battery measurement was collected. Furthermore, `wireless_transit_ms` is not guaranteed to represent pure radio propagation delay because the recorded interval may include other pipeline and middleware effects.
+
+Phase D4 used a limited manually labelled image set, so its accuracy estimates may not represent other scenes, subjects, illumination, or viewpoints. The RNG3 Run IDs did not match their actual processing modes; however, actual mode was independently confirmed from detector, camera-relay, and metrics logs before analysis. These naming inconsistencies were retained transparently in the provenance record.

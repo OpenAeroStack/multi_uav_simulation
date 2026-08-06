@@ -39,7 +39,15 @@ RUN_FIELDS = [
     'timestamp_span_s', 'mean_interarrival_s',
     'resource_cpu_mean_percent', 'resource_cpu_peak_percent',
     'resource_rss_mean_mb', 'resource_rss_peak_mb',
-    'gps_horizontal_drift_m', 'verification_status', 'validation_warnings',
+    'gps_horizontal_drift_m', 'delivery_observations',
+    'verification_status', 'validation_warnings',
+]
+
+LATENCY_FIELDS = [
+    'session', 'rng_run', 'actual_mode', 'run_id', 'official_analysis_rows',
+    'latency_rows_above_500_ms', 'latency_rows_above_1000_ms',
+    'latency_rows_above_2000_ms', 'minimum_pipeline_latency_ms',
+    'maximum_pipeline_latency_ms', 'validation_warnings',
 ]
 
 MODE_METRICS = {
@@ -245,10 +253,10 @@ def analyze_run(registry: dict[str, str]) -> dict[str, str]:
     all_rows = read_csv(directory / 'metrics.csv')
     warnings = []
     if end > len(all_rows):
-        warnings.append('official_end_exceeds_csv_length')
+        failures.append('official_end_exceeds_csv_length')
     official = all_rows[start:min(end, len(all_rows))]
     if len(official) != processed:
-        warnings.append('official_analysis_rows_differ_from_metadata')
+        failures.append('official_analysis_rows_differ_from_metadata')
     late = max(0, len(all_rows) - end)
     detections = numbers(official, 'detection_count')
     latency = numbers(official, 'pipeline_latency_ms')
@@ -257,16 +265,28 @@ def analyze_run(registry: dict[str, str]) -> dict[str, str]:
     decode = numbers(official, 'decode_ms')
     timestamps = numbers(official, 'timestamp_s', allow_negative=True)
     frames = numbers(official, 'frame_num')
+    required_numeric = (
+        'timestamp_s', 'frame_num', 'detection_count', 'pipeline_latency_ms',
+        'inference_ms', 'compression_ms', 'decode_ms')
+    if any(len(numbers(official, field, allow_negative=True)) != len(official)
+           for field in required_numeric):
+        failures.append('malformed_official_rows')
     intervals = [later - earlier for earlier, later in zip(timestamps, timestamps[1:])]
     if any(later <= earlier for earlier, later in zip(timestamps, timestamps[1:])):
-        warnings.append('official_timestamp_order_non_monotonic')
+        failures.append('official_timestamp_order_non_monotonic')
     if len(frames) != len(set(frames)):
-        warnings.append('duplicate_frame_numbers')
+        failures.append('duplicate_frame_numbers')
     mean_interval = statistics.fmean(intervals) if intervals else None
-    if mean_interval is not None and not 0.8 <= mean_interval <= 1.2:
-        warnings.append('mean_interarrival_outside_0.8_to_1.2s')
+    if (registry['actual_mode'] == 'edge' and mean_interval is not None
+            and not 0.8 <= mean_interval <= 1.2):
+        warnings.append('edge_interarrival_outside_expected_range')
     if any(item > 2000 for item in latency):
         warnings.append('latency_exceeds_2000ms')
+    observations = []
+    if registry['actual_mode'] == 'ground' and processed < sent:
+        observations.append('complete_frame_gaps_observed')
+        if mean_interval is not None and mean_interval > 1.2:
+            observations.append('mean_interarrival_above_nominal')
     before = parse_gps(metadata, 'GPS message before the run:')
     after = parse_gps(metadata, 'GPS message after the run:')
     drift = (haversine_m(before[0], before[1], after[0], after[1])
@@ -276,8 +296,6 @@ def analyze_run(registry: dict[str, str]) -> dict[str, str]:
     if cpu_mean is None:
         failures.append('resource_samples_missing')
     status = 'verified' if not failures else 'verification_failed'
-    if status == 'verified' and warnings:
-        status = 'verified_with_validation_warnings'
     return {
         'session': registry['session'], 'rng_run': registry['rng_run'],
         'actual_mode': registry['actual_mode'], 'run_id': registry['run_id'],
@@ -309,6 +327,7 @@ def analyze_run(registry: dict[str, str]) -> dict[str, str]:
         'resource_rss_mean_mb': fmt(rss_mean),
         'resource_rss_peak_mb': fmt(rss_peak),
         'gps_horizontal_drift_m': fmt(drift),
+        'delivery_observations': ';'.join(observations) or 'none',
         'verification_status': status,
         'validation_warnings': ';'.join(failures + warnings) or 'none',
     }
@@ -385,19 +404,29 @@ def save_grouped(rows: list[dict[str, str]], field: str, stem: str,
     ground = [float(next(row for row in rows if row['rng_run'] == rng
                          and row['actual_mode'] == 'ground')[field]) for rng in rngs]
     positions = np.arange(3)
-    fig, axis = plt.subplots(figsize=(8, 5))
+    fig, axis = plt.subplots(figsize=(7.2, 4.6))
     width = 0.36
-    axis.bar(positions - width / 2, edge, width, label='Edge', color='#2b6cb0')
-    axis.bar(positions + width / 2, ground, width, label='Ground', color='#dd6b20')
+    edge_bars = axis.bar(positions - width / 2, edge, width, label='Edge',
+                         color='#2864a5', edgecolor='black', linewidth=0.6)
+    ground_bars = axis.bar(positions + width / 2, ground, width, label='Ground',
+                           color='#d97706', edgecolor='black', linewidth=0.6,
+                           hatch='//')
     axis.set_xticks(positions, [f'RNG {rng}' for rng in rngs])
     axis.set_ylabel(ylabel)
     axis.set_xlabel('NS-3 RNG run')
     axis.set_ylim(bottom=0, top=1.05 if ratio else None)
-    axis.legend()
-    axis.grid(axis='y', alpha=0.25)
+    axis.legend(frameon=False, ncol=2, loc='upper center',
+                bbox_to_anchor=(0.5, 1.14))
+    axis.grid(axis='y', color='#b8b8b8', alpha=0.45, linewidth=0.6)
+    axis.set_axisbelow(True)
+    label_format = '%.2f' if ratio else '%.1f'
+    axis.bar_label(edge_bars, fmt=label_format, padding=3, fontsize=8)
+    axis.bar_label(ground_bars, fmt=label_format, padding=3, fontsize=8)
+    if not ratio:
+        axis.margins(y=0.15)
     fig.tight_layout()
-    for suffix in ('png', 'pdf'):
-        fig.savefig(FIGURES / f'{stem}.{suffix}', dpi=300)
+    fig.savefig(FIGURES / f'{stem}.png', dpi=600, bbox_inches='tight')
+    fig.savefig(FIGURES / f'{stem}.pdf', bbox_inches='tight')
     plt.close(fig)
 
 
@@ -407,21 +436,29 @@ def save_ground_overhead(rows: list[dict[str, str]]) -> None:
     compression = [float(row['mean_compression_ms']) for row in ground]
     decode = [float(row['mean_decode_ms']) for row in ground]
     positions = np.arange(3)
-    fig, axis = plt.subplots(figsize=(8, 5))
+    fig, axis = plt.subplots(figsize=(7.2, 4.6))
     width = 0.36
-    axis.bar(positions - width / 2, compression, width,
-             label='JPEG compression', color='#805ad5')
-    axis.bar(positions + width / 2, decode, width,
-             label='JPEG decode', color='#38a169')
+    compression_bars = axis.bar(
+        positions - width / 2, compression, width, label='JPEG compression',
+        color='#6b46c1', edgecolor='black', linewidth=0.6)
+    decode_bars = axis.bar(
+        positions + width / 2, decode, width, label='JPEG decode',
+        color='#2f855a', edgecolor='black', linewidth=0.6, hatch='//')
     axis.set_xticks(positions, [f'RNG {row["rng_run"]}' for row in ground])
     axis.set_xlabel('NS-3 RNG run')
     axis.set_ylabel('Mean time (ms)')
     axis.set_ylim(bottom=0)
-    axis.legend()
-    axis.grid(axis='y', alpha=0.25)
+    axis.legend(frameon=False, ncol=2, loc='upper center',
+                bbox_to_anchor=(0.5, 1.14))
+    axis.grid(axis='y', color='#b8b8b8', alpha=0.45, linewidth=0.6)
+    axis.set_axisbelow(True)
+    axis.bar_label(compression_bars, fmt='%.2f', padding=3, fontsize=8)
+    axis.bar_label(decode_bars, fmt='%.2f', padding=3, fontsize=8)
+    axis.margins(y=0.15)
     fig.tight_layout()
-    for suffix in ('png', 'pdf'):
-        fig.savefig(FIGURES / f'ground_overhead_by_rng.{suffix}', dpi=300)
+    fig.savefig(FIGURES / 'ground_overhead_by_rng.png', dpi=600,
+                bbox_inches='tight')
+    fig.savefig(FIGURES / 'ground_overhead_by_rng.pdf', bbox_inches='tight')
     plt.close(fig)
 
 
@@ -499,7 +536,8 @@ def report(rows: list[dict[str, str]], modes: list[dict[str, str]],
                'official_processed_frames', 'processed_frame_ratio',
                'median_pipeline_latency_ms', 'p95_pipeline_latency_ms',
                'mean_inference_ms', 'resource_cpu_mean_percent',
-               'resource_rss_mean_mb', 'validation_warnings']
+               'resource_rss_mean_mb', 'delivery_observations',
+               'validation_warnings']
     mode_focus = [row for row in modes if row['metric'] in (
         'processed_frame_ratio', 'median_latency_ms', 'p95_latency_ms',
         'mean_inference_ms', 'cpu_mean_percent', 'rss_mean_mb')]
@@ -530,6 +568,8 @@ All six official slices contain exactly the metadata-recorded processed-frame co
 {markdown_table(mode_focus, ['mode', 'metric', 'n', 'mean', 'sample_standard_deviation', 'median', 'minimum', 'maximum'])}
 
 Edge ratio means local edge-pipeline completion. Ground ratio means complete compressed-frame reception and processing; it is not interchangeable with Edge wireless delivery.
+
+In Ground mode, inter-arrival time is measured between successfully received and processed complete frames. Values above the nominal one-second relay interval are expected when complete compressed frames are lost. Increased Ground inter-arrival is therefore a delivery-performance observation rather than a provenance or experiment-validity failure.
 
 ## 7. Latency comparison
 
@@ -575,24 +615,7 @@ def main() -> None:
         'mode', 'metric', 'n', 'mean', 'sample_standard_deviation',
         'median', 'minimum', 'maximum'], modes)
     write_csv(PROCESSED / 'paired_comparison.csv', paired_fields(), pairs)
-
-    plots = (
-        ('processed_frame_ratio', 'processed_frame_ratio_by_rng',
-         'Processed-frame ratio', True),
-        ('median_pipeline_latency_ms', 'median_latency_by_rng',
-         'Median pipeline latency (ms)', False),
-        ('p95_pipeline_latency_ms', 'p95_latency_by_rng',
-         'P95 pipeline latency (ms)', False),
-        ('mean_inference_ms', 'mean_inference_by_rng',
-         'Mean inference time (ms)', False),
-        ('resource_cpu_mean_percent', 'cpu_mean_by_rng',
-         'Mean combined CPU (%)', False),
-        ('resource_rss_mean_mb', 'rss_mean_by_rng',
-         'Mean combined RSS (MB)', False),
-    )
-    for field, stem, ylabel, ratio in plots:
-        save_grouped(rows, field, stem, ylabel, ratio)
-    save_ground_overhead(rows)
+    write_csv(PROCESSED / 'latency_validation.csv', LATENCY_FIELDS, rows)
 
     combined = d4_combined(rows)
     write_csv(PROCESSED / 'd4_phase_f_combined.csv', list(combined), [combined])

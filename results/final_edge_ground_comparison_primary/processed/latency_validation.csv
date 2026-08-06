@@ -1,0 +1,7 @@
+session,rng_run,actual_mode,run_id,official_analysis_rows,latency_rows_above_500_ms,latency_rows_above_1000_ms,latency_rows_above_2000_ms,minimum_pipeline_latency_ms,maximum_pipeline_latency_ms,validation_warnings
+1,1,edge,f_edge_01_primary1,58,0,0,0,48.1800,240.6400,none
+1,1,ground,f_ground_q5_01_primary,49,27,0,0,383.4500,566.5900,none
+2,2,ground,f_ground_q5_02_primary,48,30,0,0,370.9800,585.1900,none
+2,2,edge,f_edge_02_primary,60,8,0,0,57.7000,587.8800,none
+3,3,ground,f_edge_03_final_v2,41,24,0,0,399.8600,590.5800,none
+3,3,edge,f_ground_q5_03_final_v3,60,3,0,0,76.6500,547.0700,none

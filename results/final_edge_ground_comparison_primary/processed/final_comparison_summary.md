@@ -10,14 +10,14 @@ Every selected run used at least nine processed warm-up rows, 15 seconds of addi
 
 ## 3. Final selected runs
 
-| rng_run | actual_mode | run_id | official_sent_frames | official_processed_frames | processed_frame_ratio | median_pipeline_latency_ms | p95_pipeline_latency_ms | mean_inference_ms | resource_cpu_mean_percent | resource_rss_mean_mb | validation_warnings |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | edge | f_edge_01_primary1 | 58 | 58 | 1.0000 | 174.9800 | 228.5820 | 55.4310 | 54.6500 | 947.0567 | none |
-| 1 | ground | f_ground_q5_01_primary | 60 | 49 | 0.8167 | 502.8800 | 560.4640 | 48.4633 | 43.5500 | 961.9036 | none |
-| 2 | ground | f_ground_q5_02_primary | 60 | 48 | 0.8000 | 510.8350 | 559.2585 | 48.9979 | 43.0000 | 961.8003 | mean_interarrival_outside_0.8_to_1.2s |
-| 2 | edge | f_edge_02_primary | 60 | 60 | 1.0000 | 168.0000 | 551.2300 | 51.0550 | 54.8333 | 957.2693 | none |
-| 3 | ground | f_edge_03_final_v2 | 60 | 41 | 0.6833 | 509.8600 | 569.2000 | 57.2390 | 40.7738 | 966.3125 | mean_interarrival_outside_0.8_to_1.2s |
-| 3 | edge | f_ground_q5_03_final_v3 | 60 | 60 | 1.0000 | 204.2350 | 483.9485 | 57.0850 | 59.1667 | 952.6424 | none |
+| rng_run | actual_mode | run_id | official_sent_frames | official_processed_frames | processed_frame_ratio | median_pipeline_latency_ms | p95_pipeline_latency_ms | mean_inference_ms | resource_cpu_mean_percent | resource_rss_mean_mb | delivery_observations | validation_warnings |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | edge | f_edge_01_primary1 | 58 | 58 | 1.0000 | 174.9800 | 228.5820 | 55.4310 | 54.6500 | 947.0567 | none | none |
+| 1 | ground | f_ground_q5_01_primary | 60 | 49 | 0.8167 | 502.8800 | 560.4640 | 48.4633 | 43.5500 | 961.9036 | complete_frame_gaps_observed | none |
+| 2 | ground | f_ground_q5_02_primary | 60 | 48 | 0.8000 | 510.8350 | 559.2585 | 48.9979 | 43.0000 | 961.8003 | complete_frame_gaps_observed;mean_interarrival_above_nominal | none |
+| 2 | edge | f_edge_02_primary | 60 | 60 | 1.0000 | 168.0000 | 551.2300 | 51.0550 | 54.8333 | 957.2693 | none | none |
+| 3 | ground | f_edge_03_final_v2 | 60 | 41 | 0.6833 | 509.8600 | 569.2000 | 57.2390 | 40.7738 | 966.3125 | complete_frame_gaps_observed;mean_interarrival_above_nominal | none |
+| 3 | edge | f_ground_q5_03_final_v3 | 60 | 60 | 1.0000 | 204.2350 | 483.9485 | 57.0850 | 59.1667 | 952.6424 | none | none |
 
 ## 4. Provenance of RNG3 mode labels
 
@@ -45,6 +45,8 @@ All six official slices contain exactly the metadata-recorded processed-frame co
 | ground | rss_mean_mb | 3 | 963.3388 | 2.5758 | 961.9036 | 961.8003 | 966.3125 |
 
 Edge ratio means local edge-pipeline completion. Ground ratio means complete compressed-frame reception and processing; it is not interchangeable with Edge wireless delivery.
+
+In Ground mode, inter-arrival time is measured between successfully received and processed complete frames. Values above the nominal one-second relay interval are expected when complete compressed frames are lost. Increased Ground inter-arrival is therefore a delivery-performance observation rather than a provenance or experiment-validity failure.
 
 ## 7. Latency comparison
 
