@@ -136,19 +136,35 @@ if (( WITH_PI )); then
     echo "  Pi reachable at ${PI_HOST#*@}"
 
     # A 1280x720 RGB frame is 2.76 MB = ~2000 UDP fragments. The default 208 KB
-    # socket buffer holds ~7% of one frame, so reassembly never completes and
-    # the subscriber silently receives nothing.
+    # socket buffer holds ~7% of one frame.
+    #
+    # BOTH directions must be checked. rmem alone is not enough: with wmem_max
+    # left at the default, the DDS profile's 16 MB <sendBufferSize> is silently
+    # clamped to 208 KB and the PUBLISHER discards fragments before they reach
+    # the NIC. That failure is invisible to every interface counter — tx_dropped
+    # stays 0 on the host and rx_errors stays 0 on the Pi, because nothing was
+    # ever transmitted. Measured symptom: camera delivered at 0.19 Hz instead of
+    # 5 Hz, with the host sending 2 Mbps in place of 110 Mbps.
     for host_desc in "local:" "remote:"; do
-        if [[ $host_desc == local: ]]; then
-            rmem=$(sysctl -n net.core.rmem_max)
-        else
-            rmem=$(ssh -o ConnectTimeout=4 "$PI_HOST" 'sysctl -n net.core.rmem_max' 2>/dev/null || echo 0)
-        fi
-        if (( rmem < 100000000 )); then
-            echo "  WARNING ${host_desc%%:*} net.core.rmem_max=$rmem is too small for 2.76 MB frames." >&2
-            echo "          sudo sysctl -w net.core.rmem_max=536870912 \\" >&2
-            echo "               net.core.rmem_default=134217728 net.ipv4.ipfrag_high_thresh=134217728" >&2
-        fi
+        for knob in rmem_max wmem_max; do
+            if [[ $host_desc == local: ]]; then
+                val=$(sysctl -n "net.core.$knob")
+            else
+                val=$(ssh -o ConnectTimeout=4 "$PI_HOST" "sysctl -n net.core.$knob" 2>/dev/null || echo 0)
+            fi
+            if (( val < 100000000 )); then
+                echo "  WARNING ${host_desc%%:*} net.core.$knob=$val is too small for 2.76 MB frames." >&2
+                echo "          sudo tee /etc/sysctl.d/60-ros2-dds.conf <<'EOF'" >&2
+                echo "          net.core.rmem_max = 536870912" >&2
+                echo "          net.core.rmem_default = 134217728" >&2
+                echo "          net.core.wmem_max = 536870912" >&2
+                echo "          net.core.wmem_default = 134217728" >&2
+                echo "          net.ipv4.ipfrag_high_thresh = 134217728" >&2
+                echo "          EOF" >&2
+                echo "          sudo sysctl --system   # then RESTART the stack:" >&2
+                echo "          FastDDS reads socket options once, at participant creation." >&2
+            fi
+        done
     done
 fi
 

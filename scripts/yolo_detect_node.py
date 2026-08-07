@@ -2,8 +2,16 @@
 """Subscribe to the UAV camera, run YOLOv8, and report human detections.
 
 Topic in : /uav1/camera/image_raw          (sensor_msgs/Image)
-Topics out: /uav1/camera/annotated         (sensor_msgs/Image, boxes drawn)
-            /uav1/detections/humans         (std_msgs/String, JSON list)
+Topics out: /uav1/detections/humans         (std_msgs/String, JSON list)
+            /detections/uav1                (std_msgs/String, GCS schema)
+
+This node NEVER publishes an annotated image. Sending a 2.76 MB frame back to
+the host on every detection saturated the same cable the camera arrives on and
+starved the lockstep simulation of CPU, so simulated time fell behind and the
+mission's waypoint timeouts fired even though the aircraft was flying correctly.
+It also contradicts the architecture: the edge node exists to emit detection
+results only. Use show_window for a local preview instead — it never touches
+the network.
 
 Brought over unmodified from the anton-ap_dds branch, where it detected humans
 correctly. Kept as a KNOWN-GOOD REFERENCE for the current world and mission:
@@ -56,10 +64,10 @@ class YoloHumanDetector(Node):
         #
         # Gazebo's camera publisher is RELIABLE, so a RELIABLE subscriber makes
         # it wait for this node to acknowledge every frame. The Pi needs ~1 s per
-        # frame and also sends a 2.76 MB annotated image back, so the publisher
-        # was throttled to the Pi's speed and the whole simulation's camera fell
-        # to ~0.27 Hz. Worse, when the Pi rebooted mid-run the unacknowledged
-        # samples kept the publisher stalled at its retransmission heartbeat.
+        # frame, so the publisher was throttled to the Pi's speed and the whole
+        # simulation's camera fell to ~0.27 Hz. Worse, when the Pi rebooted
+        # mid-run the unacknowledged samples kept the publisher stalled at its
+        # retransmission heartbeat.
         #
         # BEST_EFFORT with depth 1 means the publisher never blocks and this node
         # always works on the newest frame instead of a queue of stale ones —
@@ -69,7 +77,6 @@ class YoloHumanDetector(Node):
                          history=HistoryPolicy.KEEP_LAST,
                          depth=1)
         self.sub = self.create_subscription(Image, image_topic, self.on_image, qos)
-        self.img_pub = self.create_publisher(Image, "/uav1/camera/annotated", 10)
         self.det_pub = self.create_publisher(String, "/uav1/detections/humans", 10)
 
         # Second publisher on uav_vision's topic, so the results actually reach
@@ -85,7 +92,8 @@ class YoloHumanDetector(Node):
         self.get_logger().info(f"Listening on {image_topic}, detecting humans...")
         self.get_logger().info(
             f"model={model_path} conf={CONF_THRESHOLD} "
-            f"classes=[{PERSON_CLASS_ID}] imgsz=default(640)")
+            f"classes=[{PERSON_CLASS_ID}] imgsz=default(640) "
+            f"show_window={self.show_window}")
 
     def on_image(self, msg):
         frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
@@ -130,10 +138,12 @@ class YoloHumanDetector(Node):
             f"#{self.frame_count:04d} | {len(humans)} human(s) | "
             f"inference={inference_ms:.0f}ms")
 
-        annotated = result.plot()
-        self.img_pub.publish(self.bridge.cv2_to_imgmsg(annotated, "bgr8"))
+        # Local preview only, and only if asked for. result.plot() draws into a
+        # full-resolution copy of the frame, so it is skipped entirely when the
+        # window is off — which is always on the headless Pi. Nothing here
+        # crosses the network.
         if self.show_window:
-            cv2.imshow("UAV1 human detection", annotated)
+            cv2.imshow("UAV1 human detection", result.plot())
             cv2.waitKey(1)
 
 
