@@ -1,0 +1,712 @@
+% =====================================================================
+%  Testing, Experimentation and Validation
+%  A SECTION of the FYP report. Include from the parent chapter with:
+%      \input{testing_validation}
+%
+%  Intended to follow \input{hitl_edge_processing}; it cross-references
+%  \ref{sec:hitl} and its tables. If the two are placed in different
+%  chapters the \ref commands still resolve, LaTeX just needs two passes.
+%
+%  REQUIRED PACKAGES (add to the main preamble if not already present)
+%      \usepackage{booktabs}
+%      \usepackage{array}
+%      \usepackage{graphicx}
+%      \usepackage{subcaption}          % only for the side-by-side figure
+%
+%  FIGURES
+%  Place image files in  docs/report/figures/  and add to the preamble:
+%      \graphicspath{{figures/}}
+%  Each \includegraphics below names the file it expects. See the checklist
+%  at the end of this file for what each image should show.
+%
+%  All labels are prefixed test / tab:test- so they cannot collide with
+%  labels elsewhere in the shared report.
+% =====================================================================
+
+\newcommand{\pass}{\textsc{pass}}
+\newcommand{\fail}{\textsc{fail}}
+
+\section{Testing, Experimentation and Validation}
+\label{sec:test}
+
+This section sets out how the hardware-in-the-loop testbed described in
+Section~\ref{sec:hitl} was verified. It distinguishes three activities.
+\emph{Testing} establishes that each component behaves as specified.
+\emph{Experimentation} varies a controlled parameter to obtain the
+measurements the project set out to produce. \emph{Validation} establishes
+that those measurements mean what they are claimed to mean, which in a
+partly simulated system cannot be taken for granted.
+
+% ---------------------------------------------------------------------
+\subsection{Testing strategy}
+\label{sec:test-strategy}
+
+Testing was performed bottom-up, in five layers, each of which had to pass
+before the next was attempted. The order is dictated by the failure modes
+observed during development rather than chosen for tidiness: in this system
+a fault at a lower layer does not produce an error at the layer above, it
+produces plausible but wrong behaviour there.
+
+Three examples motivated the approach. When the kernel socket buffer was too
+small, frame reassembly never completed and the subscriber received nothing
+at all --- with no exception raised and no message logged. When the
+subscriber's quality-of-service policy was left at the ROS\,2 default, the
+publisher throttled itself and the whole simulation slowed, which presents
+as a rendering problem rather than a network one. When the detector's
+publisher and the ground station's subscriber were given mismatched topic
+names, both processes ran without error indefinitely and simply never
+exchanged a message. In each case the visible symptom appeared several
+layers above the cause.
+
+The layers are: the physical link (L1); logical separation of the two paths
+(L2); middleware transport (L3); detector function (L4); and the end-to-end
+path from camera to ground station (L5). Every test is recorded below with
+the command used, so each is repeatable rather than merely asserted.
+
+% ---------------------------------------------------------------------
+\subsection{Test environment}
+\label{sec:test-env}
+
+Table~\ref{tab:test-env} records the configuration under which all results
+in this report were obtained. Both machines run the same operating system
+release and the same ROS\,2 distribution, so that the middleware
+implementation and version are identical at both ends of the link and cannot
+themselves be a source of difference.
+
+\begin{table}[htbp]
+\centering
+\caption{Test environment.}
+\label{tab:test-env}
+\begin{tabular}{ll}
+\toprule
+Item & Configuration \\
+\midrule
+Simulation host    & x86-64 laptop, no onboard Ethernet \\
+Edge node          & Raspberry Pi 4B, Cortex-A72 quad core \\
+Link adapter       & USB 3.0 gigabit Ethernet, host side \\
+Operating system   & Ubuntu 22.04 (both machines) \\
+Middleware         & ROS\,2 Humble, Fast DDS 2.6 (both machines) \\
+Simulator          & Gazebo Classic, lockstep with ArduPilot SITL \\
+Channel simulator  & ns-3, TapBridge, 4-node scenario \\
+Detector           & YOLOv8n, COCO class \emph{person} only \\
+Camera             & $1280 \times 720$, 2.76\,MB per frame \\
+Ground truth       & 5 human models, known world coordinates \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The Pi occupies the second aircraft node of the ns-3 scenario. Its single
+Ethernet port is divided by 802.1Q tagging into \texttt{eth0.10}
+($10.0.0.2$, camera, unimpaired) and \texttt{eth0.42} ($10.42.0.12$,
+detections, through ns-3). The corresponding host interfaces are
+\texttt{eth-cam} ($10.0.0.1$) and \texttt{eth-rf}, the latter bridged to
+\texttt{tap-uav2}. Interfaces are created by
+\texttt{scripts/netns/pi\_hitl\_link.sh} on the Pi and by step~1c of
+\texttt{scripts/netns/launch\_single\_uav\_netns.sh} on the host.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.7\textwidth]{testbed_hardware.jpg}
+\caption{The physical testbed. The simulation host is connected to the
+Raspberry~Pi~4B edge node by a single Ethernet cable through a USB~3.0
+gigabit adapter. That one cable carries both the unimpaired sensor link
+(VLAN~10) and the simulated radio link (VLAN~42).}
+\label{fig:test-hardware}
+\end{figure}
+
+% ---------------------------------------------------------------------
+\subsection{Layer 1 --- Physical link}
+\label{sec:test-l1}
+
+The first layer establishes that the cable between the two machines carries
+data at the rate the experiment requires. This matters because the camera
+stream alone occupies roughly half of a gigabit link; an adapter that
+negotiates successfully but performs poorly would corrupt every result
+downstream.
+
+\begin{table}[htbp]
+\centering
+\caption{Layer 1 test cases --- physical link.}
+\label{tab:test-l1}
+\begin{tabular}{@{}lp{40mm}p{38mm}l@{}}
+\toprule
+ID & Test and command & Result & Verdict \\
+\midrule
+T1.1 & Link negotiation. \newline \texttt{ethtool <if>}
+     & $1000$\,Mbps full duplex, link detected
+     & \pass \\[2pt]
+T1.2 & Throughput, first adapter. \newline \texttt{iperf3 -c 10.0.0.2}
+     & $4.5$\,Mbps, $24\%$ loss, despite \texttt{ethtool} reporting
+       $100$\,Mbps
+     & \fail \\[2pt]
+T1.3 & Throughput, replacement adapter. \newline \texttt{iperf3 -c 10.0.0.2}
+     & $834$\,Mbps, no retransmissions
+     & \pass \\[2pt]
+T1.4 & Interface state after reboot. \newline \texttt{ip -br addr show}
+     & Addresses present on both machines after persistence was configured
+     & \pass \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Test~T1.2 is retained in this report because it is the clearest instance of
+the reporting problem described above: \texttt{ethtool} reported a healthy
+negotiated link while the adapter delivered $4.5$\,Mbps with $24\%$ loss.
+Link negotiation and link performance are separate properties, and only the
+second was fit for purpose. Had this been discovered later, the resulting
+frame loss would most naturally have been attributed to the middleware or to
+the detector.
+
+Test~T1.4 was added after addresses assigned with \texttt{ip addr add} were
+observed to disappear within minutes. Each machine runs a network manager
+that reconciles kernel state against its own stored configuration ---
+NetworkManager on the host, netplan on the Pi --- and removes addresses it
+did not create. The test therefore checks persistence, not merely presence.
+
+% ---------------------------------------------------------------------
+\subsection{Layer 2 --- Logical separation of the two paths}
+\label{sec:test-l2}
+
+The central requirement of the experiment is that detection results cross
+the simulated wireless channel while camera imagery does not. If camera
+traffic were to leak into ns-3 the channel measurements would describe a
+link carrying $481$\,Mbps of video, which is not the link the aircraft
+would have. This layer therefore receives the most attention, and is tested
+positively (the intended traffic is present) and negatively (the unintended
+traffic is absent).
+
+\begin{table}[htbp]
+\centering
+\caption{Layer 2 test cases --- path separation.}
+\label{tab:test-l2}
+\begin{tabular}{@{}lp{40mm}p{38mm}l@{}}
+\toprule
+ID & Test and command & Result & Verdict \\
+\midrule
+T2.1 & VLAN interfaces exist and are addressed. \newline
+       \texttt{ip -br addr show}
+     & \texttt{eth0.10} $10.0.0.2$, \texttt{eth0.42} $10.42.0.12$ on the Pi;
+       \texttt{eth-cam} $10.0.0.1$ on the host
+     & \pass \\[2pt]
+T2.2 & Camera path reachable. \newline \texttt{ping -c 30 10.0.0.1}
+     & Mean $1.5$\,ms, $0\%$ loss
+     & \pass \\[2pt]
+T2.3 & Radio path reachable through ns-3. \newline
+       \texttt{ping -c 30 10.42.0.10}
+     & Mean $77.4$\,ms, $0\%$ loss
+     & \pass \\[2pt]
+T2.4 & The two paths are distinguishable. \newline
+       Compare T2.2 and T2.3
+     & $53\times$ latency, $140\times$ jitter
+     & \pass \\[2pt]
+T2.5 & Camera traffic absent from the simulated channel. \newline
+       \texttt{tcpdump -i tap-uav2 -nn}
+     & No $10.0.0.0/24$ traffic observed on the ns-3 interface
+     & \pass \\[2pt]
+T2.6 & Volume crossing each path. \newline
+       \texttt{ip -s link show eth-cam} \newline
+       \texttt{ip -s link show tap-uav2}
+     & Byte counters differ by approximately four orders of magnitude
+     & \pass \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Test~T2.4 deserves comment, because two paths that both work are not by
+themselves evidence of separation --- they must also be shown to differ in
+the intended way. The measured contrast is large and in the expected
+direction: the wired path is fast and stable, the simulated radio slow and
+variable. Table~\ref{tab:hitl-links} gives the full figures.
+
+Tests~T2.5 and T2.6 are the negative tests. Separation here is enforced by
+addressing and bridge membership rather than by firewall rules, so it is
+established by observing what crosses the interfaces rather than by
+inspecting a rule set. \texttt{tap-uav2} is the point at which traffic
+enters ns-3; if imagery is absent there, it is absent from the simulated
+channel. T2.6 makes the same point quantitatively, since a leak of even one
+frame per second would be immediately visible in the byte counters given
+that a frame is $2.76$\,MB against $118$\,B for a detection message.
+
+The alternative design --- attaching the physical interface to the bridge
+directly --- was rejected on exactly this ground during design rather than
+during testing. A Linux bridge floods frames to all member ports, so the
+arrangement would have failed T2.5 by construction.
+
+% ---------------------------------------------------------------------
+\subsection{Layer 3 --- Middleware transport}
+\label{sec:test-l3}
+
+With the links established, this layer tests that DDS uses them as intended
+and that large messages survive the crossing. All three tests here
+correspond to faults that were encountered and produced no error message.
+
+\begin{table}[htbp]
+\centering
+\caption{Layer 3 test cases --- middleware transport.}
+\label{tab:test-l3}
+\begin{tabular}{@{}lp{40mm}p{38mm}l@{}}
+\toprule
+ID & Test and command & Result & Verdict \\
+\midrule
+T3.1 & Receive buffers adequate for a $2.76$\,MB frame. \newline
+       \texttt{sysctl net.core.rmem\_max}
+     & Raised from $208$\,kB to $512$\,MB on both machines
+     & \pass \\[2pt]
+T3.2 & \emph{Send} buffers adequate. \newline
+       \texttt{sysctl net.core.wmem\_max}
+     & Initially $208$\,kB; raised to $512$\,MB on both machines
+     & \fail\,$\rightarrow$\,\pass \\[2pt]
+T3.3 & Publisher bound to the intended interface. \newline
+       \texttt{ss -ulnp | grep gzserver}
+     & \texttt{gzserver} bound to $10.0.0.1$
+     & \pass \\[2pt]
+T3.4 & Frames arrive complete and are not dropped. \newline
+       \texttt{ip -s link show eth0.10}
+     & Zero dropped, zero errors; $42{,}544$ packets\,s$^{-1}$ at
+       $481$\,Mbps when the source ran at $20$\,Hz
+     & \pass \\[2pt]
+T3.5 & Delivered frame rate matches the source. \newline
+       \texttt{ros2 topic hz /uav1/camera/image\_raw}
+     & $5.000$\,Hz against a $5$\,Hz source, standard deviation
+       $4.5$\,ms
+     & \pass \\[2pt]
+T3.6 & Subscriber QoS as specified. \newline
+       \texttt{ros2 topic info -v <topic>}
+     & \texttt{BEST\_EFFORT}, depth $1$ on the camera subscription
+     & \pass \\[2pt]
+T3.7 & Publisher and subscriber matched. \newline
+       \texttt{ros2 topic info -v /detections/uav1}
+     & One publisher, one subscriber
+     & \pass \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Test~T3.3 exists because Fast DDS~2.6 enumerates network interfaces once,
+at participant creation, and has no dynamic detection. If Gazebo starts
+before $10.0.0.1$ has been assigned it can never bind that address, and the
+Pi silently receives no imagery for the entire run. The test is therefore
+also implemented as an automated pre-flight check in
+\texttt{scripts/netns/run\_hitl.sh}, both before start-up, on the address,
+and after start-up, on the actual socket binding.
+
+Test~T3.5 is a rate check rather than a delivery check, and it was
+introduced after the ROS\,2 default QoS was found to throttle the camera
+output of the entire simulation to $0.27$\,Hz. That failure is invisible to
+T3.4, since the packets that are sent do all arrive; only the rate reveals
+it. A related observation gave the diagnosis: with the Pi disconnected, the
+publisher continued to emit at intervals of $3.144$\,s with a standard
+deviation of $0.4$\,ms. A spacing that regular is a retransmission timer
+rather than a rendering rate, which located the fault in the middleware
+rather than in Gazebo.
+
+Test~T3.7 was added after the detector and the ground station receiver were
+found to be using different topic names. Both processes ran without error,
+and neither reported that it had no counterpart; the mismatch was visible
+only as a publisher with zero subscribers and a subscriber with zero
+publishers. Counting matched endpoints is consequently treated as a required
+test rather than a diagnostic step.
+
+\subsubsection{The send-buffer fault: a worked example}
+\label{sec:test-wmem}
+
+Test~T3.2 is the only test in this campaign recorded as having failed in the
+delivered system, and it is documented in full because it demonstrates the
+argument of Section~\ref{sec:test-strategy} more completely than any other
+fault encountered.
+
+The symptom was that the edge node received imagery at \(0.19\)\,Hz where the
+camera was configured for \(5\)\,Hz --- a shortfall of approximately
+\(26\times\). Every plausible explanation was eliminated in turn, and each
+elimination was itself a measurement.
+
+\begin{table}[htbp]
+\centering
+\caption{Eliminating candidate causes of the frame-rate shortfall. Each
+measurement excludes one layer.}
+\label{tab:test-wmem}
+\begin{tabular}{@{}p{34mm}p{40mm}p{40mm}@{}}
+\toprule
+Hypothesis & Measurement & Outcome \\
+\midrule
+Simulation running slowly
+  & Real-time factor from \texttt{/clock}
+  & \(0.998\) --- simulated time tracks wall clock; excluded \\[3pt]
+Gazebo rendering too slowly
+  & Host-side subscriber on the camera topic
+  & \(5.00\)\,Hz, gaps \(0.19\)--\(0.21\)\,s; source is correct \\[3pt]
+Software rendering
+  & GL driver mapped by \texttt{gzserver}
+  & Hardware driver loaded; excluded \\[3pt]
+Link negotiated at $100$\,Mbps
+  & \texttt{ethtool} on the edge node
+  & $1000$\,Mb/s full duplex; excluded \\[3pt]
+Fragments lost in flight
+  & Interface counters on both machines
+  & Zero errors, zero drops on both; excluded \\[3pt]
+Receive buffers too small
+  & \texttt{net.core.rmem\_max}
+  & $512$\,MB, already raised; excluded \\[3pt]
+\textbf{Send buffers too small}
+  & \texttt{net.core.wmem\_max}
+  & \(\mathbf{208}\)\,\textbf{kB} --- default, never raised \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The DDS profile requests a \(16\)\,MB send buffer. The kernel caps any such
+request at \texttt{net.core.wmem\_max}, which stood at its \(208\)\,kB
+default, and performs the reduction silently. A single frame is therefore
+approximately \(13\times\) larger than the buffer available to transmit it.
+The publisher filled that buffer immediately and discarded the remaining
+fragments at the socket layer, before they reached the network interface.
+
+Confirmation came from comparing what was produced with what was
+transmitted. The host generated \(414\)\,MB of imagery over thirty seconds
+and placed only \(10\)\,MB of it on the wire --- \(2\)\,Mbps against the
+\(110\)\,Mbps the configuration implies. Raising
+\texttt{net.core.wmem\_max} to \(512\)\,MB on both machines and restarting
+the stack, which is necessary because Fast DDS applies socket options only
+at participant creation, restored delivery to \(5.000\)\,Hz with a standard
+deviation of \(4.5\)\,ms.
+
+Three properties of this fault make it worth recording.
+
+\paragraph{No counter records it.}
+Loss at the socket layer is not visible to interface statistics.
+\texttt{tx\_dropped} on the sending interface and \texttt{rx\_errors} on the
+receiving one both remained at zero throughout, because the discarded
+fragments were never transmitted. A diagnosis founded on interface counters
+alone would conclude that the network was healthy, which it was.
+
+\paragraph{Its symptom appeared three layers above its cause.}
+The visible consequences were that the detector reported no humans in
+\(93\) of \(94\) frames and that the patrol mission timed out at every
+waypoint. Both invite explanation in terms of detector configuration or
+flight control. Neither has anything to do with either: the aircraft flew
+correctly and the detector functioned correctly, but the aircraft was
+observed through roughly one frame every five seconds.
+
+\paragraph{Asymmetric configuration is easy to overlook.}
+The receive path had been corrected during earlier work and the transmit
+path had not, because the failure that prompted the original correction ---
+incomplete reassembly at the subscriber --- pointed only at the receiving
+side. The two directions are configured by separate kernel parameters, and
+an error in either produces the same observable outcome. The pre-flight
+checks in \texttt{scripts/netns/run\_hitl.sh} were subsequently extended to
+verify both parameters on both machines.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.85\textwidth]{camera_rate_before_after.png}
+\caption{Delivered camera rate at the edge node, measured with
+\texttt{ros2 topic hz}, before and after \texttt{net.core.wmem\_max} was
+raised. The source rate was \(5\)\,Hz throughout and no other parameter was
+changed. Delivery rose from \(0.19\)\,Hz to \(5.000\)\,Hz, and the
+inter-arrival standard deviation fell from over a second to \(4.5\)\,ms.}
+\label{fig:test-ratefix}
+\end{figure}
+
+% ---------------------------------------------------------------------
+\subsection{Layer 4 --- Detector function}
+\label{sec:test-l4}
+
+This layer tests that the detector produces correct output, independently of
+how that output is transported. It is the only layer with an external ground
+truth: the number and position of the human models are fixed in the world
+definition, so recall is a directly measurable quantity rather than an
+estimate.
+
+\begin{table}[htbp]
+\centering
+\caption{Layer 4 test cases --- detector function.}
+\label{tab:test-l4}
+\begin{tabular}{@{}lp{40mm}p{38mm}l@{}}
+\toprule
+ID & Test and command & Result & Verdict \\
+\midrule
+T4.1 & Model loads and runs on ARM. \newline
+       Run detector standalone on a saved image
+     & Inference completes, $623$\,ms
+     & \pass \\[2pt]
+T4.2 & Detections are on real subjects. \newline
+       View \texttt{/uav1/camera/annotated}
+     & Bounding boxes coincide with the human models
+     & \pass \\[2pt]
+T4.3 & False positive rate. \newline
+       Count detections against ground truth of $5$
+     & Earlier configuration reported up to $16$; corrected configuration
+       reports $2$--$4$
+     & \pass \\[2pt]
+T4.4 & Recall against known ground truth. \newline
+       Count detections against ground truth of $5$
+     & $2$--$4$ of $5$, i.e.\ $40$--$80\%$
+     & \pass \\[2pt]
+T4.5 & Message content and size. \newline
+       \texttt{ros2 topic echo /detections/uav1}
+     & JSON, approximately $118$\,B, human count present
+     & \pass \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}[t]{0.48\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{world_ground_truth.png}
+  \caption{The test scene in Gazebo. Five human models stand approximately
+  one metre apart, at coordinates fixed in the world definition.}
+  \label{fig:test-groundtruth}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.48\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{detection_annotated.png}
+  \caption{Detector output. Bounding boxes coincide with the models,
+  confirming that reported counts correspond to real subjects.}
+  \label{fig:test-annotated}
+\end{subfigure}
+\caption{Ground truth and detector output. Because the number and position
+of the subjects are fixed in the world definition, recall is counted rather
+than estimated, and any count exceeding five is necessarily a false
+positive.}
+\label{fig:test-detection}
+\end{figure}
+
+Test~T4.2 was made a precondition of accepting any quantitative result. A
+detector that reports a plausible count while placing its boxes on building
+texture would satisfy every numerical check in this section, and the earlier
+configuration recorded in T4.3 did exactly that: sixteen detections against
+five subjects, all confident, none correct. Visual inspection of annotated
+frames, shown in Figure~\ref{fig:test-detection}, is the only test that
+distinguishes the two cases, and it was therefore run before the timing
+experiments rather than after them. The false positives were eliminated by
+raising the confidence threshold and narrowing the camera field of view.
+
+The shortfall in T4.4 is attributed to scene geometry rather than to the
+detector. The five models stand approximately one metre apart, so from the
+oblique camera view the nearer figures partially occlude those behind them,
+and a partially occluded subject at approximately $53$ pixels in height
+falls below the confidence threshold. This is a property of the test scene,
+and is noted as such rather than presented as a detector accuracy figure ---
+the project measures the cost of onboard detection, not the accuracy of
+YOLOv8n, which is established elsewhere.
+
+% ---------------------------------------------------------------------
+\subsection{Layer 5 --- End-to-end path}
+\label{sec:test-l5}
+
+The final layer tests the complete path: Gazebo renders a frame, the frame
+crosses the unimpaired wired link to the Pi, the Pi performs detection, and
+the result crosses the simulated wireless channel to the ground station.
+This is the behaviour the system exists to demonstrate, and it is the only
+layer at which the requirement --- that results, and only results, cross the
+radio --- can be confirmed as a whole.
+
+\begin{table}[htbp]
+\centering
+\caption{Layer 5 test cases --- end-to-end operation.}
+\label{tab:test-l5}
+\begin{tabular}{@{}lp{40mm}p{38mm}l@{}}
+\toprule
+ID & Test and command & Result & Verdict \\
+\midrule
+T5.1 & Whole stack starts from one command. \newline
+       \texttt{run\_hitl.sh -{}-mission}
+     & All stages report ready; mission flies
+     & \pass \\[2pt]
+T5.2 & Detections arrive at the ground station. \newline
+       Ground station receiver log, inside \texttt{gcsns}
+     & Human counts received during flight
+     & \pass \\[2pt]
+T5.3 & Those detections crossed ns-3. \newline
+       Receiver runs in \texttt{gcsns}, reachable only via
+       \texttt{tap-gcs}
+     & Namespace has no other route to the Pi
+     & \pass \\[2pt]
+T5.4 & Imagery does not cross ns-3. \newline
+       As T2.5, T2.6
+     & Only detection-sized traffic on \texttt{tap-uav2}
+     & \pass \\[2pt]
+T5.5 & Clean shutdown. \newline
+       \texttt{Ctrl+C}, then \texttt{ip -br link}
+     & Remote detector stopped; namespaces, bridges and VLANs removed
+     & \pass \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Test~T5.3 is the structural argument that supports the claim made throughout
+this report. The ground station receiver executes inside the \texttt{gcsns}
+network namespace, whose only interface is one end of a veth pair attached
+to \texttt{br-gcs} and thence to \texttt{tap-gcs}. The namespace has no
+route to $10.0.0.0/24$ and no interface on it. A message that arrives at
+that receiver cannot have taken any path other than through ns-3, because no
+other path exists from inside the namespace. Separation is therefore a
+property of the topology rather than of a configuration setting that could
+be silently overridden, which is a stronger guarantee than filtering would
+provide.
+
+% ---------------------------------------------------------------------
+\subsection{Experimentation}
+\label{sec:test-experiments}
+
+Three controlled experiments were performed once all five layers passed. In
+each, one parameter was varied and the remainder held fixed.
+
+\paragraph{E1 --- Inference back-end and input resolution.}
+The detector was timed across the four combinations of back-end (PyTorch,
+NCNN) and input resolution ($960 \times 544$, $640 \times 384$), reported in
+Table~\ref{tab:hitl-inference}. Changing back-end at constant resolution
+gives approximately $2.5\times$; halving the pixel count at constant
+back-end gives approximately $2.3\times$. Latency therefore scales close to
+linearly with pixel count, a pixel ratio of $0.47$ producing a time ratio of
+$0.43$. Timing was taken around the model invocation alone so that the two
+back-ends are compared on identical work.
+
+\paragraph{E2 --- Source frame rate.}
+The camera rate was reduced at source from $20$\,Hz to $5$\,Hz, still
+approximately seven times the rate the detector can consume, so that no
+detection opportunity is lost. Inference latency fell from $1{,}343$\,ms to
+approximately $1{,}000$\,ms and link occupancy from $481$\,Mbps to
+$111$\,Mbps. The independent variable is deliberately the source rate rather
+than a rate limit applied on arrival: discarding frames after reception
+leaves the transport and deserialisation cost already incurred, and so does
+not test the same thing.
+
+\paragraph{E3 --- Isolated versus in-pipeline inference.}
+The same model, on the same input, was timed standalone on a saved image and
+within the live pipeline: $623$\,ms against $1{,}343$\,ms. The $720$\,ms
+difference is the interference between the two workloads, and amounts to
+approximately half the board's available inference throughput. This is the
+principal finding of the hardware-in-the-loop work, and it is reported in
+full in Section~\ref{sec:hitl-contention}.
+
+% ---------------------------------------------------------------------
+\subsection{Validation of the measurements}
+\label{sec:test-validation}
+
+Passing a test establishes that a component behaves as specified. It does
+not establish that a measurement taken from that component means what it is
+claimed to mean. Four validation arguments are therefore made explicitly.
+
+\paragraph{Sample size.}
+Latency figures are reported over thirty ICMP samples. A two-sample
+measurement of the same configuration returned a mean of $167$\,ms against
+$59$\,ms for thirty, because the first packet includes address resolution
+across the simulated channel. The short sample is not noisy but biased, and
+consistently so; increasing the sample size is the correct remedy rather
+than repetition.
+
+\paragraph{Placement of the timer.}
+Inference duration is measured around the model invocation alone, excluding
+message reception, format conversion and publication. This placement is what
+makes E3 interpretable. Had the timer enclosed the whole callback, the
+$720$\,ms difference could equally have been queuing delay ahead of the
+model. Because it does not, the additional time is spent inside the model
+call itself, which establishes contention for processor time rather than
+waiting.
+
+\paragraph{Ground truth.}
+Detection performance is validated against the world definition, in which
+the number and position of the human models are fixed and known. Recall is
+therefore counted, not estimated. The same fact supports T4.3: a count
+exceeding five is necessarily a false positive, without any need to
+adjudicate individual boxes.
+
+\paragraph{Rate measurements presume a running clock.}
+Gazebo runs in lockstep with the autopilot, advancing only when SITL sends
+servo commands. If SITL stalls, simulated time stops, and every rate derived
+from it becomes meaningless while remaining superficially plausible. During
+one diagnosis a low frame rate was attributed in turn to software rendering
+and to camera geometry before a stalled clock was found to be the cause.
+The state of \texttt{/clock} is consequently checked before any rate figure
+is accepted, and this is recorded here as a methodological requirement of
+lockstep simulation rather than as an incidental fault.
+
+% ---------------------------------------------------------------------
+\subsection{Coverage and outstanding items}
+\label{sec:test-coverage}
+
+Table~\ref{tab:test-coverage} summarises coverage by layer. Every layer
+required for the reported results has been tested and passed.
+
+\begin{table}[htbp]
+\centering
+\caption{Test coverage by layer.}
+\label{tab:test-coverage}
+\begin{tabular}{@{}llcl@{}}
+\toprule
+Layer & Scope & Cases & Status \\
+\midrule
+L1 & Physical link            & 4 & All passing \\
+L2 & Path separation          & 6 & All passing \\
+L3 & Middleware transport     & 7 & All passing after T3.2 corrected \\
+L4 & Detector function        & 5 & All passing \\
+L5 & End-to-end operation     & 5 & All passing \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Three items remain outside the tested set, and no result in this report
+depends on them.
+
+Clock synchronisation between the two machines is not established. End-to-end
+latency would be computed from timestamps taken on different hosts, and
+without synchronisation such values are not meaningful while remaining
+plausible in magnitude. End-to-end latency is therefore not reported, rather
+than reported with a caveat.
+
+The ground configuration --- compressed imagery crossing the simulated
+channel with inference performed at the ground station --- has not been
+measured. The comparison it enables is the subject of the remaining work.
+
+Behaviour at range has not been characterised. All measurements were taken
+with the aircraft close to the ground station, giving zero packet loss on
+both paths. The reliability policy applied to detection messages is
+consequently untested under loss, which is the condition it exists to
+handle.
+
+% =====================================================================
+%  IMAGE CHECKLIST
+%  Save each file into  docs/report/figures/  under the name given.
+%
+%  1. testbed_hardware.jpg          (Fig. \ref{fig:test-hardware})
+%     A photograph of the real setup: laptop, USB gigabit adapter, the
+%     Ethernet cable, and the Raspberry Pi 4B with its power supply.
+%     Shoot it so the single cable between the two machines is clearly
+%     the only link. This is the one image that shows the work is
+%     hardware-in-the-loop rather than pure simulation, so it is worth
+%     taking properly: good light, plain background, both machines in
+%     frame. Optionally add small printed labels reading "VLAN 10 /
+%     VLAN 42" beside the cable.
+%
+%  2. world_ground_truth.png        (Fig. \ref{fig:test-groundtruth})
+%     Gazebo client view of the five human models, from above or at an
+%     angle that makes all five countable. Purpose: the reader must be
+%     able to verify that the ground truth really is five.
+%         gzclient        # with the stack running
+%
+%  3. detection_annotated.png       (Fig. \ref{fig:test-annotated})
+%     A frame with bounding boxes drawn on real people. Since the
+%     annotated topic was removed from the edge node, capture this by
+%     running the detector once with show_window enabled, or by drawing
+%     the boxes host-side from the bbox values in /detections/uav1.
+%     Choose a frame where the boxes clearly sit on the models.
+%
+%  4. camera_rate_before_after.png  (Fig. \ref{fig:test-ratefix})
+%     Evidence for the send-buffer fault. Either a screenshot of the two
+%     `ros2 topic hz` outputs side by side (0.19 Hz and 5.000 Hz), or a
+%     small plot of inter-arrival time against sample index for both
+%     runs. The plot is stronger: it shows the variance collapsing as
+%     well as the rate rising.
+%
+%  OPTIONAL, if space allows
+%  5. A screenshot of the two ping results (10.0.0.1 and 10.42.0.10)
+%     side by side. Table \ref{tab:test-l2} already carries the numbers,
+%     so this is supporting evidence rather than a result.
+%  6. rqt_graph of the running node/topic graph, which shows at a glance
+%     that the detector and the ground station are connected only
+%     through /detections/uav1.
+% =====================================================================

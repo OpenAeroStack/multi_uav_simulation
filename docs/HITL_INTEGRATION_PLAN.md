@@ -1,7 +1,7 @@
 # HITL Integration Plan — Raspberry Pi 4B edge node ↔ SITL host
 
 **Author:** anton · **Branch:** `ground-vs-edge-processing-RPi` (sub-branch of
-`ground-vs-edge-processing`) · **Last reconstructed:** 2026-07-31
+`ground-vs-edge-processing`) · **Last updated:** 2026-08-07
 
 > **Board correction (2026-07-28):** the edge node is a **Raspberry Pi 4B**, not a Pi 5.
 > Earlier revisions of this document said "Pi 5" throughout and that was wrong. The
@@ -27,7 +27,7 @@ result the experiment is built to produce:
 | Mode | What crosses the impaired radio link | Bottleneck |
 |---|---|---|
 | **Ground processing** | Raw camera frames (~72 Mbps) | The radio link |
-| **Edge processing** | Detection messages (**76 bytes**) | The Pi's CPU (~1–3 s/frame) |
+| **Edge processing** | Detection messages (**~118 bytes**) | The Pi's CPU (~1–3 s/frame) |
 
 That tradeoff is only meaningful if the edge CPU is real. Hence HITL.
 
@@ -99,13 +99,31 @@ that the Pi replaces `uav2ns`. `uav1ns` keeps `10.42.0.11` for SITL, unchanged.
 
 | Link | Path | Latency |
 |---|---|---|
-| `10.0.0.1` | VLAN 10, direct cable | avg **2.2 ms**, jitter 0.8 ms |
-| `10.42.0.10` | VLAN 42 → ns-3 → gcsns | min 3.3 / avg **59.0** / max 158.0 ms, jitter 40.8 ms, 0% loss |
+| `10.0.0.1` | VLAN 10, direct cable | min 0.4 / avg **1.5** / max 2.7 ms, jitter 0.4 ms, 0% loss |
+| `10.42.0.10` | VLAN 42 → ns-3 → gcsns | min 11.7 / avg **77.4** / max 242.6 ms, jitter 54.8 ms, 0% loss |
 
-~27× the latency and ~50× the jitter. The 3.3 ms minimum shows ns-3 is not applying a fixed
-delay: it is a contended CSMA/CA channel where packets queue and back off. Use ≥30 pings —
-the first packet includes ARP across the simulated channel and skews short samples badly
-(a 2-ping sample reported a misleading 167 ms average).
+**~53× the latency and ~140× the jitter.** The 6.6× spread *within* the radio path
+(11.7 ms minimum against a 77.4 ms mean) shows ns-3 is not applying a fixed delay: it is a
+contended CSMA/CA channel where packets queue and back off. Use ≥30 pings — the first packet
+includes ARP across the simulated channel and skews short samples badly (a 2-ping sample
+reported a misleading 167 ms average).
+
+Run these **after** the host stack reports `PIPELINE READY`, in this order. The host's VLANs
+are created by STEP 1c and deleted at teardown; the Pi's are created by `pi_hitl_link.sh` and
+persist until reboot. If the Pi is tagged while the host is not, both pings fail 100% with
+the carrier up.
+
+```bash
+# 1. HOST first — creates eth-cam / eth-rf / br-uav2
+./scripts/netns/run_hitl.sh --no-pi
+
+# 2. PI second
+sudo bash ~/pi_hitl_link.sh
+
+# 3. PI — verify. Both must reply, and the second must be much slower.
+ping -c 30 10.0.0.1   | tail -2
+ping -c 30 10.42.0.10 | tail -2
+```
 
 ## 4. Phase status
 
@@ -190,9 +208,14 @@ NIC while the Pi consumed the stream, with the camera at 20 Hz:
 Zero drops at 42,500 packets/second. The wire figure exceeds the payload by ~5%, which is
 exactly the IP/UDP/Ethernet header overhead.
 
-**Detection confirmed visually**, not just by counts: the annotated stream
-(`/uav1/camera/annotated`) was viewed in `rqt_image_view` during a flight and the boxes land
-on the actual `person_standing` models.
+**Detection confirmed visually**, not just by counts: boxes land on the actual
+`person_standing` models, at confidences of 0.42–0.59.
+
+The edge node does **not** publish an annotated image. Verify visually by running the
+detector once with `-p show_window:=True` on a machine that has a display, or by drawing the
+boxes host-side from the `bbox` values already carried in `/detections/uav1`. Do this before
+accepting any timing result — a detector that boxes ground texture passes every numerical
+check.
 
 **Recall: 2–4 of the 5 people per frame (~40–80%).** Not a defect — the five models sit in a
 plus pattern only 1 m apart, so from the 45° oblique view the near figures partly occlude
@@ -200,14 +223,24 @@ the far ones, and at ~53 px tall the partly-hidden ones fall under `conf=0.4`. G
 is exactly 5 and known from the world file, so **recall is measurable, not estimated** — use
 it as a second axis alongside latency in Phase 6.
 
-**What unblocked it:** raising `net.core.rmem_max` to 536870912 on both machines. A 2.76 MB
-frame is ~1,900 UDP fragments; the default 208 KB buffer holds ~7% of one frame, so
-reassembly never completed and the subscriber silently received nothing.
+**What unblocked it:** raising **both** `net.core.rmem_max` *and* `net.core.wmem_max` to
+536870912 on both machines. A 2.76 MB frame is ~1,900 UDP fragments.
+
+* `rmem_max` too small → the default 208 KB buffer holds ~7% of one frame, reassembly never
+  completes, and the subscriber silently receives nothing.
+* `wmem_max` too small → the profile's 16 MB `<sendBufferSize>` is silently clamped to
+  208 KB, and the **publisher** discards fragments before they reach the NIC. Measured
+  symptom: 0.19 Hz delivered against a 5 Hz source, host transmitting 2 Mbps instead of
+  110 Mbps. See §8.
+
+Both are checked by `run_hitl.sh` pre-flight. Persist them in
+`/etc/sysctl.d/60-ros2-dds.conf` on **both** machines — a `sysctl -w` is lost at reboot, and
+the failure it causes does not look like a buffer problem.
 
 ### Phase 5 — Detections across the ns-3 impaired link ✅ networking DONE (2026-08-05)
 
 Detections now cross the simulated radio; the camera does not. See §3 for the VLAN design
-and the measured 2.2 ms vs 59.0 ms proof.
+and §10 for the measured 1.5 ms vs 77.4 ms proof.
 
 Three changes made it work:
 
@@ -236,7 +269,7 @@ Same experiment, real edge node. The edge arm is complete; the ground arm needs
 | **Edge** ✅ | ~118 B | on the Pi | 2,540 → ~1,000 ms |
 | **Ground** ⬜ | ~100 KB JPEG/frame | on the host | ~44 ms |
 
-With a 59 ms / 41 ms-jitter channel, the bandwidth difference is where the result lives.
+With a 77 ms / 55 ms-jitter channel, the bandwidth difference is where the result lives.
 
 > **⚠ Blocked on clock sync.** `metrics_logger` computes latency as
 > `receipt_wall − send_wall`. Across two machines with unsynchronised clocks these numbers
@@ -440,14 +473,29 @@ cause.
 
 **QoS — a slow subscriber can throttle the simulator:**
 - Gazebo's camera publisher is **RELIABLE**. A RELIABLE subscriber makes it wait for an
-  acknowledgement of every frame, so the Pi (≈1 fps, and also sending a 2.76 MB annotated
-  image back) dragged the **whole simulation's camera down to 0.27 Hz**.
+  acknowledgement of every frame, so the Pi at ≈1 fps dragged the **whole simulation's
+  camera down to 0.27 Hz**.
 - Worse, when the Pi rebooted mid-run its unacknowledged samples left the publisher stalled
   at its retransmission heartbeat — frames arriving exactly 3.144 s apart, ±0.4 ms. That
   fixed spacing is the tell: render times vary, timers do not.
 - **Sensor streams must use `BEST_EFFORT`, depth 1.** A frame that arrives late is worthless
   anyway, and the publisher can then never be held back. Keep `RELIABLE` for detections,
   commands and configuration — things that must not be lost.
+
+**Socket buffers — check BOTH directions.** `rmem_max` and `wmem_max` are separate
+parameters and an error in either produces the same symptom: too few frames arriving.
+- Send-side starvation is **invisible to every interface counter**. `tx_dropped` on the host
+  and `rx_errors` on the Pi both stay at 0, because the fragments are discarded at the
+  socket layer and never transmitted. The wire looks perfectly healthy.
+- The symptom surfaces three layers up. When this bit, the detector reported 0 humans in 93
+  of 94 frames and the patrol mission timed out at every waypoint — both of which invite a
+  detector or flight-control explanation, and neither of which was the cause.
+- **Restart the stack after changing them.** Fast DDS applies socket options only at
+  participant creation, so a running `gzserver` keeps the old buffer.
+- Isolate source from transport by measuring the rate **on the host** as well as on the Pi.
+  Host at 5 Hz and Pi at 0.19 Hz localises the fault to transport in one step. Use a
+  `BEST_EFFORT` subscriber to do it — `ros2 topic hz` defaults to RELIABLE and will silently
+  match nothing against a BEST_EFFORT publisher, which looks identical to a dead topic.
 
 **Diagnosis order — check `/clock` first.** The world runs in lockstep
 (`real_time_update_rate: -1`), so Gazebo only steps when SITL sends servo packets. If SITL
@@ -463,7 +511,7 @@ was `/clock` not ticking.
    as `receipt_wall − send_wall`. Across two machines with unsynchronised clocks these
    numbers are meaningless, and plausible-looking, which is worse. Run chrony between the
    Pi and the host **before** collecting any Phase 6 data. Now more urgent than ever: with
-   the radio link adding ~59 ms, end-to-end latency is the headline measurement.
+   the radio link adding ~77 ms, end-to-end latency is the headline measurement.
 2. **Persistence on the Pi.** Its VLANs (`eth0.10`, `eth0.42`) come from
    `pi_hitl_link.sh` and are lost on every reboot. Needs netplan with a `vlans:` section.
 3. **NetworkManager vs the host VLAN.** NM keeps re-adding `10.0.0.1` to the parent
@@ -483,24 +531,40 @@ was `/clock` not ticking.
 
 | Metric | Value |
 |---|---|
+Delivered configuration: camera 5 Hz, PyTorch `yolov8n.pt`, `conf=0.4`, class 0 only.
+
+| Metric | Value |
+|---|---|
+| Link negotiation | 1000 Mb/s full duplex |
 | Link throughput (iperf3, steady) | ~834 Mbps, 0 retransmits |
 | Camera | 1280×720 RGB, **2.76 MB/frame** |
-| Camera at 20 Hz / 5 Hz | 481 Mbps / ~111 Mbps |
-| Camera link latency | 2.2 ms, 0.8 ms jitter |
-| **Radio link latency (ns-3)** | **59.0 ms avg**, 40.8 ms jitter, 0% loss |
+| Camera at 20 Hz / 5 Hz | 481 Mbps / ~110 Mbps |
+| **Camera delivered to the Pi** | **5.000 Hz** vs 5 Hz source, σ = 4.5 ms |
+| Real-time factor (`/clock`) | 0.998 |
+| Camera link latency (30 pings) | min 0.4, **avg 1.5**, max 2.7, jitter 0.4 ms |
+| **Radio link latency (ns-3, 30 pings)** | min 11.7, **avg 77.4**, max 242.6, jitter 54.8 ms, 0% loss |
+| Radio vs camera path | **53× latency, 140× jitter** |
+| Inference — PyTorch @ 640 (in pipeline) | **~1,015 ms**, range 1,001–1,070 |
 | Inference — PyTorch @ 960×544 | **2,540 ms** (0.39 fps) |
 | Inference — PyTorch @ 640×384 | ~1,100 ms |
 | Inference — NCNN @ 960×544 | **~1,000 ms** (0.74 fps) |
 | Inference — NCNN @ 640×384 | ~470 ms *(predicted, not measured)* |
-| Detection payload vs image | **~118 B vs 2.76 MB** |
-| Recall | 2–4 of 5 people per frame |
+| Detection payload vs image | **~118 B vs 2.76 MB** (~23,000×) |
+| Recall | 1–4 of 5 people per frame, conf 0.42–0.59 |
 
 Resolution and engine effects are **separable and roughly multiplicative** — inference
 scales close to linearly with pixel count (0.47 pixel ratio → 0.43 time ratio).
 
-Throttling the camera 20 → 5 Hz alone cut inference from 1,343 to ~1,000 ms. The same model
-on a static image runs in 623 ms, so the Pi was losing roughly half its inference capacity
-to deserialising frames it discarded.
+The Pi completes rather less than one detection per second against a 5 Hz camera and
+therefore discards ~80% of what it receives. Discarded frames are not free: each still costs
+reassembly of ~1,900 UDP fragments plus deserialisation of 2.76 MB, competing with inference
+for the same four cores. Throttling the camera 20 → 5 Hz cut inference from 1,343 to
+~1,000 ms for that reason. The same model on a static image runs in 623 ms.
+
+> The radio minimum of 11.7 ms against a 77.4 ms mean — a 6.6× spread on one link — is the
+> tell that ns-3 is modelling a contended channel with queueing and back-off, not applying a
+> fixed delay. Always take **30 samples**: a 2-sample ping includes ARP across the simulated
+> channel and returned 167 ms for a link that measures 59–77 ms over 30.
 
 ---
 
@@ -518,9 +582,11 @@ to deserialising frames it discarded.
 | `scripts/make_runbook_pdf.py` | Regenerates `docs/HITL_RUNBOOK.pdf` |
 | `docs/HITL_RUNBOOK.pdf` | Printable command sequence + troubleshooting |
 | `docs/PI_SETUP.md` | Full Pi flashing + setup guide |
+| `docs/report/hitl_edge_processing.tex` | FYP report section on the HITL work |
+| `docs/report/testing_validation.tex` | FYP report section on testing and validation |
 | `config/fastdds_hitl_eth.xml` | **DDS profile for HITL** — interface whitelist, UDP-only |
 | `config/fastdds_udp_only.xml` | UDP-only DDS profile (SHM bypass), host-only runs |
 | `ros2/uav_vision/uav_vision/` | `camera_relay`, `detector`, `gcs_receiver`, `metrics_logger` |
 | `params/uav1_dds_netns.parm` | DDS pointed at the agent in `gcsns` (10.42.0.10:2019) |
-| `models/iris_1_netns/model.sdf` | Camera (1280×720, 45° pitch, 0.6 rad FOV, 5 Hz) + FDM plugin |
+| `models/iris_1_netns/model.sdf` | Camera (1280×720, 45° pitch, 0.9 rad FOV, 5 Hz) + FDM plugin |
 | `worlds/small_city_single_uav_netns.world` | City world, lockstep physics, 5 `person_standing` |

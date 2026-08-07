@@ -1,0 +1,314 @@
+% =====================================================================
+%  Hardware-in-the-Loop Edge Processing
+%  A SECTION of the FYP report. Include from the parent chapter with:
+%      \input{hitl_edge_processing}
+%
+%  HEADING LEVELS USED
+%      \section     - the HITL section itself
+%      \subsection  - its parts
+%      \paragraph   - short findings within Results
+%
+%  REQUIRED PACKAGES (add to the main preamble if not already present)
+%      \usepackage{booktabs}
+%      \usepackage{graphicx}
+%      \usepackage{tikz}
+%      \usetikzlibrary{arrows.meta, positioning, fit, backgrounds}
+%
+%  All labels are prefixed hitl / tab:hitl- / fig:hitl- so they cannot
+%  collide with labels elsewhere in the shared report.
+% =====================================================================
+
+\section{Hardware-in-the-Loop Edge Processing}
+\label{sec:hitl}
+
+The vision workload was moved off the simulation host and onto physical
+hardware, so that the cost of onboard detection could be measured on a processor
+representative of one that would actually fly. A Raspberry~Pi~4B performs
+detection on imagery produced by the simulation, and returns its results across a
+wireless channel simulated in ns-3.
+
+% ---------------------------------------------------------------------
+\subsection{Extending the testbed with physical hardware}
+\label{sec:hitl-testbed}
+
+The existing stack ran entirely on one machine: Gazebo for the environment and
+sensors, ArduPilot SITL for the autopilot, ns-3 for the wireless channel, and
+Linux network namespaces isolating the ground station from each aircraft. The
+ns-3 scenario defined four nodes --- a ground control station and three aircraft
+--- of which the second and third were unused placeholders.
+
+A Raspberry~Pi~4B was introduced as the physical edge node and assigned to the
+second aircraft slot. Its TAP device, previously created only to satisfy the
+scenario's argument list, was brought into service as the attachment point. The
+autopilot, physics and channel simulation remained on the host; only the vision
+computation moved onto hardware.
+
+The Pi was configured with Ubuntu~22.04 and ROS\,2 Humble to match the host
+exactly, giving both machines the same DDS implementation. The host has no
+Ethernet port, so a USB~3.0 gigabit adapter was fitted. An initial low-cost
+adapter was replaced after \texttt{iperf3} measured \(4.5\)\,Mbps with \(24\%\)
+loss, despite \texttt{ethtool} reporting \(100\)\,Mbps full duplex; the
+replacement sustained \(834\)\,Mbps with no retransmissions.
+
+% ---------------------------------------------------------------------
+\subsection{Constructing the two-link network}
+\label{sec:hitl-network}
+
+Two logically separate paths were required between host and Pi. One carries
+camera imagery and must remain unimpaired, since on a real aircraft it is a short
+cable inside a single airframe rather than a radio. The other carries detection
+results and must pass through the simulated channel, as that is the link the
+experiment exists to characterise. The same reasoning applies to the
+flight-dynamics traffic between SITL and Gazebo, which also bypasses ns-3.
+
+The Pi provides a single Ethernet interface, so both paths were carried over one
+cable using IEEE~802.1Q VLAN tagging. On the host, two virtual interfaces were
+created on the physical adapter: \texttt{eth-cam}, tagged VLAN~10 and addressed
+\(10.0.0.1\); and \texttt{eth-rf}, tagged VLAN~42, left without an address and
+made a member of a new bridge, \texttt{br-uav2}. That bridge also received
+\texttt{tap-uav2}, the ns-3 interface for the second aircraft node. On the Pi,
+matching interfaces \texttt{eth0.10} (\(10.0.0.2\)) and \texttt{eth0.42}
+(\(10.42.0.12\)) were created.
+
+Attaching the physical interface to the bridge directly was rejected during
+design. A Linux bridge floods frames to all member ports, so camera traffic would
+have been delivered into the ns-3 TAP device as well, injecting approximately
+\(111\)\,Mbps of imagery into the simulated channel.
+
+The resulting arrangement enforces separation through routing rather than
+filtering. Gazebo is addressed only on \(10.0.0.1\) and can reach the Pi only at
+\(10.0.0.2\); the ground station namespace is addressed only on \(10.42.0.10\)
+and can reach it only at \(10.42.0.12\). Neither can use the other's path.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  font=\small,
+  box/.style={draw, rounded corners=2pt, align=center, inner sep=5pt},
+  proc/.style={box, fill=black!4},
+  net/.style={box, fill=black!10},
+  arr/.style={-{Latex[length=2mm]}, thick},
+]
+\node[proc] (gz)   {Gazebo\\camera + physics};
+\node[proc, below=14mm of gz] (gcs) {Ground station\\(namespace)\\\texttt{10.42.0.10}};
+\node[net,  right=16mm of gcs] (ns3) {ns-3\\channel};
+\node[net,  above=8mm of ns3]  (br)  {\texttt{br-uav2}\\+ TAP};
+\node[proc, right=46mm of gz] (pi) {Raspberry Pi 4B\\YOLOv8n detector};
+
+\draw[arr] (gz) -- node[above, align=center, font=\scriptsize]
+  {VLAN 10 \quad camera, 2.76\,MB/frame\\unimpaired} (pi);
+\draw[arr] (pi.south) |- node[pos=0.75, above, font=\scriptsize]
+  {VLAN 42 \quad detections, 118\,B} (br.east);
+\draw[arr] (br) -- (ns3);
+\draw[arr] (ns3) -- (gcs);
+
+\begin{scope}[on background layer]
+  \node[draw, dashed, rounded corners, fit=(gz)(gcs)(ns3)(br),
+        inner sep=7pt, label={[font=\scriptsize\itshape]above left:Host PC}] {};
+\end{scope}
+\end{tikzpicture}
+\caption{The two-link arrangement. Camera imagery reaches the edge node over an
+unimpaired wired path; detection results traverse the simulated channel. Both
+share one physical cable, separated by VLAN tagging.}
+\label{fig:hitl-architecture}
+\end{figure}
+
+Addressing was made persistent using NetworkManager on the host and netplan on
+the Pi, the two distributions using different network managers. Addresses
+assigned imperatively were found to be removed within minutes, as each manager
+reconciles kernel state against its own configuration and deletes entries it did
+not create.
+
+% ---------------------------------------------------------------------
+\subsection{Configuring the middleware}
+\label{sec:hitl-dds}
+
+A Fast DDS profile was written and applied on both machines. It pins participants
+to the intended interfaces through an interface whitelist, since both machines
+are attached to WiFi as well as the wired link and DDS otherwise advertises on
+every available interface. The profile also disables the shared-memory transport,
+which is not isolated by network namespaces and would allow participants to
+exchange data without traversing the simulated channel.
+
+Kernel socket buffers were raised on both machines from the \(208\)\,kB default
+to \(512\)\,MB. A single \(1280 \times 720\) frame is \(2.76\)\,MB and fragments
+into approximately \(1{,}900\) UDP datagrams, of which the default buffer holds
+about \(7\%\); reassembly never completed and subscribers received nothing, with
+no error reported.
+
+The camera subscription on the Pi was changed from the ROS\,2 default of
+\texttt{RELIABLE} with queue depth ten to \texttt{BEST\_EFFORT} with depth one.
+Under the default policy the publisher retains each sample until the subscriber
+acknowledges it, and because the Pi acknowledges at approximately \(1\)\,Hz, the
+camera output of the entire simulation was throttled to \(0.27\)\,Hz.
+\texttt{RELIABLE} was retained for detection messages, which must not be lost.
+
+% ---------------------------------------------------------------------
+\subsection{Deploying the detector}
+\label{sec:hitl-detector}
+
+The detection node runs YOLOv8n restricted to the COCO \emph{person} class,
+subscribing to the camera topic and publishing results as JSON. It was deployed
+to the Pi and instrumented to record inference duration, measured around the
+model invocation alone so that figures remain comparable between back-ends and
+against standalone execution.
+
+Two dependency conflicts were resolved during deployment. Installing
+\texttt{ultralytics} brings in NumPy~2.x, against which \texttt{cv\_bridge} --- a
+compiled extension built for the 1.x C ABI --- fails. Installing an older OpenCV
+to compensate reintroduces NumPy~2 as a dependency, and OpenCV~5.0 separately
+breaks \texttt{cv\_bridge} by renaming the type constants it uses to build its
+conversion table. Versions were pinned to \texttt{numpy==1.26.4} and
+\texttt{opencv-python==4.10.0.84}, the only combination satisfying both.
+
+The model was additionally exported to NCNN for ARM-optimised inference. Because
+NCNN fixes the input tensor shape at export time, the export geometry was
+specified explicitly as \(544 \times 960\) to match the letterboxed frame; a
+default export produces a square input in which approximately \(43\%\) of the
+computation is spent on padding, at \(19.9\)\,GFLOPS against \(11.3\)\,GFLOPS for
+the correct shape. Half-precision export was avoided, the Cortex-A72 lacking fp16
+SIMD support.
+
+% ---------------------------------------------------------------------
+\subsection{Automation}
+\label{sec:hitl-automation}
+
+Bring-up was consolidated into a single script that starts the namespaces, ns-3,
+Gazebo, SITL, the micro-ROS agent and the ground station receiver, creates the
+VLANs and bridge, and launches the detector on the Pi over SSH. Pre-flight checks
+were added for each failure encountered during development: presence of the host
+address before Gazebo starts, since Fast DDS enumerates interfaces only at
+participant creation and cannot use one assigned later; reachability of the Pi;
+adequate socket buffer limits on both machines; and confirmation after startup
+that Gazebo bound the intended interface.
+
+% ---------------------------------------------------------------------
+\subsection{Results}
+\label{sec:hitl-results}
+
+Detections were verified visually, by inspecting annotated frames, before any
+quantitative result was accepted. An earlier configuration had reported up to
+sixteen detections against five subjects; these were false positives on building
+texture, eliminated by raising the confidence threshold and narrowing the camera
+field of view.
+
+\paragraph{Channel characterisation.}
+Table~\ref{tab:hitl-links} compares the two paths, each measured over thirty ICMP
+samples. Short samples are unreliable: the first packet includes address
+resolution across the simulated channel, and a two-sample measurement of the same
+configuration returned a mean of \(167\)\,ms against \(59\)\,ms for thirty.
+
+\begin{table}[htbp]
+\centering
+\caption{Measured characteristics of the two links, thirty samples each.}
+\label{tab:hitl-links}
+\begin{tabular}{lrrrr}
+\toprule
+Path & Min (ms) & Mean (ms) & Max (ms) & Jitter (ms) \\
+\midrule
+Sensor, VLAN 10 (wired)   & 0.4  & 1.5  & 2.7   & 0.4  \\
+Radio, VLAN 42 (via ns-3) & 11.7 & 77.4 & 242.6 & 54.8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Packet loss was zero on both paths, the aircraft remaining close to the ground
+station throughout. The radio path is approximately \(53\times\) slower than the
+wired path on average and varies approximately \(140\times\) more.
+
+The distribution within the radio path is itself informative. Its minimum of
+\(11.7\)\,ms against a mean of \(77.4\)\,ms is a spread of some \(6.6\times\) on
+one link, where a channel applying a fixed delay would produce a narrow one.
+The variation indicates that ns-3 is modelling contention, in which packets
+queue and back off before transmission, rather than simply adding a constant
+offset to each packet.
+
+\paragraph{Sensor transport.}
+With the camera at \(20\)\,Hz the wired path carried \(481\)\,Mbps at
+\(42{,}544\) packets per second with zero dropped packets, occupying
+approximately \(58\%\) of measured link capacity.
+
+\paragraph{Inference latency.}
+Table~\ref{tab:hitl-inference} reports latency for each combination of back-end
+and input resolution. Changing back-end at constant resolution gives
+approximately \(2.5\times\); halving the pixel count at constant back-end gives
+approximately \(2.3\times\). Latency therefore scales close to linearly with
+pixel count, a pixel ratio of \(0.47\) producing a time ratio of \(0.43\).
+
+\begin{table}[htbp]
+\centering
+\caption{Inference latency on the Raspberry Pi 4B.}
+\label{tab:hitl-inference}
+\begin{tabular}{llrr}
+\toprule
+Back-end & Input & Latency (ms) & Rate (fps) \\
+\midrule
+PyTorch & $960 \times 544$ & 2540 & 0.39 \\
+PyTorch & $640 \times 384$ & 1100 & 0.91 \\
+NCNN    & $960 \times 544$ & 1000 & 1.00 \\
+NCNN    & $640 \times 384$ & \multicolumn{2}{l}{not measured (est.\ 470)} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Detection performance.}
+Between two and four of the five subjects were detected per frame, a recall of
+\(40\)--\(80\%\). The shortfall is attributable to scene geometry rather than
+detector deficiency: the models are separated by approximately one metre, so from
+the oblique camera view the nearer figures partially occlude those behind them,
+and partially occluded subjects at approximately \(53\) pixels in height fall
+below the confidence threshold. Because the number and position of subjects are
+known exactly from the world definition, recall is a directly measurable quantity
+rather than an estimate.
+
+\paragraph{Transmitted volume.}
+Each detection message is approximately \(118\)\,B, against \(2.76\)\,MB for the
+corresponding frame, a reduction of approximately \(23{,}000\times\) in data
+crossing the radio.
+
+% ---------------------------------------------------------------------
+\subsection{Contention between sensor transport and inference}
+\label{sec:hitl-contention}
+
+The two workloads on the edge node proved not to be independent. The same model,
+on the same input, required \(623\)\,ms executed on a static image but
+\(1{,}343\)\,ms within the live pipeline: a difference of \(720\)\,ms, or
+approximately half the available inference throughput.
+
+The edge node received frames at \(19.8\)\,Hz while completing inference at
+approximately \(0.74\)\,Hz, discarding roughly \(96\%\) of what it received.
+Discarded frames are not free: each requires reassembly of some \(2{,}150\) UDP
+fragments, deserialisation of \(2.76\)\,MB and a further \(2.76\)\,MB
+colour-space conversion, all competing with inference for the same four
+processor cores.
+
+Reducing the camera rate at source from \(20\)\,Hz to \(5\)\,Hz --- still
+approximately seven times the rate the detector can consume --- reduced inference
+latency to approximately \(1{,}000\)\,ms, recovering about a quarter of the
+deficit, and reduced link occupancy from \(481\)\,Mbps to \(111\)\,Mbps. The
+application-level frame-rate control provided by the relay node cannot achieve
+this, as it discards frames after reception, by which point the transport and
+deserialisation cost has already been incurred.
+
+This interaction is not observable in pure simulation, where sensor data is
+delivered through shared memory at negligible cost, nor in an isolated benchmark
+of the detector, since the interference originates outside it. It appears only
+when a physical processor performs both reception and inference concurrently.
+
+% ---------------------------------------------------------------------
+\subsection{Limitations}
+\label{sec:hitl-limitations}
+
+Clock synchronisation between the two machines has not yet been established.
+End-to-end latency is computed from timestamps taken on different hosts, and
+without synchronisation those values are not meaningful while remaining plausible
+in magnitude; synchronisation is required before end-to-end latency is reported.
+
+The edge configuration is characterised; the corresponding ground configuration,
+in which compressed imagery crosses the simulated channel and inference is
+performed at the ground station, remains to be measured.
+
+Measurements were taken with the aircraft close to the ground station, giving
+zero packet loss throughout. Behaviour as range increases and buildings obstruct
+the path has not been characterised. The testbed supports a single physical edge
+node; multi-node operation has not been evaluated.

@@ -1,0 +1,302 @@
+% =====================================================================
+%  Testing, Experimentation and Validation  (~3 pages)
+%  A SECTION of the FYP report. Include from the parent chapter with:
+%      \input{testing_validation}
+%
+%  Intended to follow \input{hitl_edge_processing}; cross-references
+%  \ref{sec:hitl}. A longer version with the full 26-case test matrix is
+%  kept in testing_validation_long.tex if an appendix is wanted.
+%
+%  REQUIRED PACKAGES
+%      \usepackage{booktabs}
+%      \usepackage{array}
+%      \usepackage{graphicx}
+%      \usepackage{subcaption}
+%      \graphicspath{{figures/}}
+%
+%  IMAGES EXPECTED in docs/report/figures/  (see checklist at end)
+%      detection_a.png  detection_b.png  detection_c.png
+% =====================================================================
+
+\section{Testing, Experimentation and Validation}
+\label{sec:test}
+
+Testing of the hardware-in-the-loop testbed described in
+Section~\ref{sec:hitl} was organised around a difficulty specific to this
+kind of system: a fault at a low layer does not raise an error at the layer
+above it, but produces plausible and wrong behaviour there. A subscriber
+starved of buffer space receives nothing and reports nothing; two nodes with
+mismatched topic names run indefinitely without complaint. Testing was
+therefore performed bottom-up --- physical link, path separation, middleware
+transport, detector, end-to-end --- with each layer required to pass before
+the next was attempted.
+
+Three results are reported here. The first establishes that the two-link
+architecture does what it claims. The second establishes that the detector
+finds real people rather than plausible-looking texture. The third concerns
+the measurement chain itself, and is included because it determines whether
+the other two can be believed.
+
+% ---------------------------------------------------------------------
+\subsection{Test environment}
+\label{sec:test-env}
+
+Both machines run Ubuntu~22.04 with ROS\,2 Humble and Fast~DDS~2.6, so the
+middleware is identical at each end of the link and cannot itself be a
+source of difference. The simulation host runs Gazebo Classic in lockstep
+with ArduPilot SITL, and ns-3 with TapBridge for the wireless channel. The
+edge node is a Raspberry~Pi~4B running YOLOv8n restricted to the COCO
+\emph{person} class. The camera produces $1280 \times 720$ frames of
+$2.76$\,MB at $5$\,Hz. The test scene contains exactly five human models at
+coordinates fixed in the world definition, which makes recall a counted
+quantity rather than an estimated one.
+
+The Pi's single Ethernet port is divided by 802.1Q tagging into
+\texttt{eth0.10} ($10.0.0.2$, camera, unimpaired) and \texttt{eth0.42}
+($10.42.0.12$, detections, through ns-3), created by
+\texttt{scripts/netns/pi\_hitl\_link.sh}. The matching host interfaces
+\texttt{eth-cam} and \texttt{eth-rf} are created by step~1c of
+\texttt{scripts/netns/launch\_single\_uav\_netns.sh}, the latter bridged
+into \texttt{tap-uav2}.
+
+% ---------------------------------------------------------------------
+\subsection{Result 1: the two links behave differently}
+\label{sec:test-links}
+
+The central claim of the architecture is that detection results cross a
+simulated wireless channel while camera imagery does not. Two paths that
+both work are not evidence of this; they must also be shown to differ in the
+intended way, and imagery must be shown to be absent from the radio path.
+
+Table~\ref{tab:test-links} reports thirty ICMP samples on each path. Thirty
+rather than two: the first packet on the radio path includes address
+resolution across the simulated channel, and a two-sample measurement of the
+same configuration returned a mean of $167$\,ms against $59$\,ms for thirty.
+The short sample is biased, not merely noisy.
+
+\begin{table}[htbp]
+\centering
+\caption{Measured characteristics of the two paths, thirty samples each,
+zero packet loss on both.}
+\label{tab:test-links}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Path & Min (ms) & Mean (ms) & Max (ms) & Jitter (ms) \\
+\midrule
+Sensor, VLAN 10 (wired)   & 0.4  & 1.5  & 2.7   & 0.4  \\
+Radio, VLAN 42 (via ns-3) & 11.7 & 77.4 & 242.6 & 54.8 \\
+\midrule
+Ratio                     & --   & $53\times$ & -- & $140\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The radio path is approximately \(53\times\) slower on average and varies
+approximately \(140\times\) more. Its internal spread is itself informative:
+a minimum of \(11.7\)\,ms against a mean of \(77.4\)\,ms is a range of some
+\(6.6\times\) on one link, where a channel applying a fixed delay would
+produce a narrow distribution. The variation indicates that ns-3 is
+modelling contention, in which packets queue and back off, rather than
+adding a constant offset.
+
+Absence of imagery on the radio path was established negatively, by
+observation rather than by inspecting a rule set, since separation here is
+enforced by addressing and bridge membership rather than by filtering. No
+$10.0.0.0/24$ traffic was observed on \texttt{tap-uav2}, the point at which
+traffic enters ns-3, and the byte counters on the two interfaces differ by
+approximately four orders of magnitude --- consistent with $2.76$\,MB per
+frame on one path against $118$\,B per detection message on the other, a
+reduction of approximately \(23{,}000\times\).
+
+A structural argument supports the measurements. The ground station receiver
+executes inside the \texttt{gcsns} network namespace, whose only interface
+is one end of a veth pair attached to \texttt{tap-gcs}. That namespace has
+no interface on $10.0.0.0/24$ and no route to it. A message arriving at the
+receiver cannot have taken any other path, because no other path exists from
+inside the namespace. Separation is therefore a property of the topology
+rather than of a setting that could be silently overridden.
+
+% ---------------------------------------------------------------------
+\subsection{Result 2: detections correspond to real subjects}
+\label{sec:test-detection}
+
+Visual confirmation was made a precondition of accepting any quantitative
+result. A detector reporting a plausible count while placing its boxes on
+building texture would satisfy every numerical check in this section, and an
+earlier configuration did exactly that: sixteen confident detections against
+five subjects, none correct. Only inspection of annotated frames
+distinguishes the two cases. Those false positives were eliminated by
+raising the confidence threshold and narrowing the camera field of view.
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}[b]{0.32\textwidth}
+  \includegraphics[width=\textwidth]{detection_a.png}
+  \caption{Two subjects, confidence $0.59$ and $0.42$.}
+  \label{fig:test-det-a}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.32\textwidth}
+  \includegraphics[width=\textwidth]{detection_b.png}
+  \caption{One subject, confidence $0.48$.}
+  \label{fig:test-det-b}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.32\textwidth}
+  \includegraphics[width=\textwidth]{detection_c.png}
+  \caption{Three subjects, confidence $0.59$, $0.47$ and $0.46$.}
+  \label{fig:test-det-c}
+\end{subfigure}
+\caption{Detector output during flight, with the edge node's log above each
+view. Bounding boxes coincide with the human models rather than with ground
+texture. The log records every frame, including those with no detection, so
+that a stalled node is distinguishable from an empty scene, and reports
+inference duration per frame.}
+\label{fig:test-detection}
+\end{figure}
+
+Figure~\ref{fig:test-detection} shows three moments from a patrol flight.
+Between one and four of the five subjects were detected per frame, at
+confidences of \(0.42\)--\(0.59\). The shortfall against the known count of
+five is attributable to scene geometry rather than to detector deficiency:
+the models stand approximately one metre apart, so from the oblique camera
+view the nearer figures partially occlude those behind them, and a partially
+occluded subject at approximately \(53\) pixels in height falls below the
+confidence threshold. Because the number of subjects is known exactly, any
+count exceeding five would be a false positive without the need to
+adjudicate individual boxes; none was observed in this configuration.
+
+Inference duration was measured around the model invocation alone, excluding
+message reception, format conversion and publication, so that the figure
+remains comparable between back-ends and against standalone execution. Over
+the frames visible in Figure~\ref{fig:test-detection} it was tightly
+distributed at approximately \(1{,}015\)\,ms, ranging \(1{,}001\)
+--\(1{,}070\)\,ms with a single outlier at \(2{,}043\)\,ms. The Pi therefore
+completes rather less than one detection per second against a camera
+delivering five frames per second, and discards approximately \(80\%\) of
+what it receives --- which is why the camera subscription uses
+\texttt{BEST\_EFFORT} with queue depth one, keeping the newest frame rather
+than accumulating a backlog of stale ones.
+
+% ---------------------------------------------------------------------
+\subsection{Result 3: validating the measurement chain}
+\label{sec:test-chain}
+
+The two results above depend on the camera actually reaching the edge node
+at the rate the configuration specifies. That assumption failed, and the
+manner of its failure is reported here because it determines what the other
+measurements are worth.
+
+The symptom was that the edge node received imagery at \(0.19\)\,Hz where
+the camera was configured for \(5\)\,Hz, a shortfall of approximately
+\(26\times\). The visible consequences appeared three layers above the
+cause: the detector reported no humans in \(93\) of \(94\) frames, and the
+patrol mission timed out at every waypoint. Both invite explanation in terms
+of detector settings or flight control, and neither has anything to do with
+either --- the aircraft flew correctly and the detector functioned
+correctly, but the scene was being observed through roughly one frame every
+five seconds.
+
+\begin{table}[htbp]
+\centering
+\caption{Eliminating candidate causes of the frame-rate shortfall. Each row
+is a measurement that excludes one layer.}
+\label{tab:test-elimination}
+\begin{tabular}{@{}p{38mm}p{38mm}p{40mm}@{}}
+\toprule
+Hypothesis & Measurement & Outcome \\
+\midrule
+Simulation running slowly
+  & Real-time factor from \texttt{/clock}
+  & \(0.998\); simulated time tracks wall clock \\[3pt]
+Gazebo rendering slowly
+  & Host-side subscriber on the camera topic
+  & \(5.00\)\,Hz, gaps \(0.19\)--\(0.21\)\,s; source correct \\[3pt]
+Link negotiated at $100$\,Mbps
+  & \texttt{ethtool} on the edge node
+  & $1000$\,Mb/s full duplex \\[3pt]
+Fragments lost in flight
+  & Interface counters, both machines
+  & Zero errors, zero drops \\[3pt]
+Receive buffers too small
+  & \texttt{net.core.rmem\_max}
+  & $512$\,MB, already raised \\[3pt]
+\textbf{Send buffers too small}
+  & \texttt{net.core.wmem\_max}
+  & \(\mathbf{208}\)\,\textbf{kB}, left at the default \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The DDS profile requests a \(16\)\,MB send buffer. The kernel caps any such
+request at \texttt{net.core.wmem\_max}, and performs the reduction silently.
+A single frame is therefore approximately \(13\times\) larger than the
+buffer available to transmit it: the publisher filled that buffer
+immediately and discarded the remaining fragments at the socket layer,
+before they reached the network interface. Comparing production with
+transmission confirmed this --- the host generated \(414\)\,MB of imagery
+over thirty seconds and placed \(10\)\,MB of it on the wire, \(2\)\,Mbps
+against the \(110\)\,Mbps the configuration implies. Raising the parameter
+on both machines and restarting the stack, which is required because
+Fast~DDS applies socket options only at participant creation, restored
+delivery to \(5.000\)\,Hz with an inter-arrival standard deviation of
+\(4.5\)\,ms: an exact match to the source.
+
+Two properties of this fault are worth recording. First, no counter
+registers it. Loss at the socket layer is invisible to interface
+statistics, and \texttt{tx\_dropped} on the sending interface and
+\texttt{rx\_errors} on the receiving one both remained at zero throughout,
+because the discarded fragments were never transmitted. A diagnosis founded
+on interface counters would have concluded that the network was healthy,
+which it was. Second, the two directions are governed by separate kernel
+parameters. The receive path had been corrected during earlier work and the
+transmit path had not, because the failure that prompted the original
+correction pointed only at the receiving side. The pre-flight checks in
+\texttt{scripts/netns/run\_hitl.sh} now verify both parameters on both
+machines before the stack starts.
+
+% ---------------------------------------------------------------------
+\subsection{Limitations}
+\label{sec:test-limitations}
+
+Clock synchronisation between the two machines has not been established.
+End-to-end latency would be computed from timestamps taken on different
+hosts, and without synchronisation such values are not meaningful while
+remaining plausible in magnitude. End-to-end latency is therefore not
+reported, rather than reported with a caveat.
+
+The edge configuration is characterised; the corresponding ground
+configuration, in which compressed imagery crosses the simulated channel and
+inference is performed at the ground station, remains to be measured. All
+measurements were taken with the aircraft close to the ground station,
+giving zero packet loss on both paths, so the reliability policy applied to
+detection messages is untested under the loss conditions it exists to
+handle. The testbed supports a single physical edge node; multi-node
+operation has not been evaluated.
+
+% =====================================================================
+%  IMAGE CHECKLIST — save into docs/report/figures/
+%
+%  detection_a.png / detection_b.png / detection_c.png
+%      The three screenshots already captured: the detector log above and
+%      the rqt_image_view annotated frame below, showing 2, 1 and 3
+%      detections respectively.
+%
+%      CROP EACH ONE before including. At three-to-a-row the full desktop
+%      screenshot will be illegible. Keep only:
+%        - the last ~8 log lines (enough to show the count and the
+%          inference time), and
+%        - the image pane itself, without the rqt toolbar and topic
+%          selector.
+%      Crop all three to the same aspect ratio so the row lines up.
+%
+%      If the log text is still too small at 0.32\textwidth, drop the log
+%      from the figure entirely and show only the three annotated views —
+%      the inference figures are already stated in the prose.
+%
+%  OPTIONAL, if a fourth image is wanted:
+%      testbed_hardware.jpg — a photograph of the laptop, the USB gigabit
+%      adapter, the single Ethernet cable and the Pi 4B. This is the only
+%      image that shows the work is hardware-in-the-loop rather than pure
+%      simulation. It would go in Section \ref{sec:test-env}.
+% =====================================================================
