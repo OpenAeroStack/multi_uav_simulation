@@ -1,0 +1,6 @@
+distance_m,processed_label,raw_log_label,offered_load_mbps,duration_s,tap_sent_packets,tap_received_packets,tap_loss_percent,tap_byte_loss_percent,iperf_sent_datagrams,iperf_received_datagrams,iperf_loss_percent
+58.50,d01_58_5m,d01_58_5m,2.0,10,1905,1639,13.96,11.86,1727,1525,12.00
+69.50,d01_69_5m,d01_69_9m,2.0,10,1914,1654,13.58,11.38,1726,1533,11.00
+83.09,d01_83_09m,d01_63_09m,2.0,10,1912,1655,13.44,11.62,1727,1529,11.00
+97.70,d01_97_7m,d01_97_7m,2.0,10,1910,1657,13.25,11.25,1727,1535,11.00
+113.80,d01_113_8m,d01_113_8m,2.0,10,1912,1654,13.49,11.02,1727,1541,11.00

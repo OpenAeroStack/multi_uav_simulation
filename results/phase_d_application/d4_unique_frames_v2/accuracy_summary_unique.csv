@@ -1,0 +1,3 @@
+representation,evaluation_frames,unique_frames,confidence_threshold,jpeg_quality,tp,fp,fn,precision,recall,f1,exact_count_frames,exact_count_rate
+edge_raw,60,60,0.250000,n/a,135,19,29,0.876623,0.823171,0.849057,34,0.566667
+ground_q5,60,60,0.250000,5,29,0,135,1.000000,0.176829,0.300518,26,0.433333

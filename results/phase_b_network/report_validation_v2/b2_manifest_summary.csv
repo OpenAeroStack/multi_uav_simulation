@@ -1,0 +1,6 @@
+distance_m,mean_rtt_ms,minimum_rtt_ms,maximum_rtt_ms,packet_loss_percent,evidence_source
+58.5,159.8,129.0,197.0,0.0,results/MANIFEST.md
+69.5,153.3,119.0,185.0,0.0,results/MANIFEST.md
+83.9,159.4,130.0,194.0,0.0,results/MANIFEST.md
+97.7,159.9,135.0,204.0,0.0,results/MANIFEST.md
+113.8,158.1,127.0,212.0,0.0,results/MANIFEST.md

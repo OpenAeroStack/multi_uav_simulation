@@ -1,0 +1,5 @@
+condition,condition_code,raw_file,timestamp_identifier,included,exclusion_reason,message_count,duration_s,mean_rate_hz,maximum_gap_ms
+C0 mission/no vision,C0,results/phase_c_middleware/raw/telemetry_c0_mission_baseline_20260805_012216.csv,012216,true,,274,120.0,2.28,2243.2
+C1 static/no vision,C1,results/phase_c_middleware/raw/telemetry_c1_baseline_20260805_001716.csv,001716,true,,253,120.0,2.11,1994.1
+C2 Edge,C2,results/phase_c_middleware/raw/telemetry_c2_edge_load_20260805_012804.csv,012804,true,,247,120.0,2.06,2354.9
+C3 Ground,C3,results/phase_c_middleware/raw/telemetry_c3_ground_load_20260805_011400.csv,011400,true,,184,120.0,1.53,3788.4

@@ -1,0 +1,5 @@
+source_file,original_row_number,frame_id,gt_count,raw_pred_count,raw_tp,raw_fp,raw_fn,q5_pred_count,q5_tp,q5_fp,q5_fn,handling
+results/phase_d_application/raw/d4_reference_01/ground_truth.csv,34,frame_0033.png,5,,,,,,,,,retained
+results/phase_d_application/raw/d4_reference_01/ground_truth.csv,35,frame_0033.png,5,,,,,,,,,excluded later duplicate
+results/phase_d_application/processed/d4_detection_details_d4_raw_vs_q5_01_20260805_221850.csv,34,frame_0033.png,5,2,2,0,3,0,0,0,5,retained
+results/phase_d_application/processed/d4_detection_details_d4_raw_vs_q5_01_20260805_221850.csv,35,frame_0033.png,5,2,2,0,3,0,0,0,5,excluded later duplicate

@@ -1,0 +1,6 @@
+distance_m,metric,predicted_value_dbm,observed_mean_dbm,observed_std_db,residual_db,available_raw_sample_count,row_status
+58.5,received_signal_power_dbm,-62.071485,,,,3,partial_saved_raw_snapshot
+69.5,received_signal_power_dbm,-63.568063,,,,0,not_in_saved_raw_snapshot
+83.9,received_signal_power_dbm,-65.203607,,,,0,not_in_saved_raw_snapshot
+97.7,received_signal_power_dbm,-66.526259,,,,0,not_in_saved_raw_snapshot
+113.8,received_signal_power_dbm,-67.851213,,,,0,not_in_saved_raw_snapshot

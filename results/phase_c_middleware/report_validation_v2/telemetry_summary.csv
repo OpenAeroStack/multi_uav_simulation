@@ -1,0 +1,5 @@
+condition,messages,configured_duration_s,first_timestamp_s,last_timestamp_s,observed_span_s,mean_rate_hz,minimum_interval_ms,mean_interval_ms,maximum_gap_ms,source_file
+C0 mission/no vision,274,120.0,1785873136.908655,1785873256.804131,119.895476,2.28,133.4,439.2,2243.2,results/phase_c_middleware/raw/telemetry_c0_mission_baseline_20260805_012216.csv
+C1 static/no vision,253,120.0,1785869237.024001,1785869356.402778,119.378777,2.11,123.4,473.7,1994.1,results/phase_c_middleware/raw/telemetry_c1_baseline_20260805_001716.csv
+C2 Edge,247,120.0,1785873490.309170,1785873604.704957,114.395787,2.06,117.3,465.0,2354.9,results/phase_c_middleware/raw/telemetry_c2_edge_load_20260805_012804.csv
+C3 Ground,184,120.0,1785872641.967698,1785872759.721756,117.754058,1.53,70.5,643.5,3788.4,results/phase_c_middleware/raw/telemetry_c3_ground_load_20260805_011400.csv

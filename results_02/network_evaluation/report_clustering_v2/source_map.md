@@ -1,0 +1,13 @@
+# Dynamic Link and Clustering Source Map
+
+| Result | Authoritative source | Evidence type | Main-report use | Caveat |
+|---|---|---|---|---|
+| Trial-level mean link quality | Corrected Trials 1--3 `extracted/network_links.csv`; canonical summary | Direct extracted measurements and verified descriptive aggregation | Compare mean RSSI, SNR and obstacle loss | Link rows are repeated observations within three trials, not independent experimental repetitions. |
+| Role-state timelines | Corrected Trials 1--3 `cluster_assignments.csv`; canonical role figure | Complete sampled assignment states after the common initialization rule | Show stable primary roles and changing backup roles | The first retained state is a baseline, not a transition. |
+| Canonical primary transitions | `clustering_validation_v2/canonical_trial_summary.csv` and `transition_audit.csv` | Report-authoritative canonical state changes | Report zero primary changes in all corrected trials | This validates stability under the recorded mobility, not primary handover. |
+| Canonical backup transitions | `clustering_validation_v2/canonical_trial_summary.csv` and `transition_audit.csv` | Report-authoritative canonical state changes | Report backup transition counts of 2, 4 and 3 | Initialization and repeated event publications are excluded; legacy `backup_changes` is not substituted. |
+| Implementation status | `clustering_validation_v2/implementation_status.md` | Static implementation audit plus stored runtime evidence | Separate implemented features from observed behaviour | The contemporaneous source was audited separately; implementation alone is not experimental validation. |
+| Primary-handover status | `implementation_status.md`; `experimental_validation_status.md`; corrected trial summaries | Implementation present, experimental trigger absent | State that controlled switching existed but was not triggered | No primary transition occurred and no handover recovery measure is available. |
+| Failover status | `implementation_status.md`; `experimental_validation_status.md`; `report_claims.md` | Partial implementation, no dedicated experiment | Define the unvalidated scope accurately | The threshold path chose the best eligible candidate and did not guarantee immediate promotion of the stored backup. |
+| Topology/position evidence | Corrected Trial 1 `positions.csv` and `cluster_assignments.csv` | Direct positions matched to complete assignment states | Illustrate initial and final movement and roles | First/last canonically retained assignments were matched to the nearest position timestamp; no communication links were inferred. |
+

@@ -1,0 +1,4 @@
+trial,duration_s,assignment_states_retained,primary_ch,primary_retention_percent,canonical_primary_transitions,initial_backup,backup_identifiers_observed,canonical_backup_transitions,mean_rssi_dbm,mean_snr_db,mean_obstacle_loss_db
+Trial 1,69.842,35,UAV3,100.0,0,UAV1,UAV1;UAV2,2,-58.770,35.230,2.072
+Trial 2,69.800,35,UAV3,100.0,0,UAV1,UAV1;UAV2,4,-59.516,34.484,1.854
+Trial 3,69.781,35,UAV1,100.0,0,UAV2,UAV2;UAV3,3,-62.373,31.627,2.705
