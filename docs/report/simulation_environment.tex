@@ -1,0 +1,287 @@
+% =====================================================================
+%  Construction of the Simulation Environment
+%  A SECTION of the FYP report. Include from the parent chapter with:
+%      \input{simulation_environment}
+%
+%  SCOPE. This describes the georeferenced campus world built for the
+%  project. It is JOINT work: the terrain is the author's contribution,
+%  the building models and the GPS integration are a project partner's.
+%  Attribution is stated explicitly in the opening and must not be
+%  removed -- see also the note in Section \ref{sec:world-scope} about
+%  which world the HITL measurements were actually taken in.
+%
+%  REQUIRED PACKAGES
+%      \usepackage{booktabs}
+%      \usepackage{graphicx}
+%      \graphicspath{{figures/}}
+%
+%  IMAGES EXPECTED in docs/report/figures/
+%      world_rendered.png       (see checklist at end)
+%      terrain_wireframe.png    (optional but recommended)
+% =====================================================================
+
+\section{Construction of the Simulation Environment}
+\label{sec:world}
+
+A georeferenced three-dimensional model of the Faculty of Engineering,
+University of Ruhuna, at Hapugala, Galle, was built as the environment for
+UAV simulation work. A synthetic environment would not have been adequate:
+the aircraft's GPS positions, the height of the camera above the ground
+beneath it, and the obstruction of radio paths by buildings all depend on the
+site being real and correctly scaled.
+
+The environment is joint work within the project. The terrain surface ---
+elevation data acquisition, mesh generation and satellite texturing --- is
+the present author's contribution and is described in
+Section~\ref{sec:world-terrain}. The building models and the georeferenced
+integration of buildings with terrain were carried out by a project partner
+and are summarised in Sections~\ref{sec:world-buildings}
+and~\ref{sec:world-integration} for completeness, since the environment
+cannot be described coherently without them.
+
+Every tool used is free and open source, which was a deliberate constraint:
+the workflow can be reproduced for any site without licensed software.
+
+\begin{table}[htbp]
+\centering
+\caption{Software used to construct the environment.}
+\label{tab:world-tools}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Tool & Version & Role \\
+\midrule
+QGIS            & 3.22.4   & Footprint tracing, DEM clipping, imagery export \\
+GDAL            & 3.4.1    & DEM reprojection and elevation sampling \\
+Blender         & 5.1.1    & Mesh construction and alignment \\
+BlenderGIS      & 2.2.14   & SRTM import and terrain mesh generation \\
+Gazebo Classic  & 11.10.2  & Simulation environment \\
+Python          & 3.10     & Coordinate conversion and validation \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---------------------------------------------------------------------
+\subsection{Site and georeferencing}
+\label{sec:world-site}
+
+The world origin is placed at the front entrance of the Administration
+Building, at $6.0792673^{\circ}$\,N, $80.1921607^{\circ}$\,E, approximately
+$31$\,m above sea level. The surface model is \texttt{EARTH\_WGS84}, and
+metre-accurate processing was carried out in UTM Zone~44N (EPSG:32644).
+
+Anchoring the world in this way means a position in the simulation
+corresponds to a position on the real campus. For a survey aircraft this is
+not a convenience but a requirement: waypoints are given as GPS coordinates,
+and the autopilot's own position estimate is a GPS solution, so a world whose
+origin is arbitrary cannot be flown with real mission data.
+
+\begin{table}[htbp]
+\centering
+\caption{Environmental parameters, set for Galle rather than left at default.}
+\label{tab:world-params}
+\begin{tabular}{@{}llp{58mm}@{}}
+\toprule
+Parameter & Value & Why it is set this way \\
+\midrule
+Gravity
+  & $-9.7804$\,m\,s$^{-2}$
+  & Local value; the $-9.80$ default overstates weight near the equator \\[3pt]
+Magnetic field (WMM2025)
+  & $(6.0,\ 23.0,\ -38.0)\ \mu$T
+  & The autopilot derives heading from the magnetometer; a wrong field
+    produces a persistent heading bias \\[3pt]
+Temperature
+  & $301$\,K ($28^{\circ}$C)
+  & Tropical, sets air density and therefore rotor thrust \\[3pt]
+Pressure
+  & $101{,}000$\,Pa
+  & At the $31$\,m datum \\[3pt]
+Lapse rate
+  & $-0.0065$\,K\,m$^{-1}$
+  & Density falls with altitude as the aircraft climbs \\[3pt]
+Wind
+  & $0$ (baseline)
+  & Zero for repeatable measurement; the south-west monsoon condition
+    is available as a separate case \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Wind is held at zero for the measurements reported in this work. A moving
+air mass makes each flight follow a slightly different path, and the
+experiment compares detection performance between configurations rather than
+robustness to disturbance, so a still atmosphere removes a source of
+run-to-run variation. A south-west monsoon case, appropriate to Galle between
+May and September, is configured separately for later use.
+
+% ---------------------------------------------------------------------
+\subsection{Terrain}
+\label{sec:world-terrain}
+
+Elevation data was taken from the Shuttle Radar Topography Mission, the
+NASA-led survey that produced near-global digital elevation models at
+$30$\,m horizontal resolution. SRTM was chosen over the alternatives ---
+Copernicus Open Access Hub and USGS Earth Explorer among them --- because it
+gives complete coverage of the area with no missing tiles. Cloud cover is
+the usual reason such datasets have gaps, since the sensors cannot measure
+terrain through it, and a dataset must be inspected for missing data before
+it is used rather than after.
+
+The DEM was clipped in QGIS from an $8 \times 8$\,km tile to the campus
+extent and reprojected from EPSG:4326 to EPSG:32644 so that subsequent
+processing was in metres rather than degrees. Elevation across the clipped
+area ranges from $6$\,m to $52$\,m above sea level.
+
+The clipped DEM was imported into Blender through the BlenderGIS add-on,
+which reads elevation products directly and generates a triangulated surface
+from them. The delivered mesh is a regular $65 \times 65$ grid of $4{,}225$
+vertices covering $382$\,m east--west by $535$\,m north--south, with
+$42.7$\,m of relief across it.
+
+Two properties of this surface deserve comment.
+
+\paragraph{Resolution.}
+The grid spacing of roughly $6$\,m is finer than SRTM's native $30$\,m
+because BlenderGIS resamples the elevation product onto its own grid. The
+mesh is therefore smoother than the source data, not more accurate than it:
+SRTM's specified vertical accuracy is $\pm 16$\,m, and no processing step
+improves on that. What the terrain represents faithfully is the \emph{shape}
+of the site --- where the ground rises and falls --- rather than absolute
+height at any single point. That is what the experiment requires, since the
+aircraft flies at a commanded height above its launch point and it is the
+variation in ground clearance across a patrol that changes the apparent size
+of a person in the image.
+
+\paragraph{Export format.}
+The terrain was exported in COLLADA rather than STL. The distinction
+resolves two difficulties that arise with STL in this workflow. First, STL
+carries no unit declaration, so a mesh must be rescaled by hand after import
+and an error there propagates into every distance the simulation reports;
+the COLLADA file declares \texttt{<unit name="meter" meter="1"/>} with a
+$Z$-up axis, so Gazebo reads it at true scale unmodified. Second, STL stores
+only geometry and has no texture coordinates, so an STL terrain cannot carry
+aerial imagery and renders as a bare surface. COLLADA stores per-vertex
+texture coordinates alongside the geometry, which is what allows the imagery
+described next to be applied at all.
+
+\paragraph{Imagery.}
+Aerial imagery was exported from Google Satellite through QGIS XYZ tile
+layers in Web Mercator projection, at $1792 \times 1280$ pixels, and applied
+to the terrain as a texture. A cloud-free export was selected: cloud in the
+imagery would appear as permanent white patches on the ground and would be a
+standing source of false detections. Beyond appearance, the texture supplies
+the visual clutter of vegetation, paths and roofs against which the detector
+must distinguish a person --- a uniformly coloured surface would make the
+detection task easier than it is in reality, and any recall figure measured
+against it would be optimistic.
+
+The imagery was initially referenced in GeoTIFF form, as exported. That file
+carries EXIF metadata which Gazebo's image library does not recognise,
+producing roughly thirty diagnostic messages on every load; the same image in
+PNG at identical resolution was substituted, removing them at no cost in
+quality. The messages were harmless, but indistinguishable at a glance from
+a genuine loading failure.
+
+% ---------------------------------------------------------------------
+\subsection{Structures}
+\label{sec:world-buildings}
+
+\emph{The work described in this subsection and the next was carried out by a
+project partner. It is included because the environment cannot be described
+without it.}
+
+Seventeen building footprints were traced manually in QGIS over a Google
+Satellite tile layer, each carrying attributes for name, height, floor count
+and roof type, and exported as GeoJSON in WGS84. The footprints were imported
+into Blender, extruded to height, and given terracotta hip roofs modelled
+individually.
+
+Manual tracing was necessary because building outlines for this campus are
+not available at usable quality in open mapping databases. The cost of that
+choice is that footprint accuracy is limited by how precisely a polygon can
+be placed over satellite imagery by hand, which is one of the two
+contributions to the position error reported below.
+
+% ---------------------------------------------------------------------
+\subsection{Integration and positional accuracy}
+\label{sec:world-integration}
+
+Terrain and buildings were produced independently and against different
+origins --- the terrain against $6.07778^{\circ}$\,N,
+$80.20722^{\circ}$\,E and the buildings against the Administration Building
+entrance --- so an offset of $1666.281$\,m east and $-166.891$\,m north was
+computed and applied to bring them into one coordinate system. Each building
+was then adjusted vertically to sit on the terrain slope beneath it, and the
+combined scene exported as a single mesh. The model is placed at
+$z = -31.412$\,m so that the terrain surface coincides with the simulator's
+$z = 0$ plane.
+
+A $2000 \times 2000$\,m invisible collision plane is placed at that same
+level. Without it, an aircraft leaving the $382 \times 535$\,m modelled area
+would encounter no ground at all and fall indefinitely, ending the run.
+
+Positional accuracy was checked against two references. Against the source
+GeoJSON footprints, agreement was below $0.01$\,m, confirming that the
+coordinate transformation itself is correct. Against building centroids
+picked independently from Google Maps, the mean error over sixteen structures
+was $5.64$\,m, with a maximum of $10.59$\,m and a minimum of $0.38$\,m.
+
+The second figure is the meaningful one, and it is consistent with what the
+inputs allow: SRTM's $30$\,m cells and the precision of manual tracing
+together account for errors of this order. For context, consumer GPS
+receivers of the kind carried by small UAVs achieve $2$--$5$\,m in practice,
+so the discrepancy between the modelled campus and the real one is of the
+same order as the uncertainty a real aircraft would have in its own position.
+
+% ---------------------------------------------------------------------
+\subsection{Relationship to the experiments reported in this work}
+\label{sec:world-scope}
+
+The campus environment described above is a contribution in its own right and
+is intended for mission-level UAV work at this site. The hardware-in-the-loop
+measurements reported in Section~\ref{sec:hitl} were \emph{not} taken in it.
+They were taken in a separate world, which was already validated against the
+network-namespace and lockstep configuration those experiments depend on, and
+which contains five human models at fixed coordinates that make detection
+recall a counted quantity.
+
+The two are kept distinct deliberately. Changing the world and the network
+architecture at the same time would have made any change in the results
+impossible to attribute. Running the hardware-in-the-loop experiments in the
+campus environment is the natural next step, and requires only that the
+autopilot's flight-dynamics plugin be added to that world.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.9\textwidth]{world_rendered.png}
+\caption{The campus environment in Gazebo. Google Satellite imagery is
+applied to an SRTM-derived terrain mesh, with individually modelled buildings
+placed on it. Terrain and structures both carry collision geometry generated
+from the meshes used for rendering, so the surface an aircraft can strike is
+the surface its camera sees.}
+\label{fig:world-rendered}
+\end{figure}
+
+% =====================================================================
+%  IMAGE CHECKLIST -- save into docs/report/figures/
+%
+%  world_rendered.png   (required)
+%      Gazebo client view of the campus. Two things to fix relative to the
+%      screenshot taken so far:
+%        1. Pull the camera back and up. The current shot is close in on a
+%           single roof; a wider view showing several buildings and the
+%           terrain relief demonstrates far more.
+%        2. Crop out the left World/Insert/Layers panel and the bottom
+%           status bar. Keep only the 3D viewport.
+%
+%  terrain_wireframe.png   (optional, recommended)
+%      View > Wireframe in Gazebo, camera angled low across the terrain.
+%      This makes the 65x65 grid and the relief visible at once, and is the
+%      only image that proves the terrain is a height map rather than a
+%      textured plane -- the claim in this section a reader is most likely
+%      to doubt.
+%
+%  NOT recommended as a figure: the GPS validation table. It is a partner's
+%  result; cite the summary figures in prose as done above rather than
+%  reproducing the full table under your own name.
+% =====================================================================

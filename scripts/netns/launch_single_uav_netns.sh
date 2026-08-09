@@ -65,8 +65,23 @@ done
 for br in br-gcs br-uav1 br-uav2; do
     sudo ip link del "$br" type bridge 2>/dev/null || true
 done
+# NOTE: eth-cam is deliberately NOT in this list.
+#
+# The camera VLAN is the drone's internal sensor cable. On a real airframe it
+# is present whenever the aircraft is powered, and it has nothing to do with
+# the radio. Deleting it here tied it to the simulator's lifetime, so between
+# runs the host answered untagged while the Pi kept sending VLAN-10 frames.
+# The result was 100% loss with the carrier up, and no route to the Pi at all
+# — not even SSH. It cost several sessions before the cause was identified.
+#
+# eth-cam is therefore owned by NetworkManager and persists across runs and
+# reboots. STEP 1c below still creates it if it is missing, so a machine that
+# has not been configured yet keeps working.
+#
+# eth-rf stays here: it is a pure L2 leg into br-uav2, which is torn down with
+# ns-3 every run, so it has nothing to persist for.
 for link in tap-gcs tap-uav1 tap-uav2 tap-uav3 veth0h veth1h sim1h \
-            eth-cam eth-rf; do
+            eth-rf; do
     sudo ip link del "$link" 2>/dev/null || true
 done
 sleep 2
@@ -135,6 +150,21 @@ if [[ -n "$PI_LINK_IF" ]] && [[ -d "/sys/class/net/$PI_LINK_IF" ]]; then
 
     # The camera address must live on the VLAN, not the parent: anything left
     # on the untagged parent would not reach the Pi's tagged sub-interface.
+    #
+    # Preferably eth-cam already exists, created by NetworkManager, so that the
+    # sensor link is up from boot and independent of this script. Every command
+    # here is idempotent, so it is a no-op in that case and still does the right
+    # thing on a machine that has not been configured yet.
+    if ip link show "$CAM_VLAN_IF" >/dev/null 2>&1; then
+        echo "  $CAM_VLAN_IF already present (persistent) — left alone"
+    else
+        echo "  $CAM_VLAN_IF missing — creating it for this run only."
+        echo "  To make it permanent so the sensor link survives reboots:"
+        echo "    sudo nmcli connection modify '<wired-profile>' ipv4.method disabled"
+        echo "    sudo nmcli connection add type vlan con-name $CAM_VLAN_IF \\"
+        echo "         ifname $CAM_VLAN_IF dev $PI_LINK_IF id $CAM_VLAN ip4 $CAM_HOST_IP/24"
+        echo "    sudo nmcli connection modify $CAM_VLAN_IF ipv4.never-default yes"
+    fi
     sudo ip addr del "$CAM_HOST_IP/24" dev "$PI_LINK_IF" 2>/dev/null || true
     sudo ip link add link "$PI_LINK_IF" name "$CAM_VLAN_IF" type vlan id "$CAM_VLAN" 2>/dev/null || true
     sudo ip addr add "$CAM_HOST_IP/24" dev "$CAM_VLAN_IF" 2>/dev/null || true
@@ -418,8 +448,11 @@ cleanup() {
     sudo ip link del br-gcs type bridge 2>/dev/null || true
     sudo ip link del br-uav1 type bridge 2>/dev/null || true
     sudo ip link del br-uav2 type bridge 2>/dev/null || true
+    # eth-cam is left up on purpose — see the note in STEP 0. It is the sensor
+    # cable, not part of the simulation, and tearing it down here is what left
+    # the Pi unreachable between runs.
     for l in tap-gcs tap-uav1 tap-uav2 tap-uav3 veth0h veth1h sim1h \
-             eth-cam eth-rf; do
+             eth-rf; do
         sudo ip link del "$l" 2>/dev/null || true
     done
     exit

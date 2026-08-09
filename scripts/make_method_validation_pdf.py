@@ -159,11 +159,13 @@ A(para("The ns-3 documentation records a real limitation of real-time mode:", "b
 E(quote("ns-3's real-time mode cannot cope with large and complex networks, and "
         "its accuracy decreases with higher traffic volumes or particularly "
         "bursty traffic", "Performance Evaluation of ns-3 Real-Time Emulation [6]"))
-A(para("The camera stream is 481 Mbps. Had it crossed ns-3, the experiment would "
-       "have been operating well outside the regime in which the emulator is "
-       "accurate, and the channel model itself would have become a source of "
-       "error. By keeping imagery off ns-3 and passing only 118-byte messages "
-       "through it, the testbed stays inside the accurate operating region.", "body"))
+A(para("The camera stream is 110 Mbps at the delivered 5 Hz, and 481 Mbps at the "
+       "20 Hz the sensor originally ran at. Either figure is far outside the "
+       "regime in which ns-3 real-time emulation stays accurate. Had imagery "
+       "crossed the emulated channel, the channel model itself would have become "
+       "a source of error. Passing only 118-byte messages through it — a "
+       "reduction of roughly 23,000x per frame — keeps the testbed inside the "
+       "accurate operating region.", "body"))
 E(callout("<b>The two-link split is not only physically faithful — it is "
           "required for the emulation to be trustworthy.</b> This is a stronger "
           "argument than the physical one alone, and it is citable."))
@@ -176,15 +178,62 @@ E(quote("the RPI5 failed to satisfy the real-time processing needs in spite of "
 E(quote("On Raspberry Pi 5, CPU-only execution of large models is impractical "
         "due to multi-second per-frame latency",
         "YOLOv8 / RT-DETR energy efficiency on edge devices [8]"))
-A(para("The figures measured here — 2,540 ms with PyTorch and approximately "
-       "1,000 ms with NCNN, on a Pi 4B, which is slower than the Pi 5 used in "
-       "both studies — sit exactly where that literature predicts. The results "
-       "are therefore consistent with independent work rather than anomalous, "
-       "and the report can say so.", "body"))
+A(para("The figures measured here sit exactly where that literature predicts: "
+       "2,540 ms with PyTorch at 960x544, approximately 1,015 ms in the live "
+       "pipeline at 640, and approximately 1,000 ms with NCNN at 960x544 — all "
+       "on a Pi 4B, which is slower than the Pi 5 used in both studies. The "
+       "results are therefore consistent with independent work rather than "
+       "anomalous, and the report can say so.", "body"))
+A(para("Detection quality is separately validated against a known ground truth "
+       "of five human models at fixed world coordinates: 1 to 4 detected per "
+       "frame at confidences of 0.42 to 0.59, with the shortfall attributable "
+       "to mutual occlusion at approximately one metre spacing rather than to "
+       "detector deficiency. Because the subject count is known exactly, recall "
+       "is counted rather than estimated, and any count above five would be a "
+       "false positive without adjudicating individual boxes.", "body"))
 A(para("The same body of work also characterises the offloading side, reporting "
        "end-to-end latency rising from 0.123 s to 2.317 s as available bandwidth "
        "falls from 1 Mbps to 50 Kbps [9] — the curve the ground arm of this "
        "experiment will trace.", "body"))
+
+# ── instrumentation ──
+A(para("Instrumentation and measurement validity", "h1"))
+A(para("A co-simulation testbed of this kind fails quietly. The measurements "
+       "below are reported with the checks that establish they mean what they "
+       "are claimed to mean, because in this system a fault at a low layer does "
+       "not raise an error at the layer above — it produces plausible and wrong "
+       "behaviour there.", "body"))
+E(table([
+    ["Check", "Why it is necessary", "Observed"],
+    ["Measure rate at the source as well as the destination",
+     "Distinguishes a slow producer from a lossy transport in one step",
+     "Host 5.00 Hz while the edge node saw 0.19 Hz — localised the fault to "
+     "transport immediately"],
+    ["Verify socket buffers in BOTH directions",
+     "A clamped send buffer discards fragments before the NIC; no interface "
+     "counter records it",
+     "wmem_max left at 208 kB silently capped a 16 MB DDS send buffer; "
+     "tx_dropped and rx_errors were 0 throughout"],
+    ["Confirm the simulation clock is advancing",
+     "Lockstep physics means a stalled autopilot freezes time, and every "
+     "derived rate becomes meaningless while staying plausible",
+     "Real-time factor 0.998, so rates are trustworthy"],
+    ["Time inference around the model call alone",
+     "Excludes queuing, so a slowdown is attributable to CPU contention rather "
+     "than to waiting",
+     "623 ms standalone against the in-pipeline figure"],
+    ["Confirm detections visually before accepting counts",
+     "A detector boxing ground texture satisfies every numerical check",
+     "An earlier configuration reported 16 confident detections against 5 "
+     "subjects, none correct"],
+], [40 * mm, 60 * mm, 65 * mm]))
+E(callout("<b>The send-buffer fault is the clearest instance.</b> Its visible "
+          "symptoms were that the detector found no humans in 93 of 94 frames "
+          "and that the patrol mission timed out at every waypoint — both of "
+          "which invite a detector or flight-control explanation, and neither "
+          "of which was the cause. The aircraft flew correctly and the detector "
+          "functioned correctly; the scene was simply being observed through "
+          "roughly one frame every five seconds."))
 
 # ── optimisation ──
 A(para("Optimisation options", "h1"))
