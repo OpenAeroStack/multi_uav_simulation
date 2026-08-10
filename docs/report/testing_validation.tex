@@ -68,36 +68,51 @@ simulated wireless channel while camera imagery does not. Two paths that
 both work are not evidence of this; they must also be shown to differ in the
 intended way, and imagery must be shown to be absent from the radio path.
 
-Table~\ref{tab:test-links} reports thirty ICMP samples on each path. Thirty
-rather than two: the first packet on the radio path includes address
-resolution across the simulated channel, and a two-sample measurement of the
-same configuration returned a mean of $167$\,ms against $59$\,ms for thirty.
-The short sample is biased, not merely noisy.
+Table~\ref{tab:test-links} reports sixty ICMP samples on the sensor path and
+thirty on the radio path. Large samples are necessary: the first packet on the
+radio path includes address resolution across the simulated channel, and a
+two-sample measurement of the same configuration returned a mean of
+$167$\,ms against $74.5$\,ms for thirty. The short sample is biased, not
+merely noisy.
 
 \begin{table}[htbp]
 \centering
-\caption{Measured characteristics of the two paths, thirty samples each,
-zero packet loss on both.}
+\caption{Measured characteristics of the two paths. Sensor path over sixty
+samples, radio path over thirty; zero packet loss on both.}
 \label{tab:test-links}
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
 Path & Min (ms) & Mean (ms) & Max (ms) & Jitter (ms) \\
 \midrule
-Sensor, VLAN 10 (wired)   & 0.4  & 1.5  & 2.7   & 0.4  \\
-Radio, VLAN 42 (via ns-3) & 11.7 & 77.4 & 242.6 & 54.8 \\
+Sensor, VLAN 10 (wired)   & 1.0  & 1.4  & 1.8   & 0.12 \\
+Radio, VLAN 42 (via ns-3) & 10.1 & 74.5 & 158.0 & 38.4 \\
 \midrule
-Ratio                     & --   & $53\times$ & -- & $140\times$ \\
+Ratio                     & --   & $53\times$ & -- & $320\times$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The radio path is approximately \(53\times\) slower on average and varies
-approximately \(140\times\) more. Its internal spread is itself informative:
-a minimum of \(11.7\)\,ms against a mean of \(77.4\)\,ms is a range of some
-\(6.6\times\) on one link, where a channel applying a fixed delay would
-produce a narrow distribution. The variation indicates that ns-3 is
-modelling contention, in which packets queue and back off, rather than
-adding a constant offset.
+The radio path is approximately \(53\times\) slower on average, and its
+variation is larger by more than two orders of magnitude.
+
+Its internal spread is itself informative: a minimum of \(10.1\)\,ms against
+a mean of \(74.5\)\,ms is a range of some \(7\times\) on one link, where a
+channel applying a fixed delay would produce a narrow distribution. The
+variation indicates that ns-3 is modelling contention, in which packets queue
+and back off, rather than adding a constant offset.
+
+The radio measurement was repeated. An independent set of thirty samples taken
+several hours earlier, with the host reconfigured in between, gave a mean of
+\(77.4\)\,ms against the \(74.5\)\,ms reported here, agreeing within
+\(4\%\).
+
+The sensor figures were taken \emph{while} the camera was streaming at
+\(110\)\,Mbps. An idle-cable measurement over the same number of samples
+gives the same mean, so the two logical links sharing one physical cable do
+not delay one another. Queue management was verified rather than assumed:
+both machines run \texttt{fq\_codel} with a \(5\)\,ms target, and byte
+queue limits on the edge node had reduced its driver ring to approximately one
+packet.
 
 Absence of imagery on the radio path was established negatively, by
 observation rather than by inspecting a rule set, since separation here is
@@ -169,12 +184,15 @@ adjudicate individual boxes; none was observed in this configuration.
 Inference duration was measured around the model invocation alone, excluding
 message reception, format conversion and publication, so that the figure
 remains comparable between back-ends and against standalone execution. Over
-the frames visible in Figure~\ref{fig:test-detection} it was tightly
-distributed at approximately \(1{,}015\)\,ms, ranging \(1{,}001\)
---\(1{,}070\)\,ms with a single outlier at \(2{,}043\)\,ms. The Pi therefore
-completes rather less than one detection per second against a camera
-delivering five frames per second, and discards approximately \(80\%\) of
-what it receives --- which is why the camera subscription uses
+\(480\) consecutive frames of one patrol flight the mean was
+\(1{,}093\)\,ms, with a minimum of \(1{,}025\)\,ms. The distribution is tight
+apart from a single outlier at \(6{,}949\)\,ms, one frame in \(480\),
+attributable to contention for the processor from another task rather than to
+the model itself.
+
+The Pi therefore completes rather less than one detection per second against a
+camera delivering five frames per second, and discards approximately \(80\%\)
+of what it receives --- which is why the camera subscription uses
 \texttt{BEST\_EFFORT} with queue depth one, keeping the newest frame rather
 than accumulating a backlog of stale ones.
 

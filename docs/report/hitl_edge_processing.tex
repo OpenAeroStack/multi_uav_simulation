@@ -200,33 +200,61 @@ configuration returned a mean of \(167\)\,ms against \(59\)\,ms for thirty.
 
 \begin{table}[htbp]
 \centering
-\caption{Measured characteristics of the two links, thirty samples each.}
+\caption{Measured characteristics of the two links. Sensor path over sixty
+ICMP samples, radio path over thirty; zero packet loss on both.}
 \label{tab:hitl-links}
 \begin{tabular}{lrrrr}
 \toprule
 Path & Min (ms) & Mean (ms) & Max (ms) & Jitter (ms) \\
 \midrule
-Sensor, VLAN 10 (wired)   & 0.4  & 1.5  & 2.7   & 0.4  \\
-Radio, VLAN 42 (via ns-3) & 11.7 & 77.4 & 242.6 & 54.8 \\
+Sensor, VLAN 10 (wired)   & 1.0  & 1.4  & 1.8   & 0.12 \\
+Radio, VLAN 42 (via ns-3) & 10.1 & 74.5 & 158.0 & 38.4 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 Packet loss was zero on both paths, the aircraft remaining close to the ground
 station throughout. The radio path is approximately \(53\times\) slower than the
-wired path on average and varies approximately \(140\times\) more.
+wired path on average, and its variation is larger by more than two orders of
+magnitude.
+
+The radio measurement was repeated: an independent set of thirty samples taken
+several hours earlier, with the host reconfigured in between, gave a mean of
+\(77.4\)\,ms against the \(74.5\)\,ms reported here --- agreement within
+\(4\%\). The maximum differed considerably more, \(242.6\)\,ms against
+\(158.0\)\,ms, which is expected of a single worst-case packet and is the
+reason the mean and jitter are the figures relied upon.
 
 The distribution within the radio path is itself informative. Its minimum of
-\(11.7\)\,ms against a mean of \(77.4\)\,ms is a spread of some \(6.6\times\) on
+\(10.1\)\,ms against a mean of \(74.5\)\,ms is a spread of some \(7\times\) on
 one link, where a channel applying a fixed delay would produce a narrow one.
 The variation indicates that ns-3 is modelling contention, in which packets
 queue and back off before transmission, rather than simply adding a constant
 offset to each packet.
 
 \paragraph{Sensor transport.}
-With the camera at \(20\)\,Hz the wired path carried \(481\)\,Mbps at
-\(42{,}544\) packets per second with zero dropped packets, occupying
-approximately \(58\%\) of measured link capacity.
+At \(5\)\,Hz the wired path carries \(110\)\,Mbps, approximately \(11\%\) of
+the \(1000\)\,Mb/s negotiated link. Frames are delivered at \(5.000\)\,Hz with
+an inter-arrival standard deviation of \(4.5\)\,ms, matching the source rate
+exactly, with zero dropped packets. An earlier configuration at \(20\)\,Hz
+carried \(481\)\,Mbps at \(42{,}544\) packets per second, also without loss.
+
+\paragraph{The shared cable does not distort the measurements.}
+Both logical links share one physical cable, separated only by VLAN tags, so
+it is reasonable to ask whether the sensor stream delays the traffic measured
+alongside it. It does not. The sensor-path figures in
+Table~\ref{tab:hitl-links} were taken \emph{while} the camera was streaming;
+an idle-cable measurement over the same number of samples gives a mean of
+\(1.4\)\,ms, unchanged. Jitter under load is in fact lower than at idle, a
+continuously active interface avoiding the wake-up latency of idle power
+states.
+
+Two mechanisms account for this. The two flows travel in opposite directions
+on a full-duplex link, and the sensor stream occupies only \(11\%\) of
+capacity, so no standing queue can form. Queue management was verified rather
+than assumed: both machines run \texttt{fq\_codel} with a \(5\)\,ms target,
+and byte queue limits on the edge node had reduced its driver ring to
+approximately one packet.
 
 \paragraph{Inference latency.}
 Table~\ref{tab:hitl-inference} reports latency for each combination of back-end
@@ -272,23 +300,38 @@ crossing the radio.
 
 The two workloads on the edge node proved not to be independent. The same model,
 on the same input, required \(623\)\,ms executed on a static image but
-\(1{,}343\)\,ms within the live pipeline: a difference of \(720\)\,ms, or
-approximately half the available inference throughput.
+\(1{,}093\)\,ms within the live pipeline, averaged over \(480\) consecutive
+frames of a patrol flight: a difference of approximately \(470\)\,ms, or some
+\(43\%\) of the time the detector spends on each frame.
 
-The edge node received frames at \(19.8\)\,Hz while completing inference at
-approximately \(0.74\)\,Hz, discarding roughly \(96\%\) of what it received.
-Discarded frames are not free: each requires reassembly of some \(2{,}150\) UDP
+The edge node receives frames at \(5\)\,Hz while completing inference at
+approximately \(0.9\)\,Hz, discarding roughly \(80\%\) of what it receives.
+Discarded frames are not free: each requires reassembly of some \(1{,}900\) UDP
 fragments, deserialisation of \(2.76\)\,MB and a further \(2.76\)\,MB
 colour-space conversion, all competing with inference for the same four
 processor cores.
 
+The mechanism is processor contention rather than queueing delay. Two
+observations separate them. Inference is timed around the model invocation
+alone, excluding message reception and format conversion, so the additional
+time is spent inside the model call rather than waiting ahead of it. And the
+network itself is demonstrably not congested: latency on the sensor link is
+unchanged between an idle cable and one carrying the full \(110\)\,Mbps
+stream, as reported in Section~\ref{sec:hitl-results}.
+
 Reducing the camera rate at source from \(20\)\,Hz to \(5\)\,Hz --- still
-approximately seven times the rate the detector can consume --- reduced inference
-latency to approximately \(1{,}000\)\,ms, recovering about a quarter of the
-deficit, and reduced link occupancy from \(481\)\,Mbps to \(111\)\,Mbps. The
+several times the rate the detector can consume --- reduced link occupancy from
+\(481\)\,Mbps to \(110\)\,Mbps and inference latency correspondingly. The
 application-level frame-rate control provided by the relay node cannot achieve
 this, as it discards frames after reception, by which point the transport and
 deserialisation cost has already been incurred.
+
+An earlier configuration in which the edge node also published a
+\(2.76\)\,MB annotated image on every detection measured \(1{,}343\)\,ms. That
+return stream was removed: it doubled the traffic on a link intended to carry
+sensor data in one direction only, and it is not part of the architecture under
+test. The figures above are for the delivered configuration, in which the edge
+node emits detection results and nothing else.
 
 This interaction is not observable in pure simulation, where sensor data is
 delivered through shared memory at negligible cost, nor in an isolated benchmark
