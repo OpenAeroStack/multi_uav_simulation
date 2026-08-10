@@ -1,7 +1,7 @@
 # HITL Integration Plan — Raspberry Pi 4B edge node ↔ SITL host
 
 **Author:** anton · **Branch:** `ground-vs-edge-processing-RPi` (sub-branch of
-`ground-vs-edge-processing`) · **Last updated:** 2026-08-07
+`ground-vs-edge-processing`) · **Last updated:** 2026-08-10
 
 > **Board correction (2026-07-28):** the edge node is a **Raspberry Pi 4B**, not a Pi 5.
 > Earlier revisions of this document said "Pi 5" throughout and that was wrong. The
@@ -95,34 +95,38 @@ node 1 = SITL in `uav1ns`, node 2 = the Pi (`10.42.0.12`). `tap-uav2` was previo
 unused stub and is now bridged to the Pi's VLAN 42 leg, matching the original plan's intent
 that the Pi replaces `uav2ns`. `uav1ns` keeps `10.42.0.11` for SITL, unchanged.
 
-**Verified by measurement**, from the Pi (30 pings each):
+**Verified by measurement**, from the Pi:
 
 | Link | Path | Latency |
 |---|---|---|
-| `10.0.0.1` | VLAN 10, direct cable | min 0.4 / avg **1.5** / max 2.7 ms, jitter 0.4 ms, 0% loss |
-| `10.42.0.10` | VLAN 42 → ns-3 → gcsns | min 11.7 / avg **77.4** / max 242.6 ms, jitter 54.8 ms, 0% loss |
+| `10.0.0.1` | VLAN 10, direct cable | min 1.0 / avg **1.4** / max 1.8 ms, jitter 0.12 ms, 0% loss (60 pings) |
+| `10.42.0.10` | VLAN 42 → ns-3 → gcsns | min 10.1 / avg **74.5** / max 158.0 ms, jitter 38.4 ms, 0% loss (30 pings) |
 
-**~53× the latency and ~140× the jitter.** The 6.6× spread *within* the radio path
-(11.7 ms minimum against a 77.4 ms mean) shows ns-3 is not applying a fixed delay: it is a
-contended CSMA/CA channel where packets queue and back off. Use ≥30 pings — the first packet
-includes ARP across the simulated channel and skews short samples badly (a 2-ping sample
-reported a misleading 167 ms average).
+**~53× the latency**, and jitter larger by more than two orders of magnitude. The ~7× spread
+*within* the radio path (10.1 ms minimum against a 74.5 ms mean) shows ns-3 is not applying a
+fixed delay: it is a contended CSMA/CA channel where packets queue and back off. Use ≥30
+pings — the first packet includes ARP across the simulated channel and skews short samples
+badly (a 2-ping sample reported a misleading 167 ms average). The radio figure repeats: an
+independent run gave 77.4 ms, within 4%.
 
-Run these **after** the host stack reports `PIPELINE READY`, in this order. The host's VLANs
-are created by STEP 1c and deleted at teardown; the Pi's are created by `pi_hitl_link.sh` and
-persist until reboot. If the Pi is tagged while the host is not, both pings fail 100% with
-the carrier up.
+**The sensor figures were taken while the camera was streaming.** Both logical links share
+one cable, so this had to be checked rather than assumed. Latency under the full 110 Mbps
+load is the same as on an idle cable, and jitter is in fact lower — a continuously active
+interface avoids idle-state wake-up delay. `fq_codel` is active on both machines with a
+5 ms target, and byte queue limits had reduced the Pi's driver ring to about one packet.
+
+**Bring-up order.** `eth-cam` is persistent (NetworkManager on the host, netplan on the Pi),
+so the camera link is up from boot and does not depend on the simulator. `eth-rf`,
+`br-uav2` and the taps are created by the launch script and torn down with it, which is
+correct: without ns-3 there is no radio.
 
 ```bash
-# 1. HOST first — creates eth-cam / eth-rf / br-uav2
-./scripts/netns/run_hitl.sh --no-pi
+# Camera link works with nothing running:
+ping -c 3 10.0.0.2        # from the host
 
-# 2. PI second
-sudo bash ~/pi_hitl_link.sh
-
-# 3. PI — verify. Both must reply, and the second must be much slower.
-ping -c 30 10.0.0.1   | tail -2
-ping -c 30 10.42.0.10 | tail -2
+# Radio link needs the stack:
+./scripts/netns/run_hitl.sh --no-pi     # wait for PIPELINE READY
+ping -c 30 10.42.0.10 | tail -2         # from the Pi
 ```
 
 ## 4. Phase status
@@ -137,7 +141,9 @@ ping -c 30 10.42.0.10 | tail -2
 | — | Pi↔host link bandwidth | ✅ RESOLVED 2026-07-30 (935 Mbps) |
 | **4** | **Camera over the wired sensor link, detector on the Pi** | ✅ **DONE 2026-08-05** |
 | **5** | **Detections across the ns-3 impaired link** | ✅ **networking DONE 2026-08-05** |
-| 6 | Run the edge-vs-ground HITL comparison | ⬜ **NEXT** — blocked on clock sync |
+| — | Clock sync between the machines | ✅ RESOLVED 2026-08-10 (60 us) |
+| — | Persistent addressing, both machines | ✅ RESOLVED 2026-08-10 |
+| 6 | Run the edge-vs-ground HITL comparison | ⬜ **NEXT** — ground arm never run |
 
 ---
 
@@ -247,8 +253,8 @@ Three changes made it work:
 1. **`launch_single_uav_netns.sh` STEP 1c** — creates `br-uav2`, splits the Pi-facing NIC
    into VLAN 10 (`eth-cam`, carries `10.0.0.1`) and VLAN 42 (`eth-rf`, no IP, bridged to
    `tap-uav2`). Auto-skips when no Pi NIC is present, so host-only runs are unaffected.
-2. **`scripts/netns/pi_hitl_link.sh`** — run with sudo on the Pi; creates `eth0.10`
-   (`10.0.0.2`) and `eth0.42` (`10.42.0.12`).
+2. **`/etc/netplan/60-hitl-vlans.yaml` on the Pi** — creates `eth0.10` (`10.0.0.2`) and
+   `eth0.42` (`10.42.0.12`) persistently, so they survive reboots. See §6.
 3. **`gcs_receiver` moved into `gcsns`.** In the root namespace its only route to the Pi is
    the unimpaired cable, and every latency number would be meaningless.
 
@@ -271,10 +277,9 @@ Same experiment, real edge node. The edge arm is complete; the ground arm needs
 
 With a 77 ms / 55 ms-jitter channel, the bandwidth difference is where the result lives.
 
-> **⚠ Blocked on clock sync.** `metrics_logger` computes latency as
-> `receipt_wall − send_wall`. Across two machines with unsynchronised clocks these numbers
-> are meaningless — and plausible-looking, which is worse. Run chrony between the Pi and the
-> host **before** collecting any Phase 6 data.
+> **Clock sync is done** (§9): the Pi tracks the host to within 60 us over the
+> camera link, so `metrics_logger`'s `latency_ms` is now valid. Any CSV recorded
+> before 2026-08-10 is not — delete them so they cannot be mixed in.
 
 ---
 
@@ -355,15 +360,44 @@ adapter gets a different name and the profile stops matching. That happened when
 adapter was swapped: NM created `Wired connection 2` for the new MAC while the old profile
 sat unused.
 
-> **⚠ Two known-fragile items (2026-08-05)**
-> - **The Pi's VLANs are not persistent.** `pi_hitl_link.sh` uses plain `ip` commands, so
->   every Pi reboot drops it back to untagged `eth0` while the host still expects VLAN 10 —
->   the symptom is `Destination Host Unreachable` with the carrier up. Needs a netplan file
->   with a `vlans:` section.
-> - **NetworkManager re-adds `10.0.0.1` to the parent interface**, fighting the VLAN
->   `eth-cam` that should own it. The result is the same address on two interfaces and ARP
->   going to the wrong one. Fix is `ipv4.method disabled` on the wired profile, leaving the
->   script's VLAN as the only holder.
+**Both sides are now persistent (2026-08-10).** The camera link is up from boot and does
+not depend on the simulator, which is what "plug and play" means here.
+
+**Host** — the address lives on the VLAN, and the parent holds none:
+
+```bash
+sudo nmcli connection modify "Wired connection 2" \
+     ipv4.addresses "" ipv4.gateway "" ipv4.method disabled
+sudo nmcli connection add type vlan con-name eth-cam ifname eth-cam \
+     dev <enx...> id 10 ip4 10.0.0.1/24
+sudo nmcli connection modify eth-cam ipv4.never-default yes connection.autoconnect yes
+```
+
+`never-default` matters: without it the host may try to route the internet down the Pi
+cable and lose WiFi. The launch script no longer deletes `eth-cam` at start or teardown —
+it only creates it if missing.
+
+**Pi** — `/etc/netplan/60-hitl-vlans.yaml`:
+
+```yaml
+network:
+  version: 2
+  ethernets:
+    eth0: {dhcp4: no, optional: true}
+  vlans:
+    eth0.10: {id: 10, link: eth0, addresses: [10.0.0.2/24]}
+    eth0.42: {id: 42, link: eth0, addresses: [10.42.0.12/24]}
+```
+
+`optional: true` stops boot waiting two minutes for a DHCP reply that will never come.
+
+> **Keep a second route to the Pi while changing any of this.** WiFi is the rescue path; a
+> wrong netplan file with no WiFi means fetching a monitor and keyboard. Note also that
+> `netplan apply` briefly takes WiFi down.
+
+> **One failure mode remains.** If the cable is unplugged, the parent goes down and
+> NetworkManager does not re-activate the VLAN when the carrier returns. Symptom:
+> `eth-cam` shows `LOWERLAYERDOWN` or disappears. Fix: `sudo nmcli connection up eth-cam`.
 
 ---
 
@@ -497,6 +531,31 @@ parameters and an error in either produces the same symptom: too few frames arri
   `BEST_EFFORT` subscriber to do it — `ros2 topic hz` defaults to RELIABLE and will silently
   match nothing against a BEST_EFFORT publisher, which looks identical to a dead topic.
 
+**One address must live on exactly ONE interface.** A leftover
+`/etc/netplan/99-cat6-link.yaml` gave `10.0.0.2` to the untagged `eth0` while
+`60-hitl-vlans.yaml` gave the same address to `eth0.10`. Netplan merges files in number
+order without warning about the conflict, so both took effect. Three unrelated-looking
+symptoms followed:
+
+- `ping` and SSH worked — unicast picks one device and either happens to work
+- multicast never arrived — the kernel resolves a group join by looking up which device
+  owns the address, found `eth0` first (index 2 before index 4), and registered the
+  membership there. The host sends tagged, so it arrives on `eth0.10`. Proven by repeating
+  the join with an explicit interface index (`ip_mreqn`): membership then landed on
+  `eth0.10` and every packet arrived.
+- **Fast DDS segfaulted at participant creation** — the whitelist entry matched two
+  devices, producing duplicate locators. No error message, no output, just exit 139.
+
+Check before every session; it must print `1`:
+
+```bash
+ip -4 addr show | grep -c "10.0.0.2/24"       # on the Pi
+grep -l "eth0" /etc/netplan/*.yaml            # only one file should touch eth0
+```
+
+The general lesson: read `ip addr show` in full rather than checking that your address is
+present. **The fault was not a missing address; it was an extra one.**
+
 **Diagnosis order — check `/clock` first.** The world runs in lockstep
 (`real_time_update_rate: -1`), so Gazebo only steps when SITL sends servo packets. If SITL
 stops, `/clock` freezes and every downstream rate decays to zero. A stalled sim looks
@@ -505,76 +564,141 @@ was `/clock` not ticking.
 
 ---
 
-## 9. Remaining hard problems
+## 9. Time synchronisation ✅ SOLVED 2026-08-10
 
-1. **Clock sync across machines — the Phase 6 blocker.** `metrics_logger` computes latency
-   as `receipt_wall − send_wall`. Across two machines with unsynchronised clocks these
-   numbers are meaningless, and plausible-looking, which is worse. Run chrony between the
-   Pi and the host **before** collecting any Phase 6 data. Now more urgent than ever: with
-   the radio link adding ~77 ms, end-to-end latency is the headline measurement.
-2. **Persistence on the Pi.** Its VLANs (`eth0.10`, `eth0.42`) come from
-   `pi_hitl_link.sh` and are lost on every reboot. Needs netplan with a `vlans:` section.
-3. **NetworkManager vs the host VLAN.** NM keeps re-adding `10.0.0.1` to the parent
-   interface, duplicating the address `eth-cam` should own. Fix with
-   `ipv4.method disabled` on the wired profile.
-4. **DDS discovery over a lossy link.** Default multicast discovery is fragile through
-   bridges plus packet loss. Loss is 0% today only because the drone stays close to the
-   GCS; once it flies out, consider unicast discovery peers (Fast DDS static discovery).
-5. **The strace workaround is unexplained** and could regress on an ArduPilot update.
-6. **NCNN @ 640 unmeasured.** One export (`imgsz=[384,640]`) completes the timing matrix
-   and should put the edge arm near 470 ms, ~5× the original baseline.
-7. **`camera_relay` ground mode untested** — the other half of the Phase 6 comparison.
+`metrics_logger` computes latency as `receipt_wall − send_wall`, one timestamp per machine.
+The Pi's clock was found to be **2 h 55 m behind** the host, which would have made every
+such figure nonsense while looking plausible in sign and shape.
+
+Three facts combined to cause it:
+
+1. **A Pi 4B has no battery-backed clock** (`timedatectl` reports `RTC time: n/a`), so every
+   boot starts from whatever `fake-hwclock` last wrote.
+2. The Pi had **no internet route**, so `systemd-timesyncd` could never correct it.
+3. `NTPSynchronized=no` is not an error anywhere; the clock is simply wrong.
+
+**The fix: the Pi takes time from the host over the camera link**, not from the internet.
+That link is 1.4 ms away and always present, so it beats public NTP over WiFi on both
+accuracy and availability — and the testbed no longer needs an internet connection at all.
+
+```bash
+# HOST — chrony replaces systemd-timesyncd, which is client-only and cannot serve
+sudo apt install -y chrony
+sudo tee -a /etc/chrony/chrony.conf > /dev/null <<'EOF'
+
+allow 10.0.0.0/24
+local stratum 10        # keep serving even if the host's own upstream is unreachable
+EOF
+sudo systemctl restart chrony
+
+# PI — prefer the host, keep the public pools as fallback
+sudo apt install -y chrony
+sudo sed -i '1i server 10.0.0.1 iburst prefer minpoll 4 maxpoll 6' /etc/chrony/chrony.conf
+sudo systemctl restart chrony
+```
+
+Verify on the Pi — `chronyc sources` should show `^*` on `10.0.0.1`:
+
+```
+Reference ID : 0A000001 (10.0.0.1)
+Root delay   : 0.00137 s        <- matches the measured cable RTT
+System time  : 0.000061 s slow  <- 60 microseconds
+```
+
+**60 µs against a 75 ms radio latency is an error of 0.08%**, so the clock no longer limits
+anything. For comparison, public NTP over WiFi gave a root delay of 174 ms.
+
+Hardware PTP was considered and is not available: `ethtool -T` reports
+`PTP Hardware Clock: none` on both the Pi's built-in NIC and the host's USB adapter. Software
+PTP would reach 10–50 µs, no better than chrony already achieves here.
+
+On a deployed aircraft the companion computer would take time from the flight controller's
+GPS receiver. The arrangement here — time from the vehicle's authoritative source over a
+short unimpaired link — mirrors that, and is in fact more accurate than the ~1–10 ms typical
+of MAVLink `SYSTEM_TIME`.
 
 ---
 
-## 10. Measured reference
+## 10. Remaining hard problems
 
-| Metric | Value |
-|---|---|
-Delivered configuration: camera 5 Hz, PyTorch `yolov8n.pt`, `conf=0.4`, class 0 only.
+1. **Search pattern covers the wrong area.** Correlating the detector and mission logs
+   (possible only now the clocks agree) shows detections cluster at the **centre** and at
+   Corner 1, with nothing at the other seven corner arrivals. The patrol flies a rectangle
+   *around* the subjects. A perimeter is the wrong shape for finding people in an area;
+   parallel sweeps would cover it. Do NOT change the waypoint coordinates themselves —
+   they are correct, see the note in §5.
+2. **`camera_relay` ground mode untested** — the other half of the Phase 6 comparison. The
+   code exists and has never been run, so there is currently no comparison at all.
+3. **DDS discovery over a lossy link.** Default multicast discovery is fragile through
+   bridges plus packet loss. Loss is 0% today only because the drone stays close to the
+   GCS; once it flies out, consider unicast discovery peers (Fast DDS static discovery).
+4. **The strace workaround is unexplained** and could regress on an ArduPilot update. It is
+   also not free: the tracer consumes ~5.7% CPU, because `-e trace=none` suppresses decoding
+   but not the per-syscall ptrace stops. Worth testing `--seccomp-bpf`.
+5. **NCNN @ 640 unmeasured.** One export (`imgsz=[384,640]`) completes the timing matrix.
+6. **ARP answers on the wrong interface.** The Pi replies to ARP for `10.0.0.2` over WiFi,
+   so the host can reach the camera address by a path that is not the camera cable. Fix with
+   `net.ipv4.conf.all.arp_ignore = 1` and `arp_announce = 2`.
+
+---
+
+## 11. Measured reference
+
+Delivered configuration: camera 5 Hz, PyTorch `yolov8n.pt`, `conf=0.4`, class 0 only,
+FOV 0.6 rad, camera pitch 45 deg.
 
 | Metric | Value |
 |---|---|
 | Link negotiation | 1000 Mb/s full duplex |
 | Link throughput (iperf3, steady) | ~834 Mbps, 0 retransmits |
-| Camera | 1280×720 RGB, **2.76 MB/frame** |
-| Camera at 20 Hz / 5 Hz | 481 Mbps / ~110 Mbps |
-| **Camera delivered to the Pi** | **5.000 Hz** vs 5 Hz source, σ = 4.5 ms |
+| Camera | 1280x720 RGB, **2.76 MB/frame** |
+| Camera at 20 Hz / 5 Hz | 481 Mbps / ~110 Mbps (11% of the link) |
+| **Camera delivered to the Pi** | **5.000 Hz** vs 5 Hz source, sigma = 4.5 ms |
 | Real-time factor (`/clock`) | 0.998 |
-| Camera link latency (30 pings) | min 0.4, **avg 1.5**, max 2.7, jitter 0.4 ms |
-| **Radio link latency (ns-3, 30 pings)** | min 11.7, **avg 77.4**, max 242.6, jitter 54.8 ms, 0% loss |
-| Radio vs camera path | **53× latency, 140× jitter** |
-| Inference — PyTorch @ 640 (in pipeline) | **~1,015 ms**, range 1,001–1,070 |
-| Inference — PyTorch @ 960×544 | **2,540 ms** (0.39 fps) |
-| Inference — PyTorch @ 640×384 | ~1,100 ms |
-| Inference — NCNN @ 960×544 | **~1,000 ms** (0.74 fps) |
-| Inference — NCNN @ 640×384 | ~470 ms *(predicted, not measured)* |
-| Detection payload vs image | **~118 B vs 2.76 MB** (~23,000×) |
-| Recall | 1–4 of 5 people per frame, conf 0.42–0.59 |
+| Camera link latency, 60 pings | min 1.0, **avg 1.4**, max 1.8, jitter 0.12 ms |
+| Camera link latency **under 110 Mbps load** | unchanged — no bufferbloat |
+| **Radio link latency (ns-3), 30 pings** | min 10.1, **avg 74.5**, max 158.0, jitter 38.4 ms, 0% loss |
+| Radio, independent repeat | avg 77.4 ms — agrees within 4% |
+| Radio vs camera path | **53x latency**, jitter over 2 orders of magnitude larger |
+| **Clock offset, Pi to host** | **60 us** (chrony over the camera link, root delay 1.37 ms) |
+| Inference — PyTorch @ 640, in pipeline | **1,093 ms** mean over 480 frames, min 1,025 |
+| Inference — PyTorch @ 640, standalone | **623 ms** on a static image |
+| Inference — PyTorch @ 960x544 | 2,540 ms (0.39 fps) |
+| Inference — NCNN @ 960x544 | ~1,000 ms (0.74 fps) |
+| Inference — NCNN @ 640x384 | ~470 ms *(predicted, not measured)* |
+| Detection payload vs image | **~118 B vs 2.76 MB** (~23,000x) |
+| Detection quality | 1-4 of 5 subjects per frame when in view, conf 0.42-0.59 |
+| Mission | 2 laps, 8 corners, all reached within 2.3 m, no timeouts |
 
 Resolution and engine effects are **separable and roughly multiplicative** — inference
-scales close to linearly with pixel count (0.47 pixel ratio → 0.43 time ratio).
+scales close to linearly with pixel count (0.47 pixel ratio -> 0.43 time ratio).
 
-The Pi completes rather less than one detection per second against a 5 Hz camera and
-therefore discards ~80% of what it receives. Discarded frames are not free: each still costs
-reassembly of ~1,900 UDP fragments plus deserialisation of 2.76 MB, competing with inference
-for the same four cores. Throttling the camera 20 → 5 Hz cut inference from 1,343 to
-~1,000 ms for that reason. The same model on a static image runs in 623 ms.
+**Contention.** The Pi completes rather less than one detection per second against a 5 Hz
+camera and therefore discards ~80% of what it receives. Discarded frames are not free: each
+still costs reassembly of ~1,900 UDP fragments plus deserialisation of 2.76 MB, competing
+with inference for the same four cores. The same model on a static image runs in 623 ms
+against 1,093 ms in the live pipeline — a gap of ~470 ms.
 
-> The radio minimum of 11.7 ms against a 77.4 ms mean — a 6.6× spread on one link — is the
+That gap is processor contention, not queueing. Inference is timed around the model call
+alone, so the extra time is spent inside it rather than waiting ahead of it, and the network
+is measurably uncongested (row 8 above). An earlier configuration measured 1,343 ms, but
+that included a 2.76 MB annotated image being sent back to the host on every detection;
+that return stream has been removed and is not part of the architecture under test.
+
+> The radio minimum of 10.1 ms against a 74.5 ms mean — a ~7x spread on one link — is the
 > tell that ns-3 is modelling a contended channel with queueing and back-off, not applying a
-> fixed delay. Always take **30 samples**: a 2-sample ping includes ARP across the simulated
-> channel and returned 167 ms for a link that measures 59–77 ms over 30.
+> fixed delay. Always take at least **30 samples**: a 2-sample ping includes ARP across the
+> simulated channel and returned 167 ms for a link that measures ~75 ms over 30.
 
 ---
 
-## 11. File map
+## 12. File map
 
 | Path | Purpose |
 |---|---|
 | `scripts/netns/run_hitl.sh` | **One-command HITL run** — pipeline + Pi detector + GCS, with pre-flight checks |
 | `scripts/netns/launch_single_uav_netns.sh` | 8-stage host bring-up; STEP 1c adds the VLANs + `br-uav2` |
-| `scripts/netns/pi_hitl_link.sh` | **Run on the Pi** — splits `eth0` into VLAN 10 / VLAN 42 |
+| `scripts/netns/pi_hitl_link.sh` | One-off VLAN setup on the Pi; superseded by `/etc/netplan/60-hitl-vlans.yaml`, kept for a machine that has not been configured yet |
 | `scripts/netns/kill_all_netns.sh` | Teardown (also kills gzserver) |
 | `scripts/netns/wireless_up.sh` · `management_up.sh` | Multi-UAV namespace/link creation |
 | `scripts/yolo_detect_node.py` | The working detector (from `anton-ap_dds`) + timing; runs on the Pi |

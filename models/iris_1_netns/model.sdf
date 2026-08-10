@@ -627,7 +627,7 @@
                so the flight path has to pass closer to the target. The 5
                person_standing models span only ~2 m, so they still fit easily.
                WAS: 0.9 -->
-          <horizontal_fov>0.9</horizontal_fov>
+          <horizontal_fov>0.6</horizontal_fov>
           <image>
             <width>1280</width>
             <height>720</height>
