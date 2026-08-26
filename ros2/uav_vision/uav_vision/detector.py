@@ -36,14 +36,17 @@ Parameters:
   processing_mode (str,   default 'edge') — determines input topic
   model_path      (str,   default ~/yolo_env/yolov8n.pt)
   conf_threshold  (float, default 0.25)   — minimum detection confidence
-  imgsz           (int,   default 960)    — YOLO inference size; the longest side
+  imgsz           (int,   default 640)    — YOLO inference size; the longest side
                                             is scaled to this and the aspect ratio
-                                            kept, so 1280x720 -> 960x544
+                                            kept, so 1280x720 -> 640x384.
+                                            IGNORED for directory models, see below.
   publish_debug   (bool,  default True)   — whether to publish annotated image
 
-NOTE for NCNN models: the exported model has a FIXED input shape, so `imgsz` here
-must match what the model was exported with (export with imgsz=[544, 960] to match
-the 960 default). A mismatch is silently ignored, not raised.
+NOTE for exported models (NCNN, OpenVINO): the input shape is FIXED at export time,
+and passing `imgsz` overrides the shape ultralytics uses to DECODE the output
+coordinates. It is not silently ignored — a mismatch gives correct boxes on the first
+call and confident nonsense on every call after, with no error raised. So `imgsz` is
+dropped automatically for any directory model path.
 
 NOTE: must be launched with ~/yolo_env active since ultralytics lives there.
 """
@@ -74,7 +77,9 @@ class Detector(Node):
             'model_path',
             os.path.expanduser('~/yolo_env/yolov8n.pt'))
         self.declare_parameter('conf_threshold', 0.25)
-        self.declare_parameter('imgsz', 960)
+        # 640 matches ultralytics' default and the delivered 640x384 camera. The
+        # old 960 default upscaled every frame for no gain in detection quality.
+        self.declare_parameter('imgsz', 640)
         self.declare_parameter('publish_debug', True)
         self.declare_parameter('target_classes', '0')
 
@@ -87,6 +92,13 @@ class Detector(Node):
         self._target_classes = [
             int(c) for c in
             str(self.get_parameter('target_classes').value).split(',')]
+
+        # Only a PyTorch checkpoint takes imgsz. EVERY export freezes its input
+        # shape — directories (*_ncnn_model, *_openvino_model) and single files
+        # (.mnn, .onnx) alike — so imgsz is dropped for all of them. Testing for
+        # a directory alone would miss .mnn. See the module docstring.
+        self._fixed_shape  = not str(model_path).endswith(('.pt', '.pth'))
+        self._infer_kwargs = {} if self._fixed_shape else {'imgsz': self._imgsz}
 
         # Load YOLO model
         self.get_logger().info(f'[Detector] Loading model: {model_path}')
@@ -134,8 +146,9 @@ class Detector(Node):
         # Log the inference settings so every run's log is self-documenting —
         # comparing runs is meaningless without knowing which knobs were set.
         self.get_logger().info(
-            f'[Detector] inference: imgsz={self._imgsz} conf={self._conf} '
-            f'classes={self._target_classes}')
+            f'[Detector] inference: '
+            f'imgsz={"fixed by export" if self._fixed_shape else self._imgsz} '
+            f'conf={self._conf} classes={self._target_classes}')
         if self._debug:
             self.get_logger().info(
                 f'[Detector] Publishing debug -> {debug_topic} '
@@ -164,10 +177,10 @@ class Detector(Node):
 
         results = self._model(
             img_bgr,
-            imgsz=self._imgsz,
             conf=self._conf,
             classes=self._target_classes,
-            verbose=False
+            verbose=False,
+            **self._infer_kwargs
         )
 
         inference_ms = (time.time() - t0) * 1000.0

@@ -30,6 +30,7 @@ Run with:
         --ros-args -p model_path:=<repo>/yolov8n.pt
 """
 import json
+import os
 import time
 
 import cv2
@@ -52,10 +53,46 @@ class YoloHumanDetector(Node):
         self.declare_parameter("image_topic", "/uav1/camera/image_raw")
         self.declare_parameter("model_path", "yolov8n.pt")
         self.declare_parameter("show_window", True)
+        # YOLO letterboxes every frame to this size before inference: the long
+        # side becomes imgsz, aspect ratio is kept, and the short side is padded
+        # to a multiple of 32. A 1280x720 frame therefore becomes 640x384 here.
+        #
+        # 640 is ultralytics' default and is kept as the default because compute
+        # grows with the AREA. Measured on this Pi: 640 -> ~1,100 ms per frame,
+        # 960 -> 2,540 ms. Raising it makes subjects larger at the model input
+        # (~27 px to ~40 px for a person at 25 m) but halves how often the
+        # detector can look, which is the wrong trade while coverage is the
+        # limiting factor.
+        #
+        # Exposed as a parameter so the resolution/rate trade-off can be swept
+        # from the command line without editing this file.
+        #
+        # IGNORED for exported models - see below. That is not a convenience,
+        # it is a correctness requirement.
+        self.declare_parameter("imgsz", 640)
 
         image_topic = self.get_parameter("image_topic").value
         model_path = self.get_parameter("model_path").value
+        self.imgsz = int(self.get_parameter("imgsz").value)
         self.show_window = self.get_parameter("show_window").value
+
+        # An export has its input shape FIXED at export time, and passing imgsz
+        # overrides the shape ultralytics uses to decode the output
+        # coordinates. Passing imgsz=640 (which means 640x640, square) to a
+        # model exported at 384x640 produces correct boxes on the FIRST call
+        # and confident nonsense on every call after it:
+        #
+        #     imgsz=640 passed :  [3, 13, 13, 13, 13, 13]  boxes span the image
+        #     imgsz omitted    :  [3,  3,  3,  3,  3,  3]  correct
+        #
+        # Nothing errors and the confidences stay high, so the only way to
+        # notice is to look at the boxes.
+        #
+        # Only a PyTorch checkpoint is safe to pass imgsz to. Every other format
+        # is an export: directories (*_ncnn_model, *_openvino_model) and single
+        # files (.mnn, .onnx) alike. Testing for a directory alone misses .mnn.
+        self.fixed_shape = not model_path.endswith((".pt", ".pth"))
+        self.infer_kwargs = {} if self.fixed_shape else {"imgsz": self.imgsz}
 
         self.bridge = CvBridge()
         self.model = YOLO(model_path)
@@ -92,7 +129,8 @@ class YoloHumanDetector(Node):
         self.get_logger().info(f"Listening on {image_topic}, detecting humans...")
         self.get_logger().info(
             f"model={model_path} conf={CONF_THRESHOLD} "
-            f"classes=[{PERSON_CLASS_ID}] imgsz=default(640) "
+            f"classes=[{PERSON_CLASS_ID}] "
+            f"imgsz={'fixed by export' if self.fixed_shape else self.imgsz} "
             f"show_window={self.show_window}")
 
     def on_image(self, msg):
@@ -106,7 +144,8 @@ class YoloHumanDetector(Node):
         # uav_vision/detector.py's inference_ms and with a standalone run.
         t0 = time.time()
         result = self.model(frame, classes=[PERSON_CLASS_ID],
-                            conf=CONF_THRESHOLD, verbose=False)[0]
+                            conf=CONF_THRESHOLD, verbose=False,
+                            **self.infer_kwargs)[0]
         inference_ms = (time.time() - t0) * 1000.0
 
         humans = [

@@ -25,8 +25,11 @@ PI_HOST="anton@10.0.0.2"
 HOST_LINK_IP="10.0.0.1"           # must exist BEFORE Gazebo starts (see below)
 PI_VENV_PY="\$HOME/yolo_env/bin/python"
 PI_DETECTOR="\$HOME/uav2_ws/install/uav_vision/lib/uav_vision/detector"
-PI_MODEL_NCNN="/home/anton/models/yolov8n_ncnn_model"
-PI_MODEL_PT="/home/anton/models/yolov8n.pt"
+# Medians measured on the Pi 4B by scripts/bench_backends.py — see
+# docs/HITL_INTEGRATION_PLAN.md §10. The default is the fastest CORRECT back-end.
+PI_MODEL_OPENVINO="/home/anton/models/yolo11n_openvino_model"       # 236 ms
+PI_MODEL_NCNN="/home/anton/models/yolov8n_384x640_ncnn_model"       # 270 ms
+PI_MODEL_PT="/home/anton/models/yolov8n.pt"                         # 1027 ms
 
 DDS_PROFILE="$PROJECT_DIR/config/fastdds_hitl_eth.xml"
 PIPELINE="$PROJECT_DIR/scripts/netns/launch_single_uav_netns.sh"
@@ -39,9 +42,11 @@ MISSION_LOG="/tmp/hitl_mission.log"
 BAG_DIR="$HOME/hitl_bags/cam_$(date +%Y%m%d_%H%M%S)"
 
 # ── Options ──────────────────────────────────────────────────────────────────
-MODEL="$PI_MODEL_NCNN"
+MODEL="$PI_MODEL_OPENVINO"
 CONF="0.4"
-IMGSZ="960"
+# Applies to the PyTorch model ONLY. The detector drops imgsz for directory
+# models (NCNN, OpenVINO), whose input shape is frozen at export time.
+IMGSZ="640"
 DEBUG="False"
 RUN_MISSION=0
 RECORD=0
@@ -51,10 +56,13 @@ usage() {
     cat <<'USAGE'
 Usage: run_hitl.sh [options]
 
-  --pt              use the PyTorch model on the Pi instead of NCNN
+  --ncnn            use the NCNN model on the Pi       (270 ms)
+  --pt              use the PyTorch model on the Pi    (1027 ms)
+                    default is OpenVINO                (236 ms — fastest correct)
   --conf <v>        detector confidence threshold      (default 0.4)
-  --imgsz <n>       detector inference size            (default 960)
-                    NOTE: the NCNN model is frozen at 544x960 and ignores this
+  --imgsz <n>       detector inference size            (default 640)
+                    PyTorch only — NCNN and OpenVINO exports have a fixed input
+                    shape and the detector drops imgsz for them
   --debug           detector saves annotated JPEGs to /tmp/yolo_frames on the Pi
                     (costs CPU + an SD write per detection — not for timing runs)
   --mission         fly uav1_patrol_mission.py once the stack is up
@@ -73,6 +81,7 @@ USAGE
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --pt)       MODEL="$PI_MODEL_PT"; shift ;;
+        --ncnn)     MODEL="$PI_MODEL_NCNN"; shift ;;
         --conf)     CONF="$2"; shift 2 ;;
         --imgsz)    IMGSZ="$2"; shift 2 ;;
         --debug)    DEBUG="True"; shift ;;
@@ -134,6 +143,16 @@ if (( WITH_PI )); then
         exit 1
     fi
     echo "  Pi reachable at ${PI_HOST#*@}"
+
+    # A missing model only surfaces as a WARNING five seconds later, by which
+    # point the whole stack is already up. Check it before paying for that.
+    if ! ssh -o ConnectTimeout=4 "$PI_HOST" "test -e '$MODEL'" 2>/dev/null; then
+        echo "ERROR: model not found on the Pi: $MODEL" >&2
+        echo "       available:" >&2
+        ssh -o ConnectTimeout=4 "$PI_HOST" 'ls -d ~/models/* 2>/dev/null' >&2 || true
+        exit 1
+    fi
+    echo "  model present: $(basename "$MODEL")"
 
     # A 1280x720 RGB frame is 2.76 MB = ~2000 UDP fragments. The default 208 KB
     # socket buffer holds ~7% of one frame.
@@ -198,6 +217,16 @@ while ! grep -q "PIPELINE READY" "$PIPELINE_LOG" 2>/dev/null; do
 done
 echo "  pipeline ready"
 
+# Surface any stage warning. The pipeline's health gates print these, but this
+# script only ever greps the log for PIPELINE READY, so a stage that degraded
+# without failing was completely silent here. That is how a dead position
+# publisher went unnoticed while every ns-3 node sat frozen for a whole run.
+if grep -q "WARNING" "$PIPELINE_LOG" 2>/dev/null; then
+    echo "  --- pipeline warnings ---" >&2
+    grep -A2 "WARNING" "$PIPELINE_LOG" | sed 's/^/    /' >&2
+    echo "  -------------------------" >&2
+fi
+
 # Confirm Gazebo actually bound the wired link. If it did not, nothing reaches
 # the Pi and every downstream symptom looks like a broken detector instead.
 GZ_PID=$(pgrep -f gzserver | head -1 || true)
@@ -247,12 +276,20 @@ if (( WITH_PI )); then
             -p imgsz:=$IMGSZ -p publish_debug:=$DEBUG
     " > "$DETECTOR_LOG" 2>&1 &
     PIDS+=("$!")
-    sleep 5
+    # Poll rather than sleeping a fixed 5 s: OpenVINO takes ~12 s to load on the
+    # Pi 4B, so a fixed wait reported a healthy detector as broken on every run.
+    # (The first INFERENCE is also slow -- ~13 s, because OpenVINO compiles the
+    # model on the first call -- then it settles to ~250 ms. Both are normal.)
+    det_deadline=$((SECONDS + 60))
+    while ! grep -q 'Model loaded OK' "$DETECTOR_LOG" 2>/dev/null; do
+        (( SECONDS >= det_deadline )) && break
+        sleep 2
+    done
     if grep -q 'Model loaded OK' "$DETECTOR_LOG" 2>/dev/null; then
         echo "  detector running, log: $DETECTOR_LOG"
         grep -m1 'inference:' "$DETECTOR_LOG" | sed 's/^/  /' || true
     else
-        echo "  WARNING: detector has not reported 'Model loaded OK' yet." >&2
+        echo "  WARNING: detector did not report 'Model loaded OK' within 60 s." >&2
         echo "           check $DETECTOR_LOG" >&2
     fi
 else

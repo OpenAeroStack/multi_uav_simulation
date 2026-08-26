@@ -629,8 +629,8 @@
                WAS: 0.9 -->
           <horizontal_fov>0.6</horizontal_fov>
           <image>
-            <width>1280</width>
-            <height>720</height>
+            <width>640</width>
+            <height>384</height>
             <format>R8G8B8</format>
           </image>
           <clip>

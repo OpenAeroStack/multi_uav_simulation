@@ -30,6 +30,12 @@ established practice"* should already have its source in this table.
 | R8 | [YOLOv8 / RT-DETR energy efficiency on edge devices](https://www.nature.com/articles/s41598-026-46453-6) | CPU-only inference of large models on a Pi 5 is impractical due to multi-second per-frame latency. Supports reporting slowness as a *finding* rather than a defect. |
 | R9 | [Communication–Computation Trade-Off in Resource-Constrained Edge Inference](https://arxiv.org/pdf/2006.02166) | End-to-end latency rises 0.123 s → 2.317 s as bandwidth falls 1 Mbps → 50 Kbps. The curve the ground arm of this experiment traces. |
 
+## Inference back-ends on a Raspberry Pi
+
+| # | Source | Used to justify |
+|---|---|---|
+| R11 | [YOLO11 on Raspberry Pi — LearnOpenCV](https://learnopencv.com/yolo11-on-raspberry-pi/) | Benchmarks PyTorch, ONNX, OpenVINO, TFLite, MNN and NCNN for YOLO11n on a **Pi 5**: OpenVINO 80.9 ms, MNN 115.8 ms, NCNN 292.1 ms. Used as the comparison point for our own Pi 4B benchmark, which reproduces OpenVINO as fastest but not by the same margin, and finds MNN *slower* than NCNN. The difference traces to the instruction set — the Pi 5's Cortex-A76 is ARMv8.2-A, the Pi 4B's Cortex-A72 is ARMv8.0-A and reports `i8sdot:0, fp16:0, i8mm:0`. Supports the claim that published Pi 5 back-end rankings do not transfer to a Pi 4B. |
+
 ## Environment construction
 
 | # | Source | Used to justify |

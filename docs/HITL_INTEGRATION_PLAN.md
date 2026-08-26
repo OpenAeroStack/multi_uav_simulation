@@ -1,7 +1,7 @@
 # HITL Integration Plan — Raspberry Pi 4B edge node ↔ SITL host
 
 **Author:** anton · **Branch:** `ground-vs-edge-processing-RPi` (sub-branch of
-`ground-vs-edge-processing`) · **Last updated:** 2026-08-10
+`ground-vs-edge-processing`) · **Last updated:** 2026-08-13
 
 > **Board correction (2026-07-28):** the edge node is a **Raspberry Pi 4B**, not a Pi 5.
 > Earlier revisions of this document said "Pi 5" throughout and that was wrong. The
@@ -27,7 +27,7 @@ result the experiment is built to produce:
 | Mode | What crosses the impaired radio link | Bottleneck |
 |---|---|---|
 | **Ground processing** | Raw camera frames (~72 Mbps) | The radio link |
-| **Edge processing** | Detection messages (**~118 bytes**) | The Pi's CPU (~1–3 s/frame) |
+| **Edge processing** | Detection messages (**72–433 B**, see §12) | The Pi's CPU (~250 ms/frame) |
 
 That tradeoff is only meaningful if the edge CPU is real. Hence HITL.
 
@@ -58,7 +58,7 @@ over one cable and separated with 802.1Q VLANs:
    ────                                              ─────────────────────
    Gazebo ─── eth-cam  VLAN 10 ═══ cable ═══ eth0.10 ──► detector (YOLOv8n)
               10.0.0.1                       10.0.0.2         │
-              ① SENSOR LINK — unimpaired                      │  ~118 B
+              ① SENSOR LINK — unimpaired                      │  72-433 B
                                                               │  detections
    gcsns ◄── tap-gcs ◄── ns-3 ◄── tap-uav2 ◄── br-uav2 ◄──────┘
    10.42.0.10             ▲       eth-rf VLAN 42      eth0.42
@@ -102,6 +102,11 @@ that the Pi replaces `uav2ns`. `uav1ns` keeps `10.42.0.11` for SITL, unchanged.
 | `10.0.0.1` | VLAN 10, direct cable | min 1.0 / avg **1.4** / max 1.8 ms, jitter 0.12 ms, 0% loss (60 pings) |
 | `10.42.0.10` | VLAN 42 → ns-3 → gcsns | min 10.1 / avg **74.5** / max 158.0 ms, jitter 38.4 ms, 0% loss (30 pings) |
 
+> **Caveat (2026-08-13):** these were taken while ns-3 mobility was frozen, so they
+> describe a **static 38.4 m** link, not a flight. The 53x ratio and the shape of the
+> result stand — the radio path is genuinely contended while the cable is not — but the
+> absolute radio figure is one point on a curve, not a mission average. See §5.
+
 **~53× the latency**, and jitter larger by more than two orders of magnitude. The ~7× spread
 *within* the radio path (10.1 ms minimum against a 74.5 ms mean) shows ns-3 is not applying a
 fixed delay: it is a contended CSMA/CA channel where packets queue and back off. Use ≥30
@@ -143,6 +148,8 @@ ping -c 30 10.42.0.10 | tail -2         # from the Pi
 | **5** | **Detections across the ns-3 impaired link** | ✅ **networking DONE 2026-08-05** |
 | — | Clock sync between the machines | ✅ RESOLVED 2026-08-10 (60 us) |
 | — | Persistent addressing, both machines | ✅ RESOLVED 2026-08-10 |
+| — | **Frozen ns-3 mobility** (nodes never moved) | ✅ **RESOLVED 2026-08-13** |
+| — | ARP answered on the wrong interface | ✅ RESOLVED 2026-08-13 |
 | 6 | Run the edge-vs-ground HITL comparison | ⬜ **NEXT** — ground arm never run |
 
 ---
@@ -167,6 +174,8 @@ Whole vision pipeline validated with no namespaces and no sudo:
 - `/uav1/camera/image_raw` at ~6 Hz after throttling.
 - Detector: **~44 ms/frame** on host x86.
 - **Edge detection message = 76 bytes.** This is the number the entire experiment turns on.
+  Superseded: the payload is **72–433 B** and scales with detection count — see §12.
+  76 B was the Phase 2a message, when a frame carried at most one detection.
 
 ### Phase 2b — netns + ns-3 host rehearsal ✅ DONE (2026-07-28)
 
@@ -223,7 +232,7 @@ boxes host-side from the `bbox` values already carried in `/detections/uav1`. Do
 accepting any timing result — a detector that boxes ground texture passes every numerical
 check.
 
-**Recall: 2–4 of the 5 people per frame (~40–80%).** Not a defect — the five models sit in a
+**Recall: 2–4 of the 5 people per frame (~40–80%), at 1280x720.** Not a defect — the five models sit in a
 plus pattern only 1 m apart, so from the 45° oblique view the near figures partly occlude
 the far ones, and at ~53 px tall the partly-hidden ones fall under `conf=0.4`. Ground truth
 is exactly 5 and known from the world file, so **recall is measurable, not estimated** — use
@@ -261,9 +270,71 @@ Three changes made it work:
 The DDS whitelist in `config/fastdds_hitl_eth.xml` gained `10.42.0.10` and `10.42.0.12`.
 
 **Still to do for Phase 5 proper:** collect detection latency and delivery statistics across
-the channel as the drone flies out and buildings occlude the path. Loss is currently 0%
-because the drone stays close to the GCS; `/ns3_link_rssi`, `/ns3_link_snr` and
-`/link_obstacle_loss` are the topics to correlate against.
+the channel as the drone flies out and buildings occlude the path. `/ns3_link_rssi`,
+`/ns3_link_snr` and `/link_obstacle_loss` are the topics to correlate against.
+
+> **Correction (2026-08-13).** This section previously said *"Loss is currently 0% because
+> the drone stays close to the GCS."* That explanation was wrong. Loss was ~0% because
+> **every ns-3 node was frozen at its start position for the whole flight** — see
+> "Frozen ns-3 mobility" below. With mobility working, the GCS↔UAV distance varies
+> 75.6–224.7 m across a mission and delivery loss rose from 0.11% to 0.70%.
+
+### Frozen ns-3 mobility — RESOLVED 2026-08-13
+
+**Every channel measurement taken before this date describes a stationary fleet.**
+
+`launch_netns_v2.sh` started `scripts/world_pos_publisher.py`, and even warned
+*"ns-3 mobility will be static"* if it could not find it.
+`launch_single_uav_netns.sh` — which replaced it, and which `run_hitl.sh` calls — never
+started it at all. Nothing published `/uav_world_positions`, so ns-3 kept the formation set
+by its own CLI defaults (`distance=50`, `uavAltitude=20`) from the first second to the last:
+
+```
+t=2.0s    UAV1=(0.0,0.0,30.0)   d01=38.4m
+t=356.0s  UAV1=(0.0,0.0,30.0)   d01=38.4m      <- after a full 2-lap patrol
+```
+
+Nothing errors. The link still carries traffic, pings still return, and the numbers look
+entirely plausible — they simply describe a fixed 38.4 m link instead of the aircraft that
+is flying. `DynamicObstacleLossModel` has no changing geometry, so RSSI and SNR never
+respond to the mission. The only visible symptom was ns-3's own integration check:
+
+```
+missing node IDs: GCS(0) UAV1(1) UAV2(2) UAV3(3)
+```
+
+**Two fixes:**
+
+1. **STEP 4b in `launch_single_uav_netns.sh`** starts the publisher after Gazebo, in the
+   root namespace, with Gazebo's DDS profile (it cannot discover `/gazebo/model_states`
+   otherwise). It must `set +u` before sourcing ROS — the script runs `set -euo pipefail`
+   and `/opt/ros/humble/setup.bash` reads `AMENT_TRACE_SETUP_FILES` unset, which aborts the
+   subshell before python starts. The first attempt failed exactly this way.
+2. **`mirror=2:1`** (new parameter in `world_pos_publisher.py`) copies UAV1's position onto
+   node 2. The Pi is ns-3 node 2 while the aircraft it serves is node 1, so with one UAV in
+   the world node 2 was never covered. Both are on the same airframe, so this is the
+   physically correct position, not a fudge. Remove it if the Pi ever shares node 1.
+
+**After the fix**, measured over one 2-lap patrol:
+
+| | before | after |
+|---|---|---|
+| GCS position | `(-24, 0, 0)` — CLI default | `(-70, -7, 2.9)` — the Gazebo model |
+| GCS↔UAV1 distance | fixed 38.4 m | **75.6 – 224.7 m** (~9.5 dB of path loss swing) |
+| Pi's node (2) | frozen 50 m away | `d12 = 0.0 m`, tracks the aircraft |
+| Missing nodes | all four | only `UAV3(3)` — correct, nothing is there |
+| Detection loss | 2 / 1,767 = 0.11% | **6 / 855 = 0.70%** |
+
+**Two lessons worth keeping.** A silent degradation is worse than a crash: the health gate
+*did* print the warning, but `run_hitl.sh` only grepped the pipeline log for
+`PIPELINE READY`, so a stage that failed without stopping the run said nothing. It now
+surfaces any `WARNING` after bring-up. And `set -u` plus a third-party setup script is a
+recurring trap — every other stage in that launcher escapes it by using `bash -lc`.
+
+**Still open:** the obstacle ray-caster reports only link `(0,1)`, so
+`missing link pairs: (0,2) …` persists and the GCS↔Pi path — the one detections actually
+take — gets distance and fading but **no building shadowing**. The same mirroring argument
+applies: node 2 sits at identical coordinates, so `(0,1)`'s loss is what `(0,2)` should see.
 
 ### Phase 6 — Edge-vs-ground HITL comparison ⬜ **NEXT**
 
@@ -272,7 +343,7 @@ Same experiment, real edge node. The edge arm is complete; the ground arm needs
 
 | | crosses the radio | inference runs | measured |
 |---|---|---|---|
-| **Edge** ✅ | ~118 B | on the Pi | 2,540 → ~1,000 ms |
+| **Edge** ✅ | 72–433 B | on the Pi | 1,343 → **236 ms** (§10) |
 | **Ground** ⬜ | ~100 KB JPEG/frame | on the host | ~44 ms |
 
 With a 77 ms / 55 ms-jitter channel, the bandwidth difference is where the result lives.
@@ -343,7 +414,7 @@ The two machines need **different tools**, which is easy to get wrong:
 |---|---|---|
 | Manager | NetworkManager | systemd-networkd |
 | Tool | `nmcli connection modify` | netplan YAML |
-| Config | `/etc/NetworkManager/system-connections/` | `/etc/netplan/99-cat6-link.yaml` |
+| Config | `/etc/NetworkManager/system-connections/` | `/etc/netplan/60-hitl-vlans.yaml` |
 
 Host, made persistent (survived an adapter unplug/replug):
 
@@ -619,7 +690,124 @@ of MAVLink `SYSTEM_TIME`.
 
 ---
 
-## 10. Remaining hard problems
+## 10. Inference optimisation ✅ 2026-08-11
+
+Inference went from **1,343 ms to 236 ms**, a factor of 5.7, entirely through
+configuration. No hardware was changed and no accuracy was lost.
+
+| Change | Inference | Why |
+|---|---|---|
+| starting point | 1,343 ms | 1280x720 camera, PyTorch, annotated frame returned to the host |
+| remove the annotated return stream | 1,093 ms | the Pi was serialising and sending 2.76 MB per detection |
+| camera 1280x720 -> 640x384 | 1,013 ms | matched the sensor to the model input; 110 -> 29.5 Mbps |
+| PyTorch -> NCNN | 271 ms | ARM-optimised inference engine, 3.8x |
+| NCNN -> OpenVINO | **236 ms** | a further 13% |
+
+Delivered rate rose from **0.98 fps to 3.47 fps** measured in the live pipeline,
+so the edge node now processes roughly two thirds of a 5 Hz camera stream
+instead of one frame in five.
+
+### Back-end comparison
+
+Nine configurations, same image, same threshold, on the Pi 4B. Run it with
+`scripts/bench_backends.py`.
+
+| Back-end | Median | Speed-up | Detections |
+|---|---|---|---|
+| **YOLO11n OpenVINO** | **236 ms** | **4.35x** | 3 |
+| YOLOv8n NCNN 384x640 | 270 ms | 3.80x | 3 |
+| YOLO11n NCNN 384x640 | 271 ms | 3.78x | 3 |
+| YOLOv8n PyTorch imgsz=320 | 291 ms | 3.53x | 3 |
+| YOLO11n MNN | 342 ms | 3.00x | 3 |
+| YOLOv8n NCNN 544x960 | 579 ms | 1.77x | 3 |
+| YOLOv8n PyTorch imgsz=480 | 589 ms | 1.74x | 3 |
+| YOLO11n PyTorch | 1,001 ms | 1.03x | 3 |
+| YOLOv8n PyTorch imgsz=640 | 1,027 ms | 1.00x | 3 |
+
+All nine returned the same detection count and were stable across ten calls,
+so this is a comparison of speed alone.
+
+### Published Pi 5 rankings do not transfer to a Pi 4B
+
+LearnOpenCV benchmarked the same back-ends on a Pi 5 (see `docs/references/`).
+The ordering is different:
+
+| Back-end | Pi 5 (published) | Pi 4B (measured here) |
+|---|---|---|
+| OpenVINO | 80.9 ms, **3.6x faster than NCNN** | 236 ms, only **1.15x** faster |
+| MNN | 115.8 ms, 2.5x faster than NCNN | **342 ms, SLOWER than NCNN** |
+| NCNN | 292.1 ms | 270 ms |
+
+The reason is the instruction set, and MNN prints it at startup:
+
+```
+The device supports: i8sdot:0, fp16:0, i8mm:0, sve2:0, sme2:0
+```
+
+The Pi 5's Cortex-A76 is ARMv8.2-A and has all of those. The Pi 4B's
+Cortex-A72 is ARMv8.0-A and has none. Back-ends that lean on them lose most of
+their advantage, which is why MNN's ranking inverts.
+
+Note also that the Pi 4B beats the Pi 5 on NCNN here (270 ms against 292 ms).
+That is not the board; it is the export shape. 384x640 is 60% of the pixels of
+the 640x640 square export used in the published test.
+
+### FP16 gives nothing on this board
+
+`quantize=16` was exported and measured: **256 ms against 262 ms**, inside the
+run-to-run spread. `fp16:0` above is why. The A72 can store and convert
+half-precision but cannot compute in it, so NCNN converts FP16 weights back to
+FP32 before use and the bandwidth saving is cancelled by the conversion. FP16
+would be expected to help on a Cortex-A76.
+
+INT8 is not offered by the ultralytics NCNN exporter, and `i8sdot:0` means the
+gain would be far smaller than the usual 2x. Doing it by hand with
+`ncnn2table` and `ncnn2int8` is the remaining lever; it is left as future work
+because it risks accuracy on subjects that are only about 27 px tall.
+
+### The trap that nearly went unnoticed
+
+An NCNN model exported at 384x640 and called with `imgsz=640` returns:
+
+```
+[3, 13, 13, 13, 13, 13]
+```
+
+Correct on the first call, then thirteen boxes spanning most of the image at
+confidence 0.88, on every call after. Nothing errors.
+
+The cause: for NCNN the input shape is fixed at export time, and `imgsz`
+overrides the shape ultralytics uses to decode the output coordinates.
+`imgsz=640` means 640x640 square, which is not 384x640. Note that `imgsz` is
+`[height, width]`, the opposite order to the usual W x H notation.
+
+**Both detectors now drop `imgsz` for any model that is not a `.pt`** —
+`scripts/yolo_detect_node.py` and `ros2/uav_vision/uav_vision/detector.py`. The
+ROS node had no guard at all until 2026-08-11, and `run_hitl.sh` was passing it
+`imgsz=960` with the 544x960 NCNN export, so the one-command path was running
+the failure above. Any detection counts from a `run_hitl.sh` run before that
+date are suspect. Testing for a directory is not enough: `.mnn` is a single
+file and is equally frozen.
+
+**Reproduced on the host** (bus.jpg, YOLO11n exported at 384x640), which also
+shows the two engines fail differently:
+
+| | call 1 | calls 2-6 |
+|---|---|---|
+| NCNN, `imgsz=640` passed | 3 persons, conf 0.85 | **2 persons, conf 0.74** — silent |
+| NCNN, `imgsz` dropped | 3 persons, 0.85 | 3 persons, 0.85 |
+| OpenVINO, `imgsz=640` passed | `RuntimeError: shape [1,3,384,640] vs (1,3,640,640)` | — |
+
+OpenVINO raises; **NCNN does not**, and settles into a stable wrong answer that
+looks entirely plausible. That is why the fault survived so long.
+
+`scripts/bench_backends.py` calls every back-end ten times and rejects any whose
+detection count varies, however fast it is — a benchmark that timed the model
+once would have recommended the broken model.
+
+---
+
+## 11. Remaining hard problems
 
 1. **Search pattern covers the wrong area.** Correlating the detector and mission logs
    (possible only now the clocks agree) shows detections cluster at the **centre** and at
@@ -636,54 +824,64 @@ of MAVLink `SYSTEM_TIME`.
    also not free: the tracer consumes ~5.7% CPU, because `-e trace=none` suppresses decoding
    but not the per-syscall ptrace stops. Worth testing `--seccomp-bpf`.
 5. **NCNN @ 640 unmeasured.** One export (`imgsz=[384,640]`) completes the timing matrix.
-6. **ARP answers on the wrong interface.** The Pi replies to ARP for `10.0.0.2` over WiFi,
-   so the host can reach the camera address by a path that is not the camera cable. Fix with
-   `net.ipv4.conf.all.arp_ignore = 1` and `arp_announce = 2`.
+6. ~~**ARP answers on the wrong interface.**~~ ✅ **RESOLVED 2026-08-13.**
+   `net.ipv4.conf.all.arp_ignore = 1` and `arp_announce = 2` are applied on the Pi and
+   verified live. Keep them in `/etc/sysctl.d/60-ros2-dds.conf`, not `sysctl -w`.
+
+7. **Obstacle loss covers only link (0,1).** The ray-caster never reports `(0,2)`, so the
+   GCS↔Pi path — the one detections cross — has no building shadowing. See §5.
 
 ---
 
-## 11. Measured reference
+## 12. Measured reference
 
-Delivered configuration: camera 5 Hz, PyTorch `yolov8n.pt`, `conf=0.4`, class 0 only,
-FOV 0.6 rad, camera pitch 45 deg.
+Delivered configuration: camera 640x384 at 5 Hz, FOV 0.6 rad, pitch 45 deg;
+YOLO11n OpenVINO on the Pi, `conf=0.4`, class 0 only.
 
 | Metric | Value |
 |---|---|
 | Link negotiation | 1000 Mb/s full duplex |
 | Link throughput (iperf3, steady) | ~834 Mbps, 0 retransmits |
-| Camera | 1280x720 RGB, **2.76 MB/frame** |
-| Camera at 20 Hz / 5 Hz | 481 Mbps / ~110 Mbps (11% of the link) |
+| **Camera, delivered** | **640x384 RGB, 0.74 MB/frame** — 29.5 Mbps at 5 Hz (3% of the link) |
+| Camera, before optimisation | 1280x720, 2.76 MB/frame — 481 Mbps at 20 Hz, 110 Mbps at 5 Hz |
 | **Camera delivered to the Pi** | **5.000 Hz** vs 5 Hz source, sigma = 4.5 ms |
 | Real-time factor (`/clock`) | 0.998 |
 | Camera link latency, 60 pings | min 1.0, **avg 1.4**, max 1.8, jitter 0.12 ms |
 | Camera link latency **under 110 Mbps load** | unchanged — no bufferbloat |
-| **Radio link latency (ns-3), 30 pings** | min 10.1, **avg 74.5**, max 158.0, jitter 38.4 ms, 0% loss |
+| **Radio link latency (ns-3), 30 pings** | min 10.1, **avg 74.5**, max 158.0, jitter 38.4 ms, 0% loss — *at a static 38.4 m, see §5* |
 | Radio, independent repeat | avg 77.4 ms — agrees within 4% |
 | Radio vs camera path | **53x latency**, jitter over 2 orders of magnitude larger |
 | **Clock offset, Pi to host** | **60 us** (chrony over the camera link, root delay 1.37 ms) |
-| Inference — PyTorch @ 640, in pipeline | **1,093 ms** mean over 480 frames, min 1,025 |
-| Inference — PyTorch @ 640, standalone | **623 ms** on a static image |
-| Inference — PyTorch @ 960x544 | 2,540 ms (0.39 fps) |
-| Inference — NCNN @ 960x544 | ~1,000 ms (0.74 fps) |
-| Inference — NCNN @ 640x384 | ~470 ms *(predicted, not measured)* |
-| Detection payload vs image | **~118 B vs 2.76 MB** (~23,000x) |
+| **Inference — OpenVINO, standalone** | **236 ms** — fastest correct back-end |
+| Inference — NCNN 384x640, standalone | 270 ms |
+| Inference — NCNN 384x640, in pipeline | **277 ms**, 3.47 fps over 859 frames |
+| Inference — PyTorch 640, standalone | 1,027 ms |
+| Inference — PyTorch 640, in pipeline | 1,013 ms, 0.98 fps over 1,039 frames |
+| Contention (pipeline minus standalone) | **18 ms**, constant regardless of back-end |
+| Starting point, before optimisation | 1,343 ms (1280x720 + annotated return stream) |
+| **Detection payload** | **72 B** empty, 143 B 1 person, 211 B 2, 361 B 4, **433 B** 5 (1,765 msgs) |
+| Payload vs image | ~5,200x smaller than a 0.74 MB frame, for one detection |
 | Detection quality | 1-4 of 5 subjects per frame when in view, conf 0.42-0.59 |
 | Mission | 2 laps, 8 corners, all reached within 2.3 m, no timeouts |
+| **GCS-UAV distance, in flight** | **75.6 - 224.7 m** (was a frozen 38.4 m before 2026-08-13) |
+| **Detection delivery, moving** | **849 / 855 = 99.3%** (0.70% loss); 99.89% when frozen |
 
 Resolution and engine effects are **separable and roughly multiplicative** — inference
 scales close to linearly with pixel count (0.47 pixel ratio -> 0.43 time ratio).
 
-**Contention.** The Pi completes rather less than one detection per second against a 5 Hz
-camera and therefore discards ~80% of what it receives. Discarded frames are not free: each
-still costs reassembly of ~1,900 UDP fragments plus deserialisation of 2.76 MB, competing
-with inference for the same four cores. The same model on a static image runs in 623 ms
-against 1,093 ms in the live pipeline — a gap of ~470 ms.
+**Contention is now 18 ms**, and it is a fixed cost rather than a proportion: the same
+18 ms appears whether inference takes 1,013 ms or 277 ms. It is the cost of receiving and
+deserialising one frame, which competes with inference for the same four cores.
 
-That gap is processor contention, not queueing. Inference is timed around the model call
-alone, so the extra time is spent inside it rather than waiting ahead of it, and the network
-is measurably uncongested (row 8 above). An earlier configuration measured 1,343 ms, but
-that included a 2.76 MB annotated image being sent back to the host on every detection;
-that return stream has been removed and is not part of the architecture under test.
+The 720 ms contention originally measured was real and has been designed out. Two changes
+did it: removing the 2.76 MB annotated frame the Pi returned on every detection, and
+matching the camera resolution to the model input so 3.75x less data crosses the cable.
+See section 10.
+
+At 3.47 fps against a 5 Hz camera the edge node now uses about two thirds of the stream
+and drops the rest. The over-supply is deliberate: it keeps the frame the detector picks up
+under 200 ms old. Supplying only 3.5 Hz would save 1 MB/s and make every frame up to
+285 ms stale, which on a moving aircraft is a metre of displacement.
 
 > The radio minimum of 10.1 ms against a 74.5 ms mean — a ~7x spread on one link — is the
 > tell that ns-3 is modelling a contended channel with queueing and back-off, not applying a
@@ -692,7 +890,7 @@ that return stream has been removed and is not part of the architecture under te
 
 ---
 
-## 12. File map
+## 13. File map
 
 | Path | Purpose |
 |---|---|

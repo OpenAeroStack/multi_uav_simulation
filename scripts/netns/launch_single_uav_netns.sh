@@ -22,6 +22,7 @@ NS3_LOG="/tmp/ns3_single.log"
 GAZEBO_LOG="/tmp/gazebo_netns.log"
 AGENT_LOG="/tmp/agent_netns.log"
 BRIDGE_LOG="/tmp/bridge_netns.log"
+POSPUB_LOG="/tmp/pospub_netns.log"
 SITL_LOG_DIR="/tmp/sitl_netns_uav1"
 
 HOME_GPS="6.0790684,80.1915283,0.00,0"
@@ -50,6 +51,7 @@ GAZEBO_PID=""
 SITL_PID=""
 AGENT_PID=""
 BRIDGE_PID=""
+POSPUB_PID=""
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 0 — Cleanup
@@ -278,6 +280,53 @@ echo "  Gazebo running: PID=$GAZEBO_PID"
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
+# STEP 4b — Position publisher (ns-3 mobility)
+#
+# WITHOUT THIS, EVERY ns-3 NODE STAYS FROZEN at its CLI-default formation
+# position for the whole flight. Nothing errors: the link still carries traffic,
+# pings still return, and the numbers look plausible -- they just describe a
+# fixed 50 m link instead of the drone that is actually flying. The obstacle
+# model has no changing geometry to shadow, so RSSI/SNR never respond to the
+# mission at all.
+#
+# This block existed in launch_netns_v2.sh and was not carried across when this
+# script replaced it. Runs in the ROOT namespace (that is where Gazebo is) and
+# needs Gazebo's DDS profile, or it cannot discover /gazebo/model_states.
+#
+# mirror=2:1 puts node 2 -- the Pi edge node -- at UAV1's coordinates. The Pi is
+# bolted to the same airframe as the autopilot, so it must be at the same place;
+# without it node 2 is never covered by the feed and stays frozen even when
+# node 1 moves. Drop the mirror once the Pi shares node 1 (TapBridge UseBridge).
+# ═══════════════════════════════════════════════════════════════════════════
+echo "=== [4b] Position publisher (feeds real UAV position to ns-3) ==="
+if [[ -f "$PROJECT_DIR/scripts/world_pos_publisher.py" ]]; then
+    : > "$POSPUB_LOG"
+    # set +u before sourcing: this script runs under `set -euo pipefail`, and
+    # /opt/ros/humble/setup.bash reads AMENT_TRACE_SETUP_FILES unset, which
+    # under -u aborts the subshell before python is ever reached. The failure is
+    # quiet -- the launcher carries on, and the only symptom is ns-3 nodes that
+    # never move. Every other stage sidesteps this by using `bash -lc`.
+    ( set +u
+      source /opt/ros/humble/setup.bash
+      export FASTRTPS_DEFAULT_PROFILES_FILE="$PROJECT_DIR/config/fastdds_hitl_eth.xml"
+      exec python3 "$PROJECT_DIR/scripts/world_pos_publisher.py" \
+           --ros-args -p n_uavs:=1 -p mirror:=2:1
+    ) > "$POSPUB_LOG" 2>&1 &
+    POSPUB_PID=$!
+    sleep 3
+    if kill -0 "$POSPUB_PID" 2>/dev/null; then
+        echo "  running: PID=$POSPUB_PID"
+    else
+        echo "  WARNING: position publisher exited — ns-3 nodes will stay at their" >&2
+        echo "           default positions and path loss will NOT track the flight." >&2
+        cat "$POSPUB_LOG" >&2
+    fi
+else
+    echo "  WARNING: world_pos_publisher.py not found — ns-3 mobility will be static." >&2
+fi
+echo ""
+
+# ═══════════════════════════════════════════════════════════════════════════
 # STEP 5 — micro_ros_agent inside gcsns
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== [5/8] micro_ros_agent inside gcsns ==="
@@ -441,7 +490,8 @@ echo ""
 
 cleanup() {
     echo "Shutting down..."
-    kill "$BRIDGE_PID" "$AGENT_PID" "$SITL_PID" "$GAZEBO_PID" "$NS3_PID" 2>/dev/null || true
+    kill "$BRIDGE_PID" "$AGENT_PID" "$SITL_PID" "$POSPUB_PID" "$GAZEBO_PID" \
+         "$NS3_PID" 2>/dev/null || true
     sleep 1
     sudo ip netns del gcsns 2>/dev/null || true
     sudo ip netns del uav1ns 2>/dev/null || true

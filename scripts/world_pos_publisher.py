@@ -48,6 +48,7 @@ Params (ros2 --ros-args -p name:=val):
 import time
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
 
@@ -71,6 +72,19 @@ class WorldPosPublisher(Node):
         # Seconds without /model_states before this node stops publishing.
         # Gazebo's state plugin runs at 20 Hz, so 2 s is ~40 missed frames.
         self.declare_parameter('stale_after', 2.0)
+        # Copy one node's position onto another: "dst:src[,dst:src...]".
+        #
+        # An ns-3 node that the feed never covers keeps its CLI-default start
+        # position for the whole run -- silently, since a frozen node still
+        # carries traffic and still answers pings. It is only visible in
+        # CheckIntegration()'s "missing node IDs" line.
+        #
+        # The case this exists for: the Pi edge node is ns-3 node 2 while the
+        # aircraft it serves is node 1, so with one UAV in the world node 2 is
+        # never fed. Both are on the SAME airframe, so "2:1" is not a fudge --
+        # it is the physically correct position for a companion computer bolted
+        # next to the autopilot. Remove it once the Pi shares node 1.
+        self.declare_parameter('mirror', '')
 
         topic = self.get_parameter('model_states_topic').value
         self.prefix = self.get_parameter('uav_prefix').value
@@ -81,17 +95,34 @@ class WorldPosPublisher(Node):
         self.gcs_h = float(self.get_parameter('gcs_antenna_height').value)
         self.stale_after = float(self.get_parameter('stale_after').value)
 
+        # "2:1,3:1" -> {2: 1, 3: 1}. Parsed once here so a malformed value fails
+        # at startup rather than silently publishing nothing for those nodes.
+        self.mirror = {}
+        spec = str(self.get_parameter('mirror').value).strip()
+        if spec:
+            for pair in spec.split(','):
+                dst, _, src = pair.partition(':')
+                if not src:
+                    raise ValueError(
+                        f"mirror entry '{pair}' is not dst:src (e.g. 2:1)")
+                self.mirror[int(dst)] = int(src)
+
         self._latest = None          # last ModelStates msg
         self._latest_t = 0.0         # monotonic time it arrived
         self._stale = False
         self._warned = False
         self._gcs_warned = False
+        self._mirror_warned = False
         self.sub = self.create_subscription(ModelStates, topic, self._on_states, 10)
         self.pub = self.create_publisher(Float32MultiArray, '/uav_world_positions', 10)
         self.timer = self.create_timer(1.0 / rate, self._tick)
         self.get_logger().info(
             f"Relaying {topic} -> /uav_world_positions "
             f"({self.n_uavs} UAVs, prefix '{self.prefix}', {rate:.0f} Hz)")
+        if self.mirror:
+            self.get_logger().info(
+                "Mirroring: " + ", ".join(f"node {d} <- node {s}"
+                                          for d, s in self.mirror.items()))
         if self.gcs_enabled:
             self.get_logger().info(
                 f"GCS enabled: model '{self.gcs_model}' -> id 0 "
@@ -174,6 +205,7 @@ class WorldPosPublisher(Node):
         # With the GCS present, node id k maps to model "<prefix>k" (the +1
         # that used to be here is absorbed by the shifted id).
         base = 1 if self.gcs_enabled else 0
+        poses = {}                            # nid -> (x, y, z), for mirroring
         for k in range(self.n_uavs):
             nid = base + k
             want = f"{self.prefix}{k + 1}"     # always iris_1..iris_N
@@ -181,7 +213,25 @@ class WorldPosPublisher(Node):
             if idx is None:
                 continue
             p = self._latest.pose[idx].position
+            poses[nid] = (float(p.x), float(p.y), float(p.z))
             out.extend([float(nid), float(p.x), float(p.y), float(p.z)])
+            found += 1
+
+        # ── mirrored nodes ───────────────────────────────────────────────
+        # Emitted after the real ones so a mirror can never shadow a node the
+        # feed actually covers.
+        for dst, src in self.mirror.items():
+            if dst in poses:
+                continue                      # real position wins
+            if src not in poses:
+                if not self._mirror_warned:
+                    self.get_logger().warn(
+                        f"mirror {dst}:{src} — source node {src} has no position, "
+                        f"so node {dst} stays frozen at its ns-3 default.")
+                    self._mirror_warned = True
+                continue
+            x, y, z = poses[src]
+            out.extend([float(dst), x, y, z])
             found += 1
 
         if found:
@@ -193,11 +243,16 @@ def main():
     node = WorldPosPublisher()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    # Ctrl+C raises KeyboardInterrupt; SIGTERM (how the launcher stops this)
+    # raises ExternalShutdownException and already shut the context down, so
+    # calling rclpy.shutdown() again below raises RCLError. Catching only the
+    # first printed a traceback on every clean teardown.
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

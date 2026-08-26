@@ -166,51 +166,99 @@ python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"   # downloads yolov
 > Expect `1.26.4 4.10.0 bgr8 OK`. Test **both** directions — reading worked fine while
 > writing was broken, so an import check alone is not enough.
 
-### 3.4b Optional — NCNN for ~2× faster inference
+### 3.4b Faster inference — OpenVINO or NCNN
 
-NCNN is ARM-NEON optimised and is what ultralytics benchmarks as fastest on Raspberry Pi.
-Measured on this Pi 4B: **2,540 ms → ~1,000 ms per frame** at the same input size.
+PyTorch is the slowest option on this board by 4x. Measured on this Pi 4B with
+`scripts/bench_backends.py` (10 calls each, median, correctness checked before speed):
+
+| Back-end | Median | vs PyTorch |
+|---|---|---|
+| **YOLO11n OpenVINO** | **236 ms** | **4.35x** |
+| YOLOv8n NCNN 384x640 | 270 ms | 3.80x |
+| YOLO11n MNN | 342 ms | 3.00x — *slower than NCNN here* |
+| YOLOv8n PyTorch 640 | 1,027 ms | 1.00x |
+
+OpenVINO on ARM is not emulation: the aarch64 wheel ships
+`libopenvino_arm_cpu_plugin.so`, built on **Arm Compute Library**, so it uses NEON exactly
+as NCNN does. `FULL_DEVICE_NAME` reports `Raspberry Pi 4 Model B`.
+
+**Published Pi 5 rankings do not transfer.** The Pi 5's Cortex-A76 is ARMv8.2-A; the Pi 4B's
+Cortex-A72 is ARMv8.0-A and reports `i8sdot:0, fp16:0, i8mm:0`. That is why MNN inverts and
+why OpenVINO wins by only 1.15x here instead of 3.6x. It is also why **`half=True` gains
+nothing** — the runtime advertises `['FP32', 'INT8', 'BIN']`, no FP16.
 
 ```bash
-pip install ncnn
+pip install openvino ncnn
 ```
 
-Export on the **host** (faster, and the `pnnx` converter ships an x86 wheel) and copy over —
-NCNN's `.param`/`.bin` files are architecture-independent:
+Export on the **host** and copy over — both formats are architecture-independent:
 
 ```bash
 # on the HOST:
 venv/bin/python -c "
 from ultralytics import YOLO
-YOLO('yolov8n.pt').export(format='ncnn', imgsz=[544,960], half=False)"
-scp -r yolov8n_ncnn_model/ anton@10.0.0.2:/home/anton/models/
+YOLO('yolo11n.pt').export(format='openvino', imgsz=[384,640])"
+rsync -a yolo11n_openvino_model/ anton@10.0.0.2:~/models/yolo11n_openvino_model/
+
+venv/bin/python -c "
+from ultralytics import YOLO
+YOLO('yolov8n.pt').export(format='ncnn', imgsz=[384,640], half=False)"
+rsync -a yolov8n_ncnn_model/ anton@10.0.0.2:~/models/yolov8n_384x640_ncnn_model/
 ```
 
-> **`imgsz` must match what the detector runs**, and the order is `[height, width]`.
-> NCNN bakes in a **fixed input shape**; a plain `imgsz=960` produces a *square* 960×960
-> input (19.9 GFLOPS, 43% grey padding) instead of the rectangular 960×544 that a 1280×720
-> frame actually letterboxes to (11.3 GFLOPS). A mismatch is silently ignored, not raised.
+> ### ⚠ Never pass `imgsz` to an exported model
 >
-> **`half=False`** — the Cortex-A72 has no fp16 SIMD, the same gap that causes the
+> An earlier revision of this guide said *"a mismatch is silently ignored, not raised."*
+> **That is wrong, and it is the dangerous kind of wrong.** For an export the input shape is
+> fixed at export time, and `imgsz` also overrides the shape ultralytics uses to *decode*
+> the output coordinates. Reproduced on a 384x640 export:
+>
+> | | call 1 | calls 2-6 |
+> |---|---|---|
+> | NCNN, `imgsz=640` passed | 3 persons, conf 0.85 | **2 persons, conf 0.74** — no error |
+> | NCNN, `imgsz` dropped | 3 persons, 0.85 | 3 persons, 0.85 |
+> | OpenVINO, `imgsz=640` passed | `RuntimeError: shape mismatch` | — |
+>
+> OpenVINO raises. **NCNN does not** — it settles into a stable, plausible, wrong answer.
+> Both detectors now drop `imgsz` for anything that is not a `.pt`. Note `imgsz` is
+> `[height, width]`, the opposite of the usual W x H.
+>
+> `half=False` for NCNN — the Cortex-A72 has no fp16 SIMD, the same gap behind the
 > CUDA-torch SIGILL above.
 
-Then just point the detector at the directory instead of the `.pt` file; no code change is
-needed, since `YOLO()` accepts an NCNN model directory.
+Point the detector at the model directory instead of the `.pt`; no code change is needed.
 
 ### 3.5 Get the code onto the Pi + build
 
-```bash
-# clone your repo (use whatever remote/branch you use; this is the HITL branch)
-git clone <your-repo-url> ~/multi_uav_simulation
-cd ~/multi_uav_simulation
-git checkout ground-vs-edge-processing-RPi
+The working Pi uses **`~/uav2_ws`**, with only `uav_vision` in it — not a full clone. Match
+that, because `run_hitl.sh` hardcodes the path:
 
-# build ONLY the vision package (the Pi doesn't need gazebo/ns-3 packages)
-source /opt/ros/humble/setup.bash
-colcon build --packages-select uav_vision
-echo "source ~/multi_uav_simulation/install/setup.bash" >> ~/.bashrc
-source ~/.bashrc
+```bash
+mkdir -p ~/uav2_ws/src ~/uav2_ws/config ~/models
 ```
+```bash
+# FROM THE HOST — the Pi does NOT track the repo; it is rsynced
+rsync -av --exclude='__pycache__' ros2/uav_vision/ anton@<pi>:~/uav2_ws/src/uav_vision/
+scp config/fastdds_hitl_eth.xml anton@<pi>:~/uav2_ws/config/
+scp scripts/yolo_detect_node.py scripts/bench_backends.py anton@<pi>:~/
+```
+```bash
+# ON THE PI
+cd ~/uav2_ws && source /opt/ros/humble/setup.bash
+colcon build --packages-select uav_vision
+echo "source ~/uav2_ws/install/setup.bash" >> ~/.bashrc
+```
+
+Also set up key auth and passwordless sudo now — Ansible will need both later:
+
+```bash
+ssh-copy-id anton@<pi>                                        # from the host
+echo "anton ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/90-anton-nopasswd
+sudo chmod 440 /etc/sudoers.d/90-anton-nopasswd               # on the Pi
+```
+
+> **After any host-side edit, re-sync and rebuild.** Stale code once left the detector
+> subscribed to a topic nobody published — it started cleanly and then sat silent.
 
 ### 3.6 Sanity test — YOLO works on ARM
 
@@ -247,19 +295,23 @@ sudo nmcli connection modify "Wired connection 2" ipv4.method manual \
 sudo nmcli connection up "Wired connection 2"
 ```
 
+> ### ⚠ Do NOT create a plain `eth0` address here
+>
+> Earlier revisions told you to write `99-cat6-link.yaml` giving `10.0.0.2` to untagged
+> `eth0`, and then to add VLANs in Phase 5. **Doing both puts one address on two
+> interfaces.** Netplan merges files in number order without warning, so both take effect,
+> and three unrelated-looking symptoms follow: ping and SSH still work; multicast silently
+> never arrives; and **Fast DDS segfaults at participant creation** (exit 139, no message)
+> because the whitelist entry matches two devices and produces duplicate locators.
+>
+> Skip straight to the VLAN file in Phase 5 — it carries the address. If a machine already
+> has `99-cat6-link.yaml`, delete it.
+
+Check before every session; it must print `1`:
+
 ```bash
-# PI (Ubuntu Server → systemd-networkd / netplan)
-sudo tee /etc/netplan/99-cat6-link.yaml >/dev/null <<'EOF'
-network:
-  version: 2
-  ethernets:
-    eth0:
-      dhcp4: no
-      dhcp6: no
-      addresses: [10.0.0.2/24]
-EOF
-sudo chmod 600 /etc/netplan/99-cat6-link.yaml
-sudo netplan try          # auto-reverts in 120 s if it breaks your SSH
+ip -4 addr show | grep -c "10.0.0.2/24"     # on the Pi
+grep -l "eth0" /etc/netplan/*.yaml          # only ONE file may touch eth0
 ```
 
 `ipv4.never-default yes` matters — without it NM may route all traffic down the cable and
@@ -274,10 +326,24 @@ appears in `ros2 topic list` but no data ever arrives.
 sudo tee /etc/sysctl.d/60-ros2-dds.conf >/dev/null <<'EOF'
 net.core.rmem_max = 536870912
 net.core.rmem_default = 134217728
+net.core.wmem_max = 536870912
+net.core.wmem_default = 134217728
 net.ipv4.ipfrag_high_thresh = 134217728
+net.ipv4.conf.all.arp_ignore = 1
+net.ipv4.conf.all.arp_announce = 2
 EOF
 sudo sysctl --system
 ```
+
+> **Both directions, or neither works.** Earlier revisions of this guide set only `rmem`.
+> With `wmem_max` left at the default, the DDS profile's 16 MB `<sendBufferSize>` is
+> silently clamped to 208 KB and the **publisher** discards fragments before they reach the
+> NIC. That failure is invisible to every interface counter — `tx_dropped` stays 0 on the
+> host and `rx_errors` stays 0 on the Pi, because nothing was ever transmitted. Measured
+> symptom: 0.19 Hz delivered against a 5 Hz source. It cost days.
+>
+> The two `arp_*` lines stop the Pi answering ARP for its cable address over WiFi, which
+> would otherwise let traffic you believe is on the cable take another path.
 
 **Pin DDS to the cable.** Both machines are on WiFi *and* Ethernet, and Fast DDS otherwise
 announces a locator on every interface — the camera can end up on WiFi, where large samples
@@ -308,12 +374,29 @@ The Pi has one Ethernet port but needs two links, so `eth0` is split with 802.1Q
 The Pi occupies the **UAV2 slot** of the 4-node ns-3 binary (node 0 = GCS, node 1 = SITL,
 node 2 = the Pi). On the host, VLAN 42 is bridged into `br-uav2 → tap-uav2 → ns-3`.
 
-Run the host launcher **first** (it creates `br-uav2` and the host-side VLANs), then on the
-Pi:
+Make it persistent with netplan — **this file carries the addresses**, so there must be no
+other netplan file touching `eth0`:
 
 ```bash
-sudo bash ~/pi_hitl_link.sh
+sudo tee /etc/netplan/60-hitl-vlans.yaml >/dev/null <<'EOF'
+network:
+  version: 2
+  ethernets:
+    eth0: {dhcp4: no, optional: true}
+  vlans:
+    eth0.10: {id: 10, link: eth0, addresses: [10.0.0.2/24]}
+    eth0.42: {id: 42, link: eth0, addresses: [10.42.0.12/24]}
+EOF
+sudo chmod 600 /etc/netplan/60-hitl-vlans.yaml
+sudo netplan try          # auto-reverts in 120 s if it breaks your SSH
 ```
+
+`optional: true` stops boot waiting two minutes for a DHCP reply that will never come.
+Run the host launcher first — it creates `br-uav2` and the host-side VLANs.
+
+> `scripts/netns/pi_hitl_link.sh` did this with plain `ip` commands and did **not** survive
+> a reboot. It is superseded by the netplan file above and kept only for a machine that has
+> not been configured yet.
 
 Verify **both** paths — this is the test that proves the split is real:
 
@@ -329,14 +412,33 @@ channel and a 2-ping sample reported a misleading 167 ms average.
 > If the radio link answers as fast as the cable, detections are **not** crossing ns-3 and
 > every latency number will be meaningless.
 
-> **⚠ Not persistent.** `pi_hitl_link.sh` uses plain `ip` commands, so a Pi reboot drops
-> back to untagged `eth0` while the host still expects VLAN 10. The symptom is
-> `Destination Host Unreachable` with the carrier up and the link at 1000 Mbps. Re-run the
-> script after every reboot until it is moved into netplan with a `vlans:` section.
+### Clock sync ✅ SOLVED
 
-**Clock sync is still outstanding** — run `chrony` between the Pi and host before
-collecting any latency data, or `metrics_logger`'s `receipt_wall − send_wall` across two
-unsynchronised clocks produces plausible-looking nonsense.
+The Pi takes time **from the host over the camera link**, not from the internet — that link
+is 1.4 ms away and always present, so it beats public NTP on both accuracy and availability,
+and the rig needs no internet at all.
+
+```bash
+# HOST — chrony replaces systemd-timesyncd, which is client-only and cannot serve
+sudo apt install -y chrony
+sudo tee -a /etc/chrony/chrony.conf > /dev/null <<'EOF'
+
+allow 10.0.0.0/24
+local stratum 10
+EOF
+sudo systemctl restart chrony
+
+# PI
+sudo apt install -y chrony
+sudo sed -i '1i server 10.0.0.1 iburst prefer minpoll 4 maxpoll 6' /etc/chrony/chrony.conf
+sudo systemctl restart chrony
+```
+
+Verify on the Pi — `chronyc sources` should show `^*` on `10.0.0.1`, and `chronyc tracking`
+a `System time` offset of a few microseconds (measured: 2-60 us against a 75 ms radio
+latency, an error of well under 0.1%). A Pi 4B has **no battery-backed clock**, so without
+this it starts each boot from whatever `fake-hwclock` last wrote — one was found 2 h 55 m
+behind, which would have made every latency figure nonsense while looking plausible.
 
 ---
 
@@ -348,12 +450,18 @@ source /opt/ros/humble/setup.bash
 export FASTRTPS_DEFAULT_PROFILES_FILE=$HOME/uav2_ws/config/fastdds_hitl_eth.xml
 
 ~/yolo_env/bin/python ~/yolo_detect_node.py --ros-args \
-    -p model_path:=/home/anton/models/yolov8n.pt \
+    -p model_path:=$HOME/models/yolo11n_openvino_model \
     -p show_window:=False
 ```
 
 `show_window:=False` is required — the Pi is headless and `cv2.imshow` has no display.
-Swap `model_path` to `/home/anton/models/yolov8n_ncnn_model` for the NCNN build.
+Swap `model_path` for `yolov8n_384x640_ncnn_model` (270 ms) or `yolov8n.pt` (1,027 ms).
+**Do not pass `imgsz` with either exported model** — see §3.4b.
+
+In normal use you do not run this by hand: `./scripts/netns/run_hitl.sh` starts the whole
+stack including the Pi's detector over SSH, and tears it down with Ctrl+C. Expect ~12 s to
+load OpenVINO and a ~13 s first inference (it compiles the model on the first call), then
+~250 ms steady.
 
 > **Sensor subscriptions must use `BEST_EFFORT`, depth 1.** Gazebo's camera publisher is
 > `RELIABLE`; a `RELIABLE` subscriber makes it wait for an acknowledgement of every frame,
@@ -375,12 +483,16 @@ Swap `model_path` to `/home/anton/models/yolov8n_ncnn_model` for the NCNN build.
 
 ## Measured performance (Pi 4B)
 
-| Engine | imgsz | Per frame | Rate |
+| Engine | imgsz | Per frame | In pipeline |
 |---|---|---|---|
-| PyTorch | 960×544 | **2,540 ms** | 0.39 fps |
-| PyTorch | 640×384 | ~1,100 ms | 0.9 fps |
-| **NCNN** | 960×544 | **~1,000 ms** | 0.74 fps |
-| NCNN | 640×384 | ~470 ms *(predicted)* | — |
+| **OpenVINO** | 384×640 | **236 ms** | ~250 ms |
+| NCNN | 384×640 | 270 ms | 277 ms (3.47 fps) |
+| PyTorch | 640 | 1,027 ms | 1,013 ms (0.98 fps) |
+
+Delivered configuration: camera **640×384 at 5 Hz**, FOV 0.6 rad, 45° pitch, `conf=0.4`,
+class 0 only. Inference went from 1,343 ms to 236 ms — 5.7x — entirely through
+configuration: removing the annotated return stream, matching the camera to the model
+input, and PyTorch → NCNN → OpenVINO.
 
 Resolution and engine effects are separable and roughly multiplicative; inference scales
 close to linearly with pixel count.

@@ -356,14 +356,17 @@ ros2 run image_transport republish raw --ros-args \
 
 ### Camera specifications
 
-| Property | Value |
-|----------|-------|
-| Resolution | 640 × 480 |
-| Format | RGB8 |
-| Field of view | 2.0 rad (~115°) |
-| Update rate | 10 Hz |
-| Orientation | Downward-facing |
-| Mount | gimbal_small_2d tilt_link |
+| Property | `iris_N` (base sim) | `iris_1_netns` (HITL) |
+|----------|--------------------|------------------------|
+| Resolution | 1280 × 720 | 640 × 384 |
+| Format | RGB8 | RGB8 |
+| Field of view | 0.9 rad (~52°) | 0.6 rad (~34°) |
+| Update rate | 20 Hz | 5 Hz |
+| Orientation | 45° pitch down | 45° pitch down |
+| Mount | gimbal_small_2d tilt_link | gimbal_small_2d tilt_link |
+
+The HITL model is smaller and slower on purpose: it matches the model input so the Pi
+spends no time on pixels it discards, and 5 Hz keeps the link at 29.5 Mbps instead of 481.
 
 ---
 
@@ -409,7 +412,7 @@ python3 scripts/multi_drone_mission.py
 
 > Do not run MAVProxy and drone_bridge on the same TCP port simultaneously.
 
-> **Hardware-in-the-loop (RPi5 edge processing):** see
+> **Hardware-in-the-loop (Raspberry Pi 4B edge processing):** see
 > [README_EDGE_PROCESSING.md](README_EDGE_PROCESSING.md).
 
 ---
@@ -490,19 +493,24 @@ multi_uav_sim/
 │   ├── uav2_dds.parm             # DDS_ENABLE=1, DDS_UDP_PORT=2020
 │   └── uav3_dds.parm             # DDS_ENABLE=1, DDS_UDP_PORT=2021
 ├── ros2/
-│   └── uav_controller/
-│       └── uav_controller/
-│           ├── drone_bridge.py    # MAVLink+DDS ↔ ROS2 bridge
-│           ├── takeoff_mission.py # single-drone auto mission
-│           ├── l_mission.py       # L-shaped waypoint mission
-│           └── multi_mission.py   # barrier-synchronised 3-drone mission
+│   ├── uav_controller/
+│   │   └── uav_controller/
+│   │       ├── drone_bridge.py    # MAVLink+DDS ↔ ROS2 bridge
+│   │       ├── takeoff_mission.py # single-drone auto mission
+│   │       ├── l_mission.py       # L-shaped waypoint mission
+│   │       └── multi_mission.py   # barrier-synchronised 3-drone mission
+│   └── uav_vision/               # edge-vs-ground vision nodes (see below)
+│       └── uav_vision/           # detector, gcs_receiver, metrics_logger, camera_relay
 ├── scripts/                      # pymavlink scripts (no ROS2 needed)
 │   ├── single_drone_takeoff.py
 │   ├── single_drone_mission.py
-│   └── multi_drone_mission.py
+│   ├── multi_drone_mission.py
+│   └── netns/                    # namespace + ns-3 + HITL bring-up
+├── ns3/                          # simulated wireless channel model
 ├── worlds/
 │   ├── multi_uav.world
-│   └── single_uav.world
+│   ├── single_uav.world
+│   └── small_city_single_uav_netns.world   # HITL world, 5 person_standing
 ├── setup.sh
 ├── build_ros2.sh
 └── README.md

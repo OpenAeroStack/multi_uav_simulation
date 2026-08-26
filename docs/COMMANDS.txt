@@ -1,0 +1,229 @@
+================================================================================
+ HITL RUN COMMANDS
+ [H] = host      [P] = Raspberry Pi
+================================================================================
+
+
+--------------------------------------------------------------------------------
+ 0. CHECK FIRST
+--------------------------------------------------------------------------------
+
+[P] ip -4 addr show | grep -c "10.0.0.2/24"        must print 1
+[P] ip -br addr show | grep -E "eth0|wlan0"
+[P] chronyc tracking | grep -E "Reference ID|System time"
+[H] sysctl net.core.rmem_max net.core.wmem_max     both 536870912
+[H] ip -br addr show | grep eth-cam
+[H] ping -c 3 10.0.0.2
+
+if eth-cam missing:
+sudo nmcli connection up eth-cam
+
+
+--------------------------------------------------------------------------------
+ 1. STACK                     [H]  terminal 1
+--------------------------------------------------------------------------------
+
+cd ~/multi_uav_simulation
+./scripts/netns/run_hitl.sh --no-pi
+
+    wait for: PIPELINE READY
+
+
+--------------------------------------------------------------------------------
+ 2. DETECTOR                  [P]  terminal 2
+--------------------------------------------------------------------------------
+
+export FASTRTPS_DEFAULT_PROFILES_FILE=$HOME/uav2_ws/config/fastdds_hitl_eth.xml
+source /opt/ros/humble/setup.bash
+
+OpenVINO  (236 ms, ~4.2 fps)  <- fastest correct, do NOT pass imgsz
+~/yolo_env/bin/python ~/yolo_detect_node.py --ros-args \
+    -p model_path:=$HOME/models/yolo11n_openvino_model \
+    -p show_window:=False 2>&1 | tee ~/detector.log
+
+NCNN  (270 ms, ~3.7 fps)  do NOT pass imgsz
+~/yolo_env/bin/python ~/yolo_detect_node.py --ros-args \
+    -p model_path:=$HOME/models/yolov8n_384x640_ncnn_model \
+    -p show_window:=False 2>&1 | tee ~/detector.log
+
+PyTorch  (1027 ms, ~1 fps)
+~/yolo_env/bin/python ~/yolo_detect_node.py --ros-args \
+    -p model_path:=$HOME/models/yolov8n.pt \
+    -p imgsz:=640 -p show_window:=False 2>&1 | tee ~/detector.log
+
+
+--------------------------------------------------------------------------------
+ 3. GROUND STATION            [H]  terminal 3
+--------------------------------------------------------------------------------
+
+REPO=/home/anton/multi_uav_simulation
+sudo ip netns exec gcsns sudo -H -u $USER \
+  env FASTRTPS_DEFAULT_PROFILES_FILE=$REPO/config/fastdds_hitl_eth.xml \
+  bash -lc "source /opt/ros/humble/setup.bash && source $REPO/install/setup.bash && \
+            ros2 run uav_vision gcs_receiver --ros-args -p uav_id:=1 -p processing_mode:=edge"
+
+
+--------------------------------------------------------------------------------
+ 4. MISSION                   [H]  terminal 4
+--------------------------------------------------------------------------------
+
+REPO=/home/anton/multi_uav_simulation
+sudo ip netns exec gcsns sudo -H -u $USER bash -lc \
+ "source /opt/ros/humble/setup.bash && source $REPO/ros2/install/setup.bash && \
+  python3 $REPO/ros2/uav_controller/uav_controller/uav1_patrol_mission.py" 2>&1 | tee /tmp/mission.log
+
+
+--------------------------------------------------------------------------------
+ 5. VIEW DETECTIONS           [H]  terminal 5
+--------------------------------------------------------------------------------
+
+cd ~/multi_uav_simulation
+export FASTRTPS_DEFAULT_PROFILES_FILE=$PWD/config/fastdds_hitl_eth.xml
+source /opt/ros/humble/setup.bash
+python3 scripts/detection_viewer.py            s = save frame,  q = quit
+
+raw camera only:
+ros2 run rqt_image_view rqt_image_view /uav1/camera/image_raw
+
+
+================================================================================
+ MEASUREMENTS
+================================================================================
+
+link latency                                     [P]
+ping -c 60 10.0.0.1   | tail -2                  sensor,  ~1.4 ms
+ping -c 30 10.42.0.10 | tail -2                  radio,   ~75 ms
+
+camera rate                                      [P]
+ros2 topic hz /uav1/camera/image_raw             5.000 Hz
+ip -s link show eth0.10 | grep -A1 "RX:"         dropped must be 0
+
+link actually loaded                             [P]
+r1=$(cat /sys/class/net/eth0.10/statistics/rx_bytes); sleep 5
+r2=$(cat /sys/class/net/eth0.10/statistics/rx_bytes)
+echo "$(( (r2-r1)/1024/1024/5 )) MB/s"           ~3.7 MB/s at 640x384
+
+detector rate + inference                        [P]
+~/rate.sh
+
+detections                                       [P]
+grep -c "human(s)"      ~/detector.log
+grep -c "| [1-9] human" ~/detector.log
+grep -o "| [0-9]* human" ~/detector.log | sort | uniq -c
+
+backend benchmark                                [P]
+~/yolo_env/bin/python ~/bench_backends.py
+
+traffic separation                               [H]
+sudo timeout 30 tcpdump -i tap-uav2 -nn -q > /tmp/rf.txt
+grep -c "10\.0\.0\."  /tmp/rf.txt                must be 0
+grep -c "10\.42\.0\." /tmp/rf.txt                must be > 0
+ip -s link show eth-cam  | grep -A1 "TX:"
+ip -s link show tap-uav2 | grep -A1 "RX:"
+
+which corner produced detections
+[P] grep "| [1-9] human" ~/detector.log
+[H] grep -E "Corner|Lap|arrived|timeout" /tmp/mission.log
+
+
+================================================================================
+ SHUTDOWN
+================================================================================
+
+Ctrl+C in terminal 1
+
+ip -br link | grep -E "br-|tap-|eth-rf"          should print nothing
+ping -c 2 10.0.0.2                               should still work
+
+pkill -9 -x 'gzserver|gzclient'                  -x not -f
+
+
+================================================================================
+ SETTINGS
+================================================================================
+
+camera resolution / fov / rate    models/iris_1_netns/model.sdf   line 630-656
+patrol altitude                   ros2/uav_controller/uav_controller/uav1_patrol_mission.py  line 42
+confidence threshold              scripts/yolo_detect_node.py     line 46
+DDS profile                       config/fastdds_hitl_eth.xml
+
+export a new model                [H]
+cd ~/multi_uav_simulation
+venv/bin/python -c "
+from ultralytics import YOLO
+YOLO('yolov8n.pt').export(format='ncnn', imgsz=[384,640], half=False)"
+rsync -a yolov8n_ncnn_model/ anton@10.0.0.2:~/models/yolov8n_384x640_ncnn_model/
+
+venv/bin/python -c "
+from ultralytics import YOLO
+YOLO('yolo11n.pt').export(format='openvino', imgsz=[384,640])"
+rsync -a yolo11n_openvino_model/ anton@10.0.0.2:~/models/yolo11n_openvino_model/
+
+
+================================================================================
+ WHEN BROKEN  -  stop at the first failure
+================================================================================
+
+1. ros2 topic hz /clock                    frozen -> sim stalled
+2. [P] ip -4 addr show | grep -c "10.0.0.2/24"    not 1 -> duplicate address
+3. [P] ping -c 3 10.0.0.1                  unreachable from own IP -> layer 2
+4. [P] ros2 topic list                     only 2 topics -> discovery broken
+                                           segfault -> duplicate address
+5. compare ros2 topic hz on BOTH machines  differ -> transport
+6. sysctl net.core.wmem_max                small -> send starvation, no counter shows it
+7. tcpdump sees it, app does not           -> between interface and socket
+
+
+================================================================================
+ REFERENCE NUMBERS
+================================================================================
+
+ camera to Pi ................. 5.000 Hz, sigma 4.5 ms
+ sensor link .................. 1.0 / 1.4 / 1.8 ms, jitter 0.12
+ sensor link under load ....... unchanged
+ radio link ................... 10.1 / 74.5 / 158 ms, jitter 38.4
+ clock offset ................. 2-60 us (chrony over the sensor link)
+ frame size ................... 640x384, 0.74 MB
+ bandwidth .................... 29.5 Mbps  (3% of link)
+
+ inference  OpenVINO .......... 236 ms    <- fastest correct
+ inference  NCNN 384x640 ...... 270 ms   (277 ms in pipeline, 3.47 fps)
+ inference  PyTorch 320 ....... 291 ms
+ inference  YOLO11n MNN ....... 342 ms   (slower than NCNN on a Pi 4B)
+ inference  NCNN 544x960 ...... 579 ms
+ inference  PyTorch 480 ....... 589 ms
+ inference  PyTorch 640 ....... 1027 ms  (1013 ms in pipeline, 0.98 fps)
+ contention (pipeline-alone) .. 18 ms, constant across back-ends
+
+ detection payload ............ 72 B empty, 143 B 1 person, 433 B 5
+ real-time factor ............. 0.998
+
+
+================================================================================
+ TRAPS
+================================================================================
+
+NCNN: never pass imgsz. It is fixed at export time. Passing imgsz=640 to a
+      384x640 model gives correct boxes on call 1 and 13 garbage boxes at
+      conf 0.88 on every call after. No error. yolo_detect_node.py now drops
+      imgsz automatically for NCNN models.
+
+imgsz is [height, width]. A single number means square.
+
+Same rule for every export - OpenVINO, .mnn, .onnx. Only a .pt takes imgsz.
+Both detectors now drop it automatically for anything else.
+
+OpenVINO RAISES on a shape mismatch. NCNN does not - it returns a stable
+wrong answer that looks plausible. Never trust NCNN counts without looking.
+
+Pi 5 back-end rankings do not transfer. The Pi 4B's Cortex-A72 is ARMv8.0-A
+and lacks i8sdot/fp16/i8mm, so MNN is SLOWER than NCNN here and FP16 gains
+nothing. Benchmark on the actual board.
+
+pkill -f gzserver kills your own terminal. Use -x.
+
+install/ has uav_vision.  ros2/install/ has uav_controller. Not interchangeable.
+
+mission must run inside gcsns or /uav1/arm is invisible.
+
+detector must be running or the camera does not transmit at all.
