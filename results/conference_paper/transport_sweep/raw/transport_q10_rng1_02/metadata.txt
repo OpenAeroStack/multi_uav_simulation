@@ -1,0 +1,26 @@
+run_id=transport_q10_rng1_02
+rng_run=1
+jpeg_quality=10
+frame_rate_hz=1.0
+official_publications=60
+official_start_sequence=22
+official_end_sequence=81
+official_start_time=2026-08-27T16:36:14,517464190+05:30
+official_end_time=2026-08-27T16:37:14,181372195+05:30
+yolo_model=YOLOv8n (/home/multi_uav/yolo_env/yolov8n.pt)
+yolo_confidence=0.25
+yolo_imgsz=960
+yolo_classes=[0] person only
+compressed_image_publisher_qos=BEST_EFFORT KEEP_LAST depth=1
+ground_detector_subscriber_qos=BEST_EFFORT KEEP_LAST depth=1
+rmw_implementation_environment=<unset>
+ns3_configuration=three_uav_tapbridge_integrated.cc; 802.11a adhoc; OfdmRate6Mbps; existing DynamicObstacleLoss/LogDistance configuration
+git_commit_hash=a32bc3caf38f50d3db85e8e265241c4f6c85fa99
+topic_info_file=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/transport_sweep/raw/transport_q10_rng1_02/compressed_topic_info.txt
+network_configuration_file=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/transport_sweep/raw/transport_q10_rng1_02/network_configuration.txt
+relay_log=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/transport_sweep/raw/transport_q10_rng1_02/camera_relay.log
+detector_log=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/transport_sweep/raw/transport_q10_rng1_02/detector.log
+ns3_log=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/transport_sweep/raw/transport_q10_rng1_02/ns3.log
+transport_trace=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/transport_sweep/processed/transport_trace_transport_q10_rng1_02.csv
+run_summary=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/transport_sweep/processed/transport_summary_transport_q10_rng1_02.csv
+tap_deltas=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/transport_sweep/processed/tap_deltas_transport_q10_rng1_02.csv

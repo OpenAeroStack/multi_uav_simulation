@@ -23,6 +23,7 @@ NOTE: deliberately avoids cv_bridge due to NumPy 2.x incompatibility.
 Uses numpy directly for image buffer access instead.
 """
 
+import json
 import time
 
 import cv2
@@ -44,11 +45,18 @@ class CameraRelay(Node):
         self.declare_parameter('processing_mode', 'edge')
         self.declare_parameter('jpeg_quality', 50)
         self.declare_parameter('frame_rate_hz', 1.0)
+        self.declare_parameter('experiment_sequence_ids', False)
+        self.declare_parameter('transport_trace_path', '')
 
         self._uav_id  = self.get_parameter('uav_id').value
         self._mode    = self.get_parameter('processing_mode').value
         self._quality = int(self.get_parameter('jpeg_quality').value)
         self._rate_hz = float(self.get_parameter('frame_rate_hz').value)
+        self._experiment_sequence_ids = bool(
+            self.get_parameter('experiment_sequence_ids').value)
+        trace_path = str(self.get_parameter('transport_trace_path').value)
+        self._transport_trace = (
+            open(trace_path, 'a', encoding='utf-8') if trace_path else None)
 
         if self._mode not in self.MODES:
             self.get_logger().error(
@@ -96,6 +104,12 @@ class CameraRelay(Node):
         self._out_topic = out_topic
         self.create_timer(self._min_interval, self._publish)
 
+    def _trace_event(self, payload: dict) -> None:
+        if self._transport_trace is None:
+            return
+        self._transport_trace.write(json.dumps(payload) + '\n')
+        self._transport_trace.flush()
+
     def _on_frame(self, msg: Image) -> None:
         """Buffer latest frame — never block, just overwrite."""
         self._latest_msg = msg
@@ -123,11 +137,21 @@ class CameraRelay(Node):
 
         if self._mode == 'edge':
             t_publish = time.time()
+            sequence_id = self._sent_count + 1
             msg.header.stamp.sec = int(t_publish)
             msg.header.stamp.nanosec = int((t_publish % 1) * 1e9)
-            msg.header.frame_id = str(t_publish)
+            msg.header.frame_id = (
+                f'{t_publish:.9f}|{sequence_id}'
+                if self._experiment_sequence_ids else str(t_publish))
             self._pub.publish(msg)
             self._sent_count += 1
+            if self._experiment_sequence_ids:
+                self._trace_event({
+                    'event': 'relay_publish',
+                    'sequence_id': sequence_id,
+                    'relay_publish_time': t_publish,
+                    'frame_size_bytes': len(msg.data),
+                })
             self.get_logger().info(
                 f'[UAV{self._uav_id}] edge frame sent '
                 f'#{self._sent_count:04d}')
@@ -150,15 +174,31 @@ class CameraRelay(Node):
                 # stamp = encode start, frame_id = encode end (send time)
                 out.header.stamp.sec = int(t_encode_start)
                 out.header.stamp.nanosec = int((t_encode_start % 1) * 1e9)
-                out.header.frame_id = str(t_encode_end)
+                sequence_id = self._sent_count + 1
+                out.header.frame_id = (
+                    f'{t_encode_end:.9f}|{sequence_id}'
+                    if self._experiment_sequence_ids else str(t_encode_end))
                 self._pub.publish(out)
                 self._sent_count += 1
+                if self._experiment_sequence_ids:
+                    self._trace_event({
+                        'event': 'relay_publish',
+                        'sequence_id': sequence_id,
+                        'relay_publish_time': t_encode_end,
+                        'frame_size_bytes': len(out.data),
+                        'jpeg_size_bytes': len(out.data),
+                    })
                 kb = len(out.data) / 1024
                 self.get_logger().info(
                     f'[UAV{self._uav_id}] ground frame sent '
                     f'#{self._sent_count:04d}: {kb:.1f} KB')
             except Exception as e:
                 self.get_logger().error(f'Compression error: {e}')
+
+    def destroy_node(self):
+        if self._transport_trace is not None:
+            self._transport_trace.close()
+        super().destroy_node()
 
 
 def main(args=None):

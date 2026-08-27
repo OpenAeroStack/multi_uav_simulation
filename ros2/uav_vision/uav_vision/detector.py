@@ -68,6 +68,8 @@ class Detector(Node):
         self.declare_parameter('conf_threshold', 0.25)
         self.declare_parameter('publish_debug', True)
         self.declare_parameter('target_classes', '0')
+        self.declare_parameter('experiment_sequence_ids', False)
+        self.declare_parameter('transport_trace_path', '')
 
         self._uav_id    = self.get_parameter('uav_id').value
         self._mode      = self.get_parameter('processing_mode').value
@@ -77,6 +79,11 @@ class Detector(Node):
         self._target_classes = [
             int(c) for c in
             str(self.get_parameter('target_classes').value).split(',')]
+        self._experiment_sequence_ids = bool(
+            self.get_parameter('experiment_sequence_ids').value)
+        trace_path = str(self.get_parameter('transport_trace_path').value)
+        self._transport_trace = (
+            open(trace_path, 'a', encoding='utf-8') if trace_path else None)
 
         # Load YOLO model
         self.get_logger().info(
@@ -155,8 +162,16 @@ class Detector(Node):
         buf = np.frombuffer(msg.data, dtype=np.uint8)
         return cv2.imdecode(buf, cv2.IMREAD_COLOR)
 
+    def _trace_event(self, payload: dict) -> None:
+        if self._transport_trace is None:
+            return
+        self._transport_trace.write(json.dumps(payload) + '\n')
+        self._transport_trace.flush()
+
     def _run_inference(self, img_bgr: np.ndarray, frame_id: str,
-                        compression_ms: float = -1.0, decode_ms: float = -1.0) -> None:
+                        compression_ms: float = -1.0, decode_ms: float = -1.0,
+                        sequence_id: int | None = None,
+                        relay_publish_time: float | None = None) -> None:
         """Run YOLO, publish detection JSON and optional annotated image."""
         self._frame_count += 1
         t0 = time.time()
@@ -191,6 +206,19 @@ class Detector(Node):
         msg_out      = String()
         msg_out.data = payload
         self._det_pub.publish(msg_out)
+
+        if sequence_id is not None:
+            completed_t = time.time()
+            self._trace_event({
+                'event': 'inference_result',
+                'sequence_id': sequence_id,
+                'inference_completed': True,
+                'inference_ms': inference_ms,
+                'result_published': True,
+                'pipeline_latency_ms': (
+                    (completed_t - relay_publish_time) * 1000.0
+                    if relay_publish_time is not None else None),
+            })
 
         self.get_logger().info(
             f'[Detector] #{self._frame_count:04d} | '
@@ -230,29 +258,91 @@ class Detector(Node):
         """Edge mode: throttled frame from camera_relay (rate-matched to
         ground mode). frame_id/stamp were set by camera_relay at publish
         time, so we reuse that rather than re-stamping here."""
-        frame_id = msg.header.frame_id if msg.header.frame_id else str(time.time())
+        sequence_id = None
+        send_time_text = msg.header.frame_id if msg.header.frame_id else str(time.time())
+        if self._experiment_sequence_ids and '|' in send_time_text:
+            candidate_time, candidate_sequence = send_time_text.rsplit('|', 1)
+            try:
+                sequence_id = int(candidate_sequence)
+                float(candidate_time)
+                send_time_text = candidate_time
+            except ValueError:
+                sequence_id = None
+        callback_t = time.time()
+        if sequence_id is not None:
+            self._trace_event({
+                'event': 'detector_callback',
+                'sequence_id': sequence_id,
+                'detector_callback_received': True,
+                'callback_time': callback_t,
+            })
         img = self._img_msg_to_numpy(msg)
-        self._run_inference(img, frame_id, compression_ms=-1.0, decode_ms=-1.0)
+        self._run_inference(
+            img, send_time_text, compression_ms=-1.0, decode_ms=-1.0,
+            sequence_id=sequence_id,
+            relay_publish_time=(float(send_time_text)
+                                if sequence_id is not None else None))
 
     def _on_compressed(self, msg: CompressedImage) -> None:
         """Ground mode: compressed frame that already crossed wireless link."""
+        sequence_id = None
+        send_time_text = msg.header.frame_id
+        if self._experiment_sequence_ids and '|' in send_time_text:
+            candidate_time, candidate_sequence = send_time_text.rsplit('|', 1)
+            try:
+                sequence_id = int(candidate_sequence)
+                float(candidate_time)
+                send_time_text = candidate_time
+            except ValueError:
+                sequence_id = None
+        callback_t = time.time()
+        if sequence_id is not None:
+            self._trace_event({
+                'event': 'gcs_callback',
+                'sequence_id': sequence_id,
+                'gcs_callback_received': True,
+                'gcs_callback_time': callback_t,
+                'jpeg_size_bytes': len(msg.data),
+            })
         t_decode_start = time.time()
         img = self._compressed_to_numpy(msg)
         t_decode_end = time.time()
         if img is None:
+            if sequence_id is not None:
+                self._trace_event({
+                    'event': 'decode',
+                    'sequence_id': sequence_id,
+                    'decode_success': False,
+                    'decode_time_ms': (t_decode_end - t_decode_start) * 1000.0,
+                })
             self.get_logger().warning('JPEG decode failed — frame dropped')
             return
         decode_ms = (t_decode_end - t_decode_start) * 1000.0
+        if sequence_id is not None:
+            self._trace_event({
+                'event': 'decode',
+                'sequence_id': sequence_id,
+                'decode_success': True,
+                'decode_time_ms': decode_ms,
+            })
 
         stamp_s = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         try:
-            send_t = float(msg.header.frame_id)
+            send_t = float(send_time_text)
             compression_ms = (send_t - stamp_s) * 1000.0 if stamp_s > 0 else -1.0
         except ValueError:
             compression_ms = -1.0
 
-        self._run_inference(img, msg.header.frame_id,
-                             compression_ms=compression_ms, decode_ms=decode_ms)
+        self._run_inference(
+            img, send_time_text, compression_ms=compression_ms,
+            decode_ms=decode_ms, sequence_id=sequence_id,
+            relay_publish_time=(float(send_time_text)
+                                if sequence_id is not None else None))
+
+    def destroy_node(self):
+        if self._transport_trace is not None:
+            self._transport_trace.close()
+        super().destroy_node()
 
 
 def main(args=None):

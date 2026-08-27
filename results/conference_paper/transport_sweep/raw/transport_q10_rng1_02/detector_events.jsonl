@@ -1,0 +1,33 @@
+{"event": "gcs_callback", "sequence_id": 21, "gcs_callback_received": true, "gcs_callback_time": 1787828774.664749, "jpeg_size_bytes": 32383}
+{"event": "decode", "sequence_id": 21, "decode_success": true, "decode_time_ms": 6.136894226074219}
+{"event": "inference_result", "sequence_id": 21, "inference_completed": true, "inference_ms": 856.4956188201904, "result_published": true, "pipeline_latency_ms": 1352.4038791656494}
+{"event": "gcs_callback", "sequence_id": 26, "gcs_callback_received": true, "gcs_callback_time": 1787828779.6723547, "jpeg_size_bytes": 32408}
+{"event": "decode", "sequence_id": 26, "decode_success": true, "decode_time_ms": 5.921840667724609}
+{"event": "inference_result", "sequence_id": 26, "inference_completed": true, "inference_ms": 63.05742263793945, "result_published": true, "pipeline_latency_ms": 569.812536239624}
+{"event": "gcs_callback", "sequence_id": 29, "gcs_callback_received": true, "gcs_callback_time": 1787828782.667852, "jpeg_size_bytes": 32340}
+{"event": "decode", "sequence_id": 29, "decode_success": true, "decode_time_ms": 3.435850143432617}
+{"event": "inference_result", "sequence_id": 29, "inference_completed": true, "inference_ms": 47.09196090698242, "result_published": true, "pipeline_latency_ms": 549.1833686828613}
+{"event": "gcs_callback", "sequence_id": 30, "gcs_callback_received": true, "gcs_callback_time": 1787828783.671715, "jpeg_size_bytes": 32345}
+{"event": "decode", "sequence_id": 30, "decode_success": true, "decode_time_ms": 3.6928653717041016}
+{"event": "inference_result", "sequence_id": 30, "inference_completed": true, "inference_ms": 52.332401275634766, "result_published": true, "pipeline_latency_ms": 557.55615234375}
+{"event": "gcs_callback", "sequence_id": 31, "gcs_callback_received": true, "gcs_callback_time": 1787828784.6789668, "jpeg_size_bytes": 32342}
+{"event": "decode", "sequence_id": 31, "decode_success": true, "decode_time_ms": 4.127979278564453}
+{"event": "inference_result", "sequence_id": 31, "inference_completed": true, "inference_ms": 52.449941635131836, "result_published": true, "pipeline_latency_ms": 561.8927478790283}
+{"event": "gcs_callback", "sequence_id": 38, "gcs_callback_received": true, "gcs_callback_time": 1787828791.6513472, "jpeg_size_bytes": 32271}
+{"event": "decode", "sequence_id": 38, "decode_success": true, "decode_time_ms": 3.124237060546875}
+{"event": "inference_result", "sequence_id": 38, "inference_completed": true, "inference_ms": 86.42840385437012, "result_published": true, "pipeline_latency_ms": 570.7740783691406}
+{"event": "gcs_callback", "sequence_id": 40, "gcs_callback_received": true, "gcs_callback_time": 1787828793.6748714, "jpeg_size_bytes": 32234}
+{"event": "decode", "sequence_id": 40, "decode_success": true, "decode_time_ms": 4.675388336181641}
+{"event": "inference_result", "sequence_id": 40, "inference_completed": true, "inference_ms": 69.71502304077148, "result_published": true, "pipeline_latency_ms": 574.1920471191406}
+{"event": "gcs_callback", "sequence_id": 47, "gcs_callback_received": true, "gcs_callback_time": 1787828800.663527, "jpeg_size_bytes": 32237}
+{"event": "decode", "sequence_id": 47, "decode_success": true, "decode_time_ms": 3.805875778198242}
+{"event": "inference_result", "sequence_id": 47, "inference_completed": true, "inference_ms": 90.68846702575684, "result_published": true, "pipeline_latency_ms": 590.348482131958}
+{"event": "gcs_callback", "sequence_id": 56, "gcs_callback_received": true, "gcs_callback_time": 1787828809.6675475, "jpeg_size_bytes": 32363}
+{"event": "decode", "sequence_id": 56, "decode_success": true, "decode_time_ms": 3.2453536987304688}
+{"event": "inference_result", "sequence_id": 56, "inference_completed": true, "inference_ms": 76.76815986633301, "result_published": true, "pipeline_latency_ms": 576.6534805297852}
+{"event": "gcs_callback", "sequence_id": 63, "gcs_callback_received": true, "gcs_callback_time": 1787828816.6665068, "jpeg_size_bytes": 32261}
+{"event": "decode", "sequence_id": 63, "decode_success": true, "decode_time_ms": 3.659963607788086}
+{"event": "inference_result", "sequence_id": 63, "inference_completed": true, "inference_ms": 76.51185989379883, "result_published": true, "pipeline_latency_ms": 577.5575637817383}
+{"event": "gcs_callback", "sequence_id": 65, "gcs_callback_received": true, "gcs_callback_time": 1787828818.6636171, "jpeg_size_bytes": 32274}
+{"event": "decode", "sequence_id": 65, "decode_success": true, "decode_time_ms": 6.032228469848633}
+{"event": "inference_result", "sequence_id": 65, "inference_completed": true, "inference_ms": 80.63769340515137, "result_published": true, "pipeline_latency_ms": 578.1779289245605}

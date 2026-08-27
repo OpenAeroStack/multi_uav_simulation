@@ -165,7 +165,7 @@ echo ""
 # STEP 4 — Gazebo (root namespace)
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== [4/8] Starting Gazebo ==="
-export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:$HOME/FYP/small_city_gazebo/models:${GAZEBO_MODEL_PATH:-}"
+export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:$HOME/FYP/small_city_gazebo_world/models:${GAZEBO_MODEL_PATH:-}"
 export GAZEBO_PLUGIN_PATH="$PROJECT_DIR/install/multi_uav_gazebo_plugins/lib:${GAZEBO_PLUGIN_PATH:-}"
 export GAZEBO_RESOURCE_PATH="$PROJECT_DIR:$PROJECT_DIR/worlds:${GAZEBO_RESOURCE_PATH:-}"
 
