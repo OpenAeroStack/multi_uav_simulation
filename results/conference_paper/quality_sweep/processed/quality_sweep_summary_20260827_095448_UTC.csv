@@ -1,0 +1,3 @@
+representation,jpeg_quality,frames,total_gt,tp,fp,fn,precision,recall,f1,exact_count_accuracy,mean_predicted_count,mean_confidence,mean_payload_bytes,median_payload_bytes,std_payload_bytes,mean_compression_ratio,mean_encode_ms,mean_decode_ms,mean_inference_ms,median_inference_ms
+RAW,,60,164,135,19,29,0.876623,0.823171,0.849057,0.566667,2.566667,0.498965,2764800.000000,2764800.000000,0.000000,1.000000,0.000000,0.000000,36.251853,35.333898
+Q5,5,60,164,29,0,135,1.000000,0.176829,0.300518,0.433333,0.483333,0.328418,18458.900000,18580.500000,586.232482,149.933836,1.705018,1.513344,34.285662,33.349966

@@ -1,0 +1,38 @@
+{
+  "run_id": "conference_qs_full_01",
+  "timestamp_utc": "20260827_095558_UTC",
+  "image_directory": "/home/multi_uav/FYP/multi_uav_simulation/results/phase_d_application/raw/d4_reference_01",
+  "ground_truth_path": "/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/quality_sweep/input/ground_truth_clean.csv",
+  "model_path": "/home/multi_uav/yolo_env/yolov8n.pt",
+  "model_name": "YOLOv8n",
+  "ultralytics_version": "8.4.115",
+  "opencv_version": "5.0.0",
+  "python_version": "3.10.12",
+  "confidence_threshold": 0.25,
+  "imgsz": 960,
+  "class_filter": [
+    0
+  ],
+  "class_filter_description": "COCO person class only",
+  "jpeg_qualities": [
+    5,
+    10,
+    20,
+    30,
+    40,
+    50,
+    60,
+    70,
+    80,
+    90
+  ],
+  "frame_count": 60,
+  "warmup_inferences": 3,
+  "warmup_frame": "frame_0001.png",
+  "warmup_recorded_in_csv": false,
+  "raw_timing_convention": "RAW encode_ms and decode_ms are 0.0",
+  "evaluation_definition": "Count-based, not bounding-box IoU: TP=min(gt_count,pred_count); FP=max(pred_count-gt_count,0); FN=max(gt_count-pred_count,0).",
+  "git_commit_hash": "2f57ae083da68b9e3bf628c17351d58b693a14c7",
+  "details_file": "quality_sweep_details_20260827_095558_UTC.csv",
+  "summary_file": "quality_sweep_summary_20260827_095558_UTC.csv"
+}
