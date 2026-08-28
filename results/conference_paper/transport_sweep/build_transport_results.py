@@ -154,7 +154,9 @@ def main() -> int:
                 "inference_completed": bool(event["inference_completed"]),
                 "inference_ms": event["inference_ms"],
                 "result_published": bool(event["result_published"]),
-                "pipeline_latency_ms": event["pipeline_latency_ms"],
+                "pipeline_latency_ms": event.get(
+                    "relay_to_inference_completion_ms",
+                    event.get("pipeline_latency_ms")),
             })
 
     trace_rows = []

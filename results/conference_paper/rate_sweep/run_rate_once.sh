@@ -6,12 +6,15 @@ EXPERIMENT_DIR="$PROJECT/results/conference_paper/rate_sweep"
 RELAY="$PROJECT/ros2/uav_vision/uav_vision/camera_relay.py"
 DETECTOR="$PROJECT/ros2/uav_vision/uav_vision/detector.py"
 BUILDER="$EXPERIMENT_DIR/build_rate_results.py"
+GROUND_OBSERVER="$EXPERIMENT_DIR/ground_result_observer.py"
 RAW_ROOT="$EXPERIMENT_DIR/raw"
+FAILED_ROOT="$RAW_ROOT/failed"
 PROCESSED_ROOT="$EXPERIMENT_DIR/processed"
 JPEG_QUALITY=5
 SETTLE_SECONDS=5
 MEASUREMENT_SECONDS=60
 DRAIN_SECONDS=5
+DISCOVERY_TIMEOUT_SECONDS=60
 
 usage() {
     cat <<'EOF'
@@ -42,7 +45,7 @@ for command_name in pidstat python3; do
     command -v "$command_name" >/dev/null || {
         echo "ERROR: required command unavailable: $command_name" >&2; exit 1; }
 done
-for source_file in "$RELAY" "$DETECTOR" "$BUILDER"; do
+for source_file in "$RELAY" "$DETECTOR" "$BUILDER" "$GROUND_OBSERVER"; do
     [[ -f "$source_file" ]] || { echo "ERROR: missing $source_file" >&2; exit 1; }
 done
 
@@ -52,12 +55,15 @@ SUMMARY_OUTPUT="$PROCESSED_ROOT/rate_summary_${RUN_ID}.csv"
 TAP_OUTPUT="$PROCESSED_ROOT/tap_deltas_${RUN_ID}.csv"
 RELAY_LOG="$RUN_RAW/camera_relay.log"
 DETECTOR_LOG="$RUN_RAW/detector.log"
+GROUND_OBSERVER_LOG="$RUN_RAW/ground_result_observer.log"
 RELAY_EVENTS="$RUN_RAW/relay_events.jsonl"
 DETECTOR_EVENTS="$RUN_RAW/detector_events.jsonl"
+GROUND_RESULT_EVENTS="$RUN_RAW/ground_result_events.jsonl"
 PIDSTAT_LOG="$RUN_RAW/pidstat.txt"
 TAP_BEFORE="$RUN_RAW/tap_before.txt"
 TAP_AFTER="$RUN_RAW/tap_after.txt"
 TOPIC_INFO="$RUN_RAW/image_topic_info.txt"
+RESULT_TOPIC_INFO="$RUN_RAW/detection_topic_info.txt"
 POSE_START="$RUN_RAW/uav_pose_at_official_start.txt"
 NETWORK_INFO="$RUN_RAW/network_configuration.txt"
 NS3_ARCHIVE="$RUN_RAW/ns3.log"
@@ -68,9 +74,6 @@ METADATA="$RUN_RAW/metadata.txt"
 for output in "$TRACE_OUTPUT" "$SUMMARY_OUTPUT" "$TAP_OUTPUT"; do
     [[ ! -e "$output" ]] || { echo "ERROR: refusing to overwrite $output" >&2; exit 1; }
 done
-mkdir -p "$RUN_RAW" "$PROCESSED_ROOT"
-: >"$RELAY_EVENTS"; : >"$DETECTOR_EVENTS"
-
 sudo -v
 sudo -n true || { echo "ERROR: sudo credentials unavailable" >&2; exit 1; }
 for namespace in uav1ns gcsns; do
@@ -80,8 +83,9 @@ done
 [[ -f /tmp/ns3_single.log ]] || {
     echo "ERROR: /tmp/ns3_single.log is unavailable" >&2; exit 1; }
 
-existing_nodes="$(ps -eo comm=,args= | awk -v relay="$RELAY" -v detector="$DETECTOR" '
-    $1 ~ /^python/ && (index($0, relay) || index($0, detector))')"
+existing_nodes="$(ps -eo comm=,args= | awk -v relay="$RELAY" -v detector="$DETECTOR" \
+    -v observer="$GROUND_OBSERVER" '
+    $1 ~ /^python/ && (index($0, relay) || index($0, detector) || index($0, observer))')"
 [[ -z "$existing_nodes" ]] || {
     echo "ERROR: relay or detector is already running:" >&2
     echo "$existing_nodes" >&2; exit 1; }
@@ -105,7 +109,7 @@ snapshot_taps() {
     } >"$destination"
 }
 
-RELAY_PGID=""; DETECTOR_PGID=""
+RELAY_PGID=""; DETECTOR_PGID=""; GROUND_OBSERVER_PGID=""
 stop_group() {
     local pgid="${1:-}"
     [[ -n "$pgid" ]] || return 0
@@ -115,14 +119,32 @@ stop_group() {
         sleep 0.2
     done
     sudo -n kill -TERM -- "-$pgid" 2>/dev/null || true
+    for _ in {1..10}; do
+        sudo -n kill -0 -- "-$pgid" 2>/dev/null || return 0
+        sleep 0.2
+    done
+    sudo -n kill -KILL -- "-$pgid" 2>/dev/null || true
 }
 cleanup() {
     local status=$?
     trap - EXIT INT TERM
     stop_group "$RELAY_PGID"; stop_group "$DETECTOR_PGID"
+    stop_group "$GROUND_OBSERVER_PGID"
+    if (( status != 0 )) && [[ -d "$RUN_RAW" ]]; then
+        local failed_destination
+        failed_destination="$FAILED_ROOT/${RUN_ID}_failed_$(date +%Y%m%dT%H%M%S)_pid$$"
+        mv "$RUN_RAW" "$failed_destination"
+        echo "Failed-run artifacts preserved at: $failed_destination" >&2
+        echo "Run ID '$RUN_ID' is available for a clean retry." >&2
+    fi
     exit "$status"
 }
 trap cleanup EXIT INT TERM
+
+# Create artifacts only after infrastructure/process preflight has passed and
+# cleanup is active, so any later startup failure is archived automatically.
+mkdir -p "$RUN_RAW" "$PROCESSED_ROOT" "$FAILED_ROOT"
+: >"$RELAY_EVENTS"; : >"$DETECTOR_EVENTS"; : >"$GROUND_RESULT_EVENTS"
 
 find_python_pid() {
     local path="$1"
@@ -155,6 +177,17 @@ echo "Confirm infrastructure RNG_RUN=$RNG_RUN and the fixed Phase F pose."
 echo "Configuration remains unchanged: YOLOv8n, conf=0.25, imgsz=960, class 0."
 DETECTOR_NS="uav1ns"; [[ "$MODE" == ground ]] && DETECTOR_NS="gcsns"
 
+sudo -n setsid ip netns exec gcsns runuser -u multi_uav -- bash -lc '
+    source /opt/ros/humble/setup.bash
+    source /home/multi_uav/FYP/multi_uav_simulation/ros2/install/setup.bash
+    export PYTHONUNBUFFERED=1
+    exec python3 "$1" --ros-args -p uav_id:=1 -p trace_path:="$2"
+' observer-shell "$GROUND_OBSERVER" "$GROUND_RESULT_EVENTS" \
+    >"$GROUND_OBSERVER_LOG" 2>&1 &
+GROUND_OBSERVER_LAUNCHER_PID=$!
+wait_for_node "$GROUND_OBSERVER" "$GROUND_OBSERVER_LOG" \
+    "[GroundResultObserver] ready" 20 GROUND_OBSERVER_PID GROUND_OBSERVER_PGID
+
 sudo -n setsid ip netns exec "$DETECTOR_NS" runuser -u multi_uav -- bash -lc '
     source /opt/ros/humble/setup.bash
     source /home/multi_uav/FYP/multi_uav_simulation/ros2/install/setup.bash
@@ -184,15 +217,53 @@ IMAGE_TOPIC="/cluster/cam/uav1"
     RELAY_MARKER="GROUND output QoS: BEST_EFFORT"; IMAGE_TOPIC="/relay/uav1/compressed"; }
 wait_for_node "$RELAY" "$RELAY_LOG" "$RELAY_MARKER" 20 RELAY_PID RELAY_PGID
 
-deadline=$((SECONDS + 30))
+deadline=$((SECONDS + DISCOVERY_TIMEOUT_SECONDS))
 while true; do
     ros_in_namespace "$DETECTOR_NS" ros2 topic info -v "$IMAGE_TOPIC" >"$TOPIC_INFO" 2>&1 || true
     if grep -Eq 'Publisher count: [1-9][0-9]*' "$TOPIC_INFO" &&
        grep -Eq 'Subscription count: [1-9][0-9]*' "$TOPIC_INFO"; then break; fi
     sudo -n kill -0 -- "-$RELAY_PGID" 2>/dev/null || {
         echo "ERROR: relay exited during endpoint discovery" >&2; exit 1; }
+    sudo -n kill -0 -- "-$DETECTOR_PGID" 2>/dev/null || {
+        echo "ERROR: detector exited during image-endpoint discovery" >&2
+        cat "$DETECTOR_LOG" >&2; exit 1; }
+    sudo -n kill -0 -- "-$GROUND_OBSERVER_PGID" 2>/dev/null || {
+        echo "ERROR: ground result observer exited during image-endpoint discovery" >&2
+        cat "$GROUND_OBSERVER_LOG" >&2; exit 1; }
     (( SECONDS < deadline )) || {
         echo "ERROR: image endpoints did not match" >&2; cat "$TOPIC_INFO" >&2; exit 1; }
+    sleep 0.2
+done
+
+deadline=$((SECONDS + DISCOVERY_TIMEOUT_SECONDS))
+while true; do
+    # For Edge, query from the writer's namespace. DDS discovery across the
+    # simulated path can be asymmetric in the GCS graph even while the writer
+    # has matched the remote observer and results are reaching its callback.
+    ros_in_namespace "$DETECTOR_NS" ros2 topic info -v /detections/uav1 \
+        >"$RESULT_TOPIC_INFO" 2>&1 || true
+    if grep -Eq 'Publisher count: [1-9][0-9]*' "$RESULT_TOPIC_INFO" &&
+       grep -Eq 'Subscription count: [1-9][0-9]*' "$RESULT_TOPIC_INFO"; then break; fi
+    sudo -n kill -0 -- "-$DETECTOR_PGID" 2>/dev/null || {
+        echo "ERROR: detector exited during result-endpoint discovery" >&2
+        cat "$DETECTOR_LOG" >&2; exit 1; }
+    sudo -n kill -0 -- "-$GROUND_OBSERVER_PGID" 2>/dev/null || {
+        echo "ERROR: ground result observer exited during endpoint discovery" >&2
+        cat "$GROUND_OBSERVER_LOG" >&2; exit 1; }
+    sudo -n kill -0 -- "-$RELAY_PGID" 2>/dev/null || {
+        echo "ERROR: relay exited during result-endpoint discovery" >&2
+        cat "$RELAY_LOG" >&2; exit 1; }
+    (( SECONDS < deadline )) || {
+        echo "ERROR: detection-result endpoints did not match within ${DISCOVERY_TIMEOUT_SECONDS}s" >&2
+        echo "--- writer-side /detections/uav1 endpoint state ---" >&2
+        cat "$RESULT_TOPIC_INFO" >&2
+        echo "--- detector log (last 80 lines) ---" >&2
+        tail -n 80 "$DETECTOR_LOG" >&2
+        echo "--- observer log (last 80 lines) ---" >&2
+        tail -n 80 "$GROUND_OBSERVER_LOG" >&2
+        echo "--- relay log (last 40 lines) ---" >&2
+        tail -n 40 "$RELAY_LOG" >&2
+        exit 1; }
     sleep 0.2
 done
 
@@ -218,6 +289,7 @@ stop_group "$RELAY_PGID"; RELAY_PGID=""
 echo "Official admission stopped; fixed detector drain: ${DRAIN_SECONDS}s"
 sleep "$DRAIN_SECONDS"
 stop_group "$DETECTOR_PGID"; DETECTOR_PGID=""
+stop_group "$GROUND_OBSERVER_PGID"; GROUND_OBSERVER_PGID=""
 
 cp /tmp/ns3_single.log "$NS3_ARCHIVE"
 NS3_SOURCE="/home/multi_uav/ns-allinone-3.38/ns-3.38/scratch/three_uav_tapbridge_integrated.cc"
@@ -238,7 +310,8 @@ NS3_SOURCE="/home/multi_uav/ns-allinone-3.38/ns-3.38/scratch/three_uav_tapbridge
 python3 "$BUILDER" --run-id "$RUN_ID" --rng-run "$RNG_RUN" --mode "$MODE" \
     --frame-rate-hz "$FRAME_RATE_HZ" --official-start-time "$OFFICIAL_START_TIME" \
     --official-end-time "$OFFICIAL_END_TIME" --relay-events "$RELAY_EVENTS" \
-    --detector-events "$DETECTOR_EVENTS" --pidstat "$PIDSTAT_LOG" \
+    --detector-events "$DETECTOR_EVENTS" \
+    --ground-result-events "$GROUND_RESULT_EVENTS" --pidstat "$PIDSTAT_LOG" \
     --relay-pid "$RELAY_PID" --detector-pid "$DETECTOR_PID" \
     --tap-before "$TAP_BEFORE" --tap-after "$TAP_AFTER" \
     --trace-output "$TRACE_OUTPUT" --summary-output "$SUMMARY_OUTPUT" \
@@ -268,6 +341,8 @@ camera_input_qos=BEST_EFFORT KEEP_LAST depth=1
 edge_image_qos=RELIABLE KEEP_LAST depth=1
 ground_compressed_qos=BEST_EFFORT KEEP_LAST depth=1
 detection_output_qos=RELIABLE KEEP_LAST depth=10
+ground_result_observer_qos=RELIABLE KEEP_LAST depth=10
+primary_pipeline_latency=frame admission at relay to beginning of ground result callback
 rmw_implementation_environment=${RMW_IMPLEMENTATION:-<unset>}
 fixed_phase_f_pose=latitude 6.079430, longitude 80.193085, relative altitude 25.0 m, yaw 102.6 degrees
 git_commit_hash=$(git -C "$PROJECT" rev-parse HEAD 2>/dev/null || echo unavailable)
@@ -276,6 +351,8 @@ ns3_source_archive=$NS3_SOURCE_ARCHIVE
 tap_counters=interface traffic including non-image traffic
 relay_log=$RELAY_LOG
 detector_log=$DETECTOR_LOG
+ground_result_observer_log=$GROUND_OBSERVER_LOG
+ground_result_events=$GROUND_RESULT_EVENTS
 pidstat_log=$PIDSTAT_LOG
 tap_before=$TAP_BEFORE
 tap_after=$TAP_AFTER

@@ -1,0 +1,40 @@
+run_id=rate_ground_1hz_rng2
+rng_run=2
+mode=ground
+requested_frame_rate_hz=1
+actual_official_publication_count=60
+official_start_time_epoch=1787839035.044889779
+official_end_time_epoch=1787839095.050028749
+official_start_time_iso=2026-08-27T19:27:15,045904169+05:30
+official_end_time_iso=2026-08-27T19:28:15,051534669+05:30
+official_window_seconds=60
+settling_seconds=5
+drain_seconds=5
+ground_jpeg_quality=5
+yolo_model=YOLOv8n (/home/multi_uav/yolo_env/yolov8n.pt)
+yolo_confidence=0.25
+yolo_imgsz=960
+yolo_target_classes=[0] person only
+camera_input_qos=BEST_EFFORT KEEP_LAST depth=1
+edge_image_qos=RELIABLE KEEP_LAST depth=1
+ground_compressed_qos=BEST_EFFORT KEEP_LAST depth=1
+detection_output_qos=RELIABLE KEEP_LAST depth=10
+ground_result_observer_qos=RELIABLE KEEP_LAST depth=10
+primary_pipeline_latency=frame admission at relay to beginning of ground result callback
+rmw_implementation_environment=<unset>
+fixed_phase_f_pose=latitude 6.079430, longitude 80.193085, relative altitude 25.0 m, yaw 102.6 degrees
+git_commit_hash=baef6bd4781095d082653d918c44484f45fb28d1
+ns3_configuration=existing single-UAV infrastructure; archived log: /home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/rate_sweep/raw/rate_ground_1hz_rng2/ns3.log
+ns3_source_archive=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/rate_sweep/raw/rate_ground_1hz_rng2/three_uav_tapbridge_integrated.cc
+tap_counters=interface traffic including non-image traffic
+relay_log=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/rate_sweep/raw/rate_ground_1hz_rng2/camera_relay.log
+detector_log=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/rate_sweep/raw/rate_ground_1hz_rng2/detector.log
+ground_result_observer_log=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/rate_sweep/raw/rate_ground_1hz_rng2/ground_result_observer.log
+ground_result_events=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/rate_sweep/raw/rate_ground_1hz_rng2/ground_result_events.jsonl
+pidstat_log=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/rate_sweep/raw/rate_ground_1hz_rng2/pidstat.txt
+tap_before=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/rate_sweep/raw/rate_ground_1hz_rng2/tap_before.txt
+tap_after=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/rate_sweep/raw/rate_ground_1hz_rng2/tap_after.txt
+network_configuration=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/rate_sweep/raw/rate_ground_1hz_rng2/network_configuration.txt
+pose_at_official_start=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/rate_sweep/raw/rate_ground_1hz_rng2/uav_pose_at_official_start.txt
+frame_trace=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/rate_sweep/processed/frame_trace_rate_ground_1hz_rng2.csv
+run_summary=/home/multi_uav/FYP/multi_uav_simulation/results/conference_paper/rate_sweep/processed/rate_summary_rate_ground_1hz_rng2.csv

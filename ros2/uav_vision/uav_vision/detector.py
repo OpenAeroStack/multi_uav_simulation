@@ -196,12 +196,15 @@ class Detector(Node):
                 'bbox':       [round(x1), round(y1),
                                round(x2), round(y2)]})
 
-        payload = json.dumps({
+        payload_data = {
             'frame_id':       frame_id,
             'inference_ms':   round(inference_ms, 1),
             'compression_ms': round(compression_ms, 1),
             'decode_ms':      round(decode_ms, 1),
-            'detections':     detections})
+            'detections':     detections}
+        if self._experiment_sequence_ids and sequence_id is not None:
+            payload_data['sequence_id'] = sequence_id
+        payload = json.dumps(payload_data)
 
         msg_out      = String()
         msg_out.data = payload
@@ -213,9 +216,13 @@ class Detector(Node):
                 'event': 'inference_result',
                 'sequence_id': sequence_id,
                 'inference_completed': True,
+                'inference_completion_time': completed_t,
                 'inference_ms': inference_ms,
                 'result_published': True,
-                'pipeline_latency_ms': (
+                # Retained for transport-sweep compatibility. This is an
+                # internal relay-publish-to-detector-completion interval, not
+                # the rate sweep's system-level pipeline latency.
+                'relay_to_inference_completion_ms': (
                     (completed_t - relay_publish_time) * 1000.0
                     if relay_publish_time is not None else None),
             })

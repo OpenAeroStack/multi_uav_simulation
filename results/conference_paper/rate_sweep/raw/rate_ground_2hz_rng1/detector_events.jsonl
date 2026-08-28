@@ -1,0 +1,15 @@
+{"event": "gcs_callback", "sequence_id": 71, "gcs_callback_received": true, "gcs_callback_time": 1787894168.1538942, "jpeg_size_bytes": 19890}
+{"event": "decode", "sequence_id": 71, "decode_success": true, "decode_time_ms": 27.84872055053711}
+{"event": "inference_result", "sequence_id": 71, "inference_completed": true, "inference_completion_time": 1787894169.0275376, "inference_ms": 845.4451560974121, "result_published": true, "relay_to_inference_completion_ms": 1367.3021793365479}
+{"event": "gcs_callback", "sequence_id": 107, "gcs_callback_received": true, "gcs_callback_time": 1787894186.154906, "jpeg_size_bytes": 19936}
+{"event": "decode", "sequence_id": 107, "decode_success": true, "decode_time_ms": 12.631893157958984}
+{"event": "inference_result", "sequence_id": 107, "inference_completed": true, "inference_completion_time": 1787894186.2457514, "inference_ms": 77.90207862854004, "result_published": true, "relay_to_inference_completion_ms": 585.00075340271}
+{"event": "gcs_callback", "sequence_id": 136, "gcs_callback_received": true, "gcs_callback_time": 1787894200.653117, "jpeg_size_bytes": 19958}
+{"event": "decode", "sequence_id": 136, "decode_success": true, "decode_time_ms": 6.653070449829102}
+{"event": "inference_result", "sequence_id": 136, "inference_completed": true, "inference_completion_time": 1787894200.7158737, "inference_ms": 55.76348304748535, "result_published": true, "relay_to_inference_completion_ms": 554.5346736907959}
+{"event": "gcs_callback", "sequence_id": 143, "gcs_callback_received": true, "gcs_callback_time": 1787894204.1540127, "jpeg_size_bytes": 19875}
+{"event": "decode", "sequence_id": 143, "decode_success": true, "decode_time_ms": 2.9692649841308594}
+{"event": "inference_result", "sequence_id": 143, "inference_completed": true, "inference_completion_time": 1787894204.2057006, "inference_ms": 48.38228225708008, "result_published": true, "relay_to_inference_completion_ms": 544.6755886077881}
+{"event": "gcs_callback", "sequence_id": 179, "gcs_callback_received": true, "gcs_callback_time": 1787894222.15191, "jpeg_size_bytes": 19948}
+{"event": "decode", "sequence_id": 179, "decode_success": true, "decode_time_ms": 1.5974044799804688}
+{"event": "inference_result", "sequence_id": 179, "inference_completed": true, "inference_completion_time": 1787894222.1968005, "inference_ms": 43.04146766662598, "result_published": true, "relay_to_inference_completion_ms": 537.6260280609131}

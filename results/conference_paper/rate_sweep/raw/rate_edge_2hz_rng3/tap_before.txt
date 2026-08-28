@@ -1,0 +1,14 @@
+--- tap-uav1 ---
+157: tap-uav1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br-uav1 state UP mode DEFAULT group default qlen 1000
+    link/ether 56:59:47:60:25:9c brd ff:ff:ff:ff:ff:ff
+    RX:  bytes packets errors dropped  missed   mcast           
+       1189418   11712      0       0       0       0 
+    TX:  bytes packets errors dropped carrier collsns           
+       6168718   28671      0       0       0       0 
+--- tap-gcs ---
+153: tap-gcs: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br-gcs state UP mode DEFAULT group default qlen 1000
+    link/ether 06:8d:b0:f6:c4:59 brd ff:ff:ff:ff:ff:ff
+    RX:  bytes packets errors dropped  missed   mcast           
+       3255791   11669      0       0       0       0 
+    TX:  bytes packets errors dropped carrier collsns           
+       3528511   25031      0       0       0       0 

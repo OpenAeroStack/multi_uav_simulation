@@ -1,0 +1,34 @@
+Type: std_msgs/msg/String
+
+Publisher count: 1
+
+Node name: detector
+Node namespace: /
+Topic type: std_msgs/msg/String
+Endpoint type: PUBLISHER
+GID: 01.0f.9d.d2.9f.9d.e3.58.00.00.00.00.00.00.12.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: rate_sweep_ground_result_observer
+Node namespace: /
+Topic type: std_msgs/msg/String
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.3c.fe.5a.9d.0b.53.00.00.00.00.00.00.11.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+

@@ -14,9 +14,12 @@ from typing import Any
 
 TRACE_FIELDS = [
     "run_id", "rng_run", "mode", "frame_rate_hz", "sequence_id",
-    "publish_time", "frame_size_bytes", "detector_callback_received",
-    "callback_time", "decode_success", "inference_completed",
-    "inference_ms", "result_published", "pipeline_latency_ms",
+    "frame_admission_time", "publish_time", "frame_size_bytes",
+    "detector_callback_received", "callback_time",
+    "relay_to_detector_callback_ms", "decode_success", "jpeg_encode_ms",
+    "jpeg_decode_ms", "inference_completed", "inference_completion_time",
+    "inference_ms", "result_published", "relay_to_inference_completion_ms",
+    "ground_result_receipt_time", "pipeline_latency_ms",
 ]
 SUMMARY_FIELDS = [
     "run_id", "rng_run", "mode", "frame_rate_hz",
@@ -28,7 +31,8 @@ SUMMARY_FIELDS = [
     "uav_tx_bitrate_mbps", "gcs_rx_bitrate_mbps",
     "mean_relay_cpu_percent", "mean_detector_cpu_percent",
     "mean_combined_cpu_percent", "callback_delivery_ratio",
-    "decode_success_ratio", "mean_jpeg_size_bytes",
+    "decode_success_ratio", "mean_jpeg_size_bytes", "ground_result_receipts",
+    "ground_result_delivery_ratio",
 ]
 TAP_INTERFACES = ("tap-uav1", "tap-gcs")
 TAP_FIELDS = (
@@ -49,6 +53,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--official-end-time", required=True, type=float)
     parser.add_argument("--relay-events", required=True, type=Path)
     parser.add_argument("--detector-events", required=True, type=Path)
+    parser.add_argument("--ground-result-events", required=True, type=Path)
     parser.add_argument("--pidstat", required=True, type=Path)
     parser.add_argument("--relay-pid", required=True, type=int)
     parser.add_argument("--detector-pid", required=True, type=int)
@@ -130,26 +135,26 @@ def average(values: list[float]) -> float | None:
 
 
 def pidstat_cpu(path: Path, relay_pid: int, detector_pid: int) -> tuple[float | None, ...]:
-    """Read CPU rows; pidstat's CPU value is the third field from the right."""
+    """Read CPU rows using the PID-relative offset declared by pidstat."""
     samples: dict[str, dict[int, float]] = {}
     wanted = {relay_pid, detector_pid}
+    cpu_offset: int | None = None
     with path.open(encoding="utf-8") as source:
         for line in source:
             parts = line.split()
-            if "%CPU" in parts or len(parts) < 8 or parts[0] == "Average:":
+            if "PID" in parts and "%CPU" in parts:
+                cpu_offset = parts.index("%CPU") - parts.index("PID")
+                continue
+            if cpu_offset is None or len(parts) < 8 or parts[0] == "Average:":
                 continue
             pid_index = next(
                 (i for i, token in enumerate(parts) if token.isdigit()
                  and int(token) in wanted), None)
             if pid_index is None:
                 continue
-            # CPU rows have seven fields after PID; memory rows emitted by
-            # the same `pidstat -u -r` invocation have only six.
-            if len(parts) - pid_index - 1 < 7:
-                continue
             try:
                 pid = int(parts[pid_index])
-                cpu = float(parts[-3])
+                cpu = float(parts[pid_index + cpu_offset])
             except (ValueError, IndexError):
                 continue
             sample_key = " ".join(parts[:pid_index])
@@ -176,8 +181,8 @@ def main() -> int:
     for event in read_events(args.relay_events):
         if event.get("event") != "relay_publish":
             continue
-        publish_time = float(event["relay_publish_time"])
-        if args.official_start_time <= publish_time < args.official_end_time:
+        admission_time = float(event["frame_admission_time"])
+        if args.official_start_time <= admission_time < args.official_end_time:
             sequence = int(event["sequence_id"])
             if sequence in relay_by_sequence:
                 raise ValueError(f"duplicate relay sequence {sequence}")
@@ -199,11 +204,27 @@ def main() -> int:
                 "callback_time", event.get("gcs_callback_time", ""))
         elif event_type == "decode":
             record["decode_success"] = bool(event["decode_success"])
+            record["jpeg_decode_ms"] = event["decode_time_ms"]
         elif event_type == "inference_result":
             record["inference_completed"] = bool(event["inference_completed"])
+            record["inference_completion_time"] = event[
+                "inference_completion_time"]
             record["inference_ms"] = event["inference_ms"]
             record["result_published"] = bool(event["result_published"])
-            record["pipeline_latency_ms"] = event["pipeline_latency_ms"]
+            record["relay_to_inference_completion_ms"] = event.get(
+                "relay_to_inference_completion_ms", event.get(
+                    "pipeline_latency_ms", ""))
+
+    ground_results: dict[int, float] = {}
+    for event in read_events(args.ground_result_events):
+        if event.get("event") != "ground_result_receipt":
+            continue
+        sequence = int(event["sequence_id"])
+        if sequence not in official_sequences:
+            continue
+        if sequence in ground_results:
+            raise ValueError(f"duplicate ground result for sequence {sequence}")
+        ground_results[sequence] = float(event["ground_result_receipt_time"])
 
     trace_rows = []
     for sequence, relay in sorted(relay_by_sequence.items()):
@@ -212,24 +233,45 @@ def main() -> int:
             "run_id": args.run_id, "rng_run": args.rng_run,
             "mode": args.mode, "frame_rate_hz": args.frame_rate_hz,
             "sequence_id": sequence,
+            "frame_admission_time": relay["frame_admission_time"],
             "publish_time": relay["relay_publish_time"],
             "frame_size_bytes": relay["frame_size_bytes"],
             "detector_callback_received": stage.get(
                 "detector_callback_received", False),
             "callback_time": stage.get("callback_time", ""),
+            "relay_to_detector_callback_ms": (
+                (float(stage["callback_time"])
+                 - float(relay["frame_admission_time"])) * 1000.0
+                if stage.get("callback_time", "") != "" else ""),
             "decode_success": (stage.get("decode_success", False)
                                if args.mode == "ground" else ""),
+            "jpeg_encode_ms": (relay.get("jpeg_encode_ms", "")
+                               if args.mode == "ground" else ""),
+            "jpeg_decode_ms": (stage.get("jpeg_decode_ms", "")
+                               if args.mode == "ground" else ""),
             "inference_completed": stage.get("inference_completed", False),
+            "inference_completion_time": stage.get(
+                "inference_completion_time", ""),
             "inference_ms": stage.get("inference_ms", ""),
             "result_published": stage.get("result_published", False),
-            "pipeline_latency_ms": stage.get("pipeline_latency_ms", ""),
+            "relay_to_inference_completion_ms": (
+                (float(stage["inference_completion_time"])
+                 - float(relay["frame_admission_time"])) * 1000.0
+                if stage.get("inference_completion_time", "") != "" else ""),
+            "ground_result_receipt_time": ground_results.get(sequence, ""),
+            "pipeline_latency_ms": (
+                (ground_results[sequence]
+                 - float(relay["frame_admission_time"])) * 1000.0
+                if sequence in ground_results else ""),
         })
 
     publications = len(trace_rows)
     callbacks = sum(row["detector_callback_received"] for row in trace_rows)
     completions = sum(row["inference_completed"] for row in trace_rows)
+    ground_receipts = sum(
+        row["ground_result_receipt_time"] != "" for row in trace_rows)
     latencies = [float(row["pipeline_latency_ms"]) for row in trace_rows
-                 if row["inference_completed"] and row["pipeline_latency_ms"] != ""]
+                 if row["pipeline_latency_ms"] != ""]
     inferences = [float(row["inference_ms"]) for row in trace_rows
                   if row["inference_completed"] and row["inference_ms"] != ""]
     frame_sizes = [float(row["frame_size_bytes"]) for row in trace_rows]
@@ -268,6 +310,9 @@ def main() -> int:
                                  if args.mode == "ground" and publications else ""),
         "mean_jpeg_size_bytes": (average(frame_sizes)
                                  if args.mode == "ground" and frame_sizes else ""),
+        "ground_result_receipts": ground_receipts,
+        "ground_result_delivery_ratio": (
+            ground_receipts / publications if publications else 0),
     }
 
     args.trace_output.parent.mkdir(parents=True, exist_ok=True)
@@ -281,7 +326,7 @@ def main() -> int:
         writer = csv.DictWriter(output, fieldnames=SUMMARY_FIELDS)
         writer.writeheader(); writer.writerow(summary)
     print(f"PASS: {publications} official publications, {callbacks} callbacks, "
-          f"{completions} inference completions")
+          f"{completions} inference completions, {ground_receipts} GCS results")
     return 0
 
 

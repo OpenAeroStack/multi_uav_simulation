@@ -1,0 +1,41 @@
+--- /ap/v1/navsat ---
+header:
+  stamp:
+    sec: 1787844129
+    nanosec: 441771000
+  frame_id: '0'
+status:
+  status: 2
+  service: 1
+latitude: 6.07943058013916
+longitude: 80.1930923461914
+altitude: 25.01999855041504
+position_covariance:
+- 0.09000000357627869
+- 0.0
+- 0.0
+- 0.0
+- 0.09000000357627869
+- 0.0
+- 0.0
+- 0.0
+- 0.09000000357627869
+position_covariance_type: 2
+---
+--- /ap/v1/pose/filtered ---
+header:
+  stamp:
+    sec: 1787844131
+    nanosec: 473429000
+  frame_id: base_link
+pose:
+  position:
+    x: 150.33203125
+    y: 110.28357696533203
+    z: 25.0
+  orientation:
+    x: 0.0024566706269979477
+    y: -0.0006958667072467506
+    z: 0.3071939945220947
+    w: 0.9516434669494629
+---

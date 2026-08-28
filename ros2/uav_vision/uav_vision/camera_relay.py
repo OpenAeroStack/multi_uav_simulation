@@ -134,10 +134,11 @@ class CameraRelay(Node):
 
         msg = self._latest_msg
         self._latest_msg = None
+        sequence_id = self._sent_count + 1
 
         if self._mode == 'edge':
-            t_publish = time.time()
-            sequence_id = self._sent_count + 1
+            frame_admission_time = time.time()
+            t_publish = frame_admission_time
             msg.header.stamp.sec = int(t_publish)
             msg.header.stamp.nanosec = int((t_publish % 1) * 1e9)
             msg.header.frame_id = (
@@ -149,8 +150,10 @@ class CameraRelay(Node):
                 self._trace_event({
                     'event': 'relay_publish',
                     'sequence_id': sequence_id,
+                    'frame_admission_time': frame_admission_time,
                     'relay_publish_time': t_publish,
                     'frame_size_bytes': len(msg.data),
+                    'jpeg_encode_ms': None,
                 })
             self.get_logger().info(
                 f'[UAV{self._uav_id}] edge frame sent '
@@ -158,6 +161,7 @@ class CameraRelay(Node):
 
         else:
             try:
+                frame_admission_time = time.time()
                 cv_img = self._img_msg_to_numpy(msg)
                 t_encode_start = time.time()
                 ok, buf = cv2.imencode(
@@ -171,12 +175,13 @@ class CameraRelay(Node):
                 out.header = msg.header
                 out.format = 'jpeg'
                 out.data = buf.tobytes()
-                # stamp = encode start, frame_id = encode end (send time)
+                # Preserve the historical encode-start stamp and, outside
+                # experiments, the historical encode-end frame_id.
                 out.header.stamp.sec = int(t_encode_start)
                 out.header.stamp.nanosec = int((t_encode_start % 1) * 1e9)
-                sequence_id = self._sent_count + 1
+                t_publish = time.time()
                 out.header.frame_id = (
-                    f'{t_encode_end:.9f}|{sequence_id}'
+                    f'{t_publish:.9f}|{sequence_id}'
                     if self._experiment_sequence_ids else str(t_encode_end))
                 self._pub.publish(out)
                 self._sent_count += 1
@@ -184,7 +189,12 @@ class CameraRelay(Node):
                     self._trace_event({
                         'event': 'relay_publish',
                         'sequence_id': sequence_id,
-                        'relay_publish_time': t_encode_end,
+                        'frame_admission_time': frame_admission_time,
+                        'relay_publish_time': t_publish,
+                        'jpeg_encode_start_time': t_encode_start,
+                        'jpeg_encode_end_time': t_encode_end,
+                        'jpeg_encode_ms': (
+                            (t_encode_end - t_encode_start) * 1000.0),
                         'frame_size_bytes': len(out.data),
                         'jpeg_size_bytes': len(out.data),
                     })
