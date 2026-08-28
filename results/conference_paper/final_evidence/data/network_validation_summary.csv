@@ -1,0 +1,15 @@
+experiment,metric,value,unit,sample_count,calculation,source_path,status
+received_power_friis,recoverable_packet_samples,3,packets,3,"count valid rx_node 0/1 rows in confirmed 58.5-m window [728,770] s",results/phase_b_network/raw/ns3_snr_obstaclefree_20260804_220047.csv,VERIFIED_RAW
+received_power_friis,recoverable_distance_points,1,distance windows,3,count windows with recoverable samples,results/phase_b_network/raw/ns3_snr_obstaclefree_20260804_220047.csv,VERIFIED_RAW
+received_power_friis,distance_min,58.5,m,3,confirmed window encoded in results/scripts/b1_friis_validation.py,results/phase_b_network/raw/ns3_snr_obstaclefree_20260804_220047.csv; results/scripts/b1_friis_validation.py:35-41,VERIFIED_RAW
+received_power_friis,distance_max,58.5,m,3,confirmed window encoded in results/scripts/b1_friis_validation.py,results/phase_b_network/raw/ns3_snr_obstaclefree_20260804_220047.csv; results/scripts/b1_friis_validation.py:35-41,VERIFIED_RAW
+received_power_friis,expected_friis_power,-62.071485,dBm,3,"20 - 20 log10(4*pi*d*f/c), d=58.5 m, f=5180 MHz",results/phase_b_network/raw/ns3_snr_obstaclefree_20260804_220047.csv; results/scripts/b1_friis_validation.py:43-62,VERIFIED_RAW
+received_power_friis,observed_mean_power,-80.412067,dBm,3,arithmetic mean of recoverable packet signal_dbm,results/phase_b_network/raw/ns3_snr_obstaclefree_20260804_220047.csv,VERIFIED_RAW
+received_power_friis,rmse,18.341013,dB,3,sqrt(mean((observed packet power - expected Friis power)^2)),results/phase_b_network/raw/ns3_snr_obstaclefree_20260804_220047.csv,VERIFIED_RAW
+received_power_friis,mean_bias,-18.340582,dB,3,mean(observed packet power - expected Friis power),results/phase_b_network/raw/ns3_snr_obstaclefree_20260804_220047.csv,VERIFIED_RAW
+received_power_friis,r_squared,,,3,not calculable: only one expected-power/distance point is recoverable,results/phase_b_network/raw/ns3_snr_obstaclefree_20260804_220047.csv,NOT_VERIFIED
+fixed_load_udp,run_count,5,runs,5,count complete iperf receiver summaries,results/phase_b_network/raw/iperf_*.txt,VERIFIED_RAW
+fixed_load_udp,offered_rate,2.000000,Mbit/s per run,5,iperf sender summaries/configured -b 2M,results/phase_b_network/raw/iperf_*.txt,VERIFIED_RAW
+fixed_load_udp,mean_receiver_goodput,1.682000,Mbit/s,5,arithmetic mean of five run-level receiver bitrates,results/phase_b_network/raw/iperf_*.txt,VERIFIED_RAW
+fixed_load_udp,mean_iperf_loss,11.200000,percent,5,arithmetic mean of five run-level receiver loss percentages,results/phase_b_network/raw/iperf_*.txt,VERIFIED_RAW
+offered_load_sweep,multi_rate_curve,,,0,no raw multi-rate offered-load sweep located,,NOT_VERIFIED

@@ -1,0 +1,6 @@
+run_label,offered_rate_mbps,receiver_goodput_mbps,jitter_ms,lost_datagrams,total_datagrams,iperf_loss_percent,duration_s,source_path
+d01_113_8m,2.0,1.69,2.42,186,1727,11.0,10,results/phase_b_network/raw/iperf_d01_113_8m_20260804_235352.txt
+d01_58_5m,2.0,1.67,2.282,202,1727,12.0,10,results/phase_b_network/raw/iperf_d01_58_5m_20260804_234952.txt
+d01_63_09m,2.0,1.68,2.158,198,1727,11.0,10,results/phase_b_network/raw/iperf_d01_63_09m_20260804_235210.txt
+d01_69_9m,2.0,1.68,2.658,193,1726,11.0,10,results/phase_b_network/raw/iperf_d01_69_9m_20260804_235131.txt
+d01_97_7m,2.0,1.69,2.248,192,1727,11.0,10,results/phase_b_network/raw/iperf_d01_97_7m_20260804_235314.txt

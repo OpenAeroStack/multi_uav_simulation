@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
 import math
 import re
 import statistics
 from pathlib import Path
+
+from iperf_json import parse_udp_json
 
 ROOT = Path(__file__).resolve().parent
 PROCESSED = ROOT / "processed"
@@ -82,30 +83,6 @@ def tap_deltas(before_path: Path, after_path: Path) -> dict[str, dict[str, int]]
                 raise ValueError(f"negative TAP delta: {interface} {field}")
             output[interface][field] = delta
     return output
-
-
-def read_iperf(path: Path) -> dict[str, float | int]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if "error" in data:
-        raise ValueError(f"iperf3 error in {path}: {data['error']}")
-    sent = data["end"]["sum_sent"]
-    received = data["end"]["sum_received"]
-    sender_packets = int(sent.get("packets", 0))
-    receiver_packets = int(received.get("packets", 0))
-    lost = int(received.get("lost_packets", sender_packets - receiver_packets))
-    if sender_packets <= 0 or receiver_packets < 0 or lost < 0:
-        raise ValueError(f"invalid iperf datagram counts in {path}")
-    return {
-        "actual_sender_mbps": float(sent["bits_per_second"]) / 1e6,
-        "sender_bytes": int(sent["bytes"]),
-        "sender_datagrams": sender_packets,
-        "receiver_bytes": int(received["bytes"]),
-        "receiver_datagrams": receiver_packets,
-        "received_goodput_mbps": float(received["bits_per_second"]) / 1e6,
-        "lost_datagrams": lost,
-        "packet_loss_ratio": lost / sender_packets,
-        "jitter_ms": float(received.get("jitter_ms", 0.0)),
-    }
 
 
 def write_csv(path: Path, fields: tuple[str, ...] | list[str], rows: list[dict]) -> None:
@@ -252,7 +229,9 @@ def main() -> int:
     taps = tap_deltas(args.tap_before, args.tap_after)
     rows, starts, durations = [], [], []
     for uav in range(1, args.n_active_uav + 1):
-        metrics = read_iperf(args.raw_dir / f"iperf_uav{uav}.json")
+        metrics = parse_udp_json(args.raw_dir / f"iperf_uav{uav}.json")
+        metrics.pop("sender_schema")
+        metrics.pop("receiver_schema")
         start = float((args.raw_dir / f"client_uav{uav}_start.txt").read_text().strip())
         end = float((args.raw_dir / f"client_uav{uav}_end.txt").read_text().strip())
         starts.append(start); durations.append(end - start)

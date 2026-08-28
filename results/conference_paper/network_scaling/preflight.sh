@@ -4,15 +4,50 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NS3_ROOT="${NS3_ROOT:-/home/multi_uav/ns-allinone-3.38/ns-3.38}"
 TMP="$(mktemp -d /tmp/network_scaling_preflight.XXXXXX)"
-NS3_PGID=""; POS_PGID=""; OBS_PGID=""; SERVER_PGID=""
-cleanup() {
-    trap - EXIT INT TERM
-    for pgid in "$SERVER_PGID" "$POS_PGID" "$OBS_PGID" "$NS3_PGID"; do
-        [[ -n "$pgid" ]] && sudo -n kill -TERM -- "-$pgid" 2>/dev/null || true
+NS3_PGID=""; POS_PGID=""; OBS_PGID=""; SERVER_PID=""
+stop_group() {
+    local pgid="${1:-}"
+    [[ -n "$pgid" ]] || return 0
+    sudo -n kill -INT -- "-$pgid" 2>/dev/null || true
+    for _ in {1..10}; do
+        sudo -n kill -0 -- "-$pgid" 2>/dev/null || return 0
+        sleep 0.2
     done
-    rm -rf "$TMP"
+    sudo -n kill -TERM -- "-$pgid" 2>/dev/null || true
+    for _ in {1..10}; do
+        sudo -n kill -0 -- "-$pgid" 2>/dev/null || return 0
+        sleep 0.2
+    done
+    sudo -n kill -KILL -- "-$pgid" 2>/dev/null || true
 }
-trap cleanup EXIT INT TERM
+stop_pid() {
+    local pid="${1:-}"
+    [[ -n "$pid" ]] || return 0
+    sudo -n kill -INT -- "$pid" 2>/dev/null || true
+    for _ in {1..10}; do
+        sudo -n kill -0 -- "$pid" 2>/dev/null || return 0
+        sleep 0.2
+    done
+    sudo -n kill -TERM -- "$pid" 2>/dev/null || true
+    for _ in {1..10}; do
+        sudo -n kill -0 -- "$pid" 2>/dev/null || return 0
+        sleep 0.2
+    done
+    sudo -n kill -KILL -- "$pid" 2>/dev/null || true
+}
+cleanup() {
+    local status=$?
+    trap - EXIT INT TERM
+    stop_pid "$SERVER_PID"
+    stop_group "$POS_PGID"
+    stop_group "$OBS_PGID"
+    stop_group "$NS3_PGID"
+    rm -rf "$TMP"
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 sudo -v; sudo -n true
 
 for ns in gcsns uav1ns uav2ns uav3ns; do
@@ -45,12 +80,17 @@ until grep -q 't=' "$TMP/ns3.log" 2>/dev/null; do
     (( SECONDS < deadline )) || { cat "$TMP/ns3.log"; echo "FAIL: NS-3 readiness timeout"; exit 1; }
     sleep 0.25
 done
-deadline=$((SECONDS + 30))
+deadline=$((SECONDS + 60))
 while ! grep -q '\[integration check\] OK:' "$TMP/ns3.log" 2>/dev/null; do
     grep -q 'INCOMPLETE FEED' "$TMP/ns3.log" 2>/dev/null && {
         cat "$TMP/ns3.log"; echo "FAIL: NS-3 did not receive all positions/links"; exit 1; }
     kill -0 "$NS3_PGID" 2>/dev/null || { cat "$TMP/ns3.log"; echo "FAIL: NS-3 exited"; exit 1; }
-    (( SECONDS < deadline )) || { cat "$TMP/ns3.log"; echo "FAIL: integration-check timeout"; exit 1; }
+    (( SECONDS < deadline )) || {
+        echo "--- final NS-3 log ---" >&2
+        cat "$TMP/ns3.log" >&2
+        echo "FAIL: integration-check timeout after 60 wall-clock seconds" >&2
+        exit 1
+    }
     sleep 0.25
 done
 
@@ -61,17 +101,39 @@ for uav in 1 2 3; do
 done
 
 echo "[3/4] One-UAV 500-Kbit/s UDP smoke test"
-sudo -n setsid ip netns exec gcsns runuser -u multi_uav -- iperf3 -s -1 -p 5201 >"$TMP/server.log" 2>&1 & SERVER_PGID=$!
-sleep 1
-timeout 20 sudo -n ip netns exec uav1ns runuser -u multi_uav -- \
-    iperf3 -c 10.42.0.10 -p 5201 --connect-timeout 5000 -u -b 500K -t 5 -J >"$TMP/client.json"
-python3 - "$TMP/client.json" <<'PY'
-import json, sys
-d=json.load(open(sys.argv[1])); r=d['end']['sum_received']
-if r.get('bits_per_second',0) < 350000:
-    raise SystemExit('FAIL: received goodput below 350 Kbit/s')
-print(f"  received={r['bits_per_second']/1e6:.3f} Mbps loss={r.get('lost_percent',0):.2f}%")
-PY
+sudo -n ip netns exec gcsns iperf3 -s -1 -p 5201 \
+    >"$TMP/server.log" 2>&1 & SERVER_PID=$!
+deadline=$((SECONDS + 10))
+until sudo -n ip netns exec gcsns ss -H -ltn 'sport = :5201' 2>/dev/null | grep -q .; do
+    if ! sudo -n kill -0 "$SERVER_PID" 2>/dev/null; then
+        cat "$TMP/server.log" >&2
+        echo "FAIL: iperf3 server exited before becoming ready" >&2
+        exit 1
+    fi
+    if (( SECONDS >= deadline )); then
+        cat "$TMP/server.log" >&2
+        echo "FAIL: iperf3 server did not listen on GCS port 5201 within 10 seconds" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+if ! timeout --signal=TERM --kill-after=2s 20s \
+    sudo -n ip netns exec uav1ns iperf3 -c 10.42.0.10 -p 5201 \
+        --connect-timeout 5000 -u -b 500K -t 5 -J \
+        >"$TMP/client.json" 2>"$TMP/client.err"; then
+    cat "$TMP/client.err" >&2
+    cat "$TMP/server.log" >&2
+    echo "FAIL: iperf3 UDP smoke-test client failed" >&2
+    exit 1
+fi
+python3 "$ROOT/iperf_json.py" "$TMP/client.json" \
+    --smoke-min-goodput-mbps 0.35
+wait "$SERVER_PID" || {
+    cat "$TMP/server.log" >&2
+    echo "FAIL: iperf3 server exited unsuccessfully" >&2
+    exit 1
+}
+SERVER_PID=""
 
 echo "[4/4] Real-time progress check"
 wall_end="$(date +%s.%N)"

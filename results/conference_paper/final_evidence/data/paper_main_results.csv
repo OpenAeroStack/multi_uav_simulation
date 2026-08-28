@@ -1,0 +1,29 @@
+category,condition,metric,value,unit,sample_count,source_path,calculation
+network,recoverable Friis window,RMSE,18.341013,dB,3,results/phase_b_network/raw/ns3_snr_obstaclefree_20260804_220047.csv,packet-level RMSE at sole recoverable distance
+network,five fixed 2-Mbit/s runs,mean receiver goodput,1.682000,Mbit/s,5,results/phase_b_network/raw/iperf_*.txt,mean of run receiver summaries
+network,five fixed 2-Mbit/s runs,mean receiver loss,11.200000,percent,5,results/phase_b_network/raw/iperf_*.txt,mean of run receiver summaries
+jpeg,RAW,count-based F1,0.849057,ratio,60,results/conference_paper/quality_sweep/processed/quality_sweep_summary_20260827_095558_UTC.csv,TP/FP/FN aggregate supplied by full sweep artifact
+jpeg,RAW,count-based recall,0.823171,ratio,60,results/conference_paper/quality_sweep/processed/quality_sweep_summary_20260827_095558_UTC.csv,TP/(TP+FN) from full sweep artifact
+jpeg,RAW,mean payload,2764800.000000,bytes/frame,60,results/conference_paper/quality_sweep/processed/quality_sweep_summary_20260827_095558_UTC.csv,mean across 60 frame representations
+jpeg,Q5,count-based F1,0.300518,ratio,60,results/conference_paper/quality_sweep/processed/quality_sweep_summary_20260827_095558_UTC.csv,TP/FP/FN aggregate supplied by full sweep artifact
+jpeg,Q5,count-based recall,0.176829,ratio,60,results/conference_paper/quality_sweep/processed/quality_sweep_summary_20260827_095558_UTC.csv,TP/(TP+FN) from full sweep artifact
+jpeg,Q5,mean payload,18458.900000,bytes/frame,60,results/conference_paper/quality_sweep/processed/quality_sweep_summary_20260827_095558_UTC.csv,mean across 60 frame representations
+jpeg,Q40,count-based F1,0.857143,ratio,60,results/conference_paper/quality_sweep/processed/quality_sweep_summary_20260827_095558_UTC.csv,TP/FP/FN aggregate supplied by full sweep artifact
+jpeg,Q40,count-based recall,0.859756,ratio,60,results/conference_paper/quality_sweep/processed/quality_sweep_summary_20260827_095558_UTC.csv,TP/(TP+FN) from full sweep artifact
+jpeg,Q40,mean payload,89069.916667,bytes/frame,60,results/conference_paper/quality_sweep/processed/quality_sweep_summary_20260827_095558_UTC.csv,mean across 60 frame representations
+rate,edge 1 Hz,processed-frame ratio,1.000000000,ratio,3,rate_edge_1hz_rng1;rate_edge_1hz_rng2;rate_edge_1hz_rng3,mean of run-level ratios
+rate,edge 1 Hz,result-delivery ratio,0.950000000,ratio,3,rate_edge_1hz_rng1;rate_edge_1hz_rng2;rate_edge_1hz_rng3,mean of run-level ratios
+rate,edge 1 Hz,median pipeline latency,252.979119619,ms,3,rate_edge_1hz_rng1;rate_edge_1hz_rng2;rate_edge_1hz_rng3,mean of run-level medians; delivered results only
+rate,edge 1 Hz,UAV TAP TX bitrate,0.212887156,Mbit/s,3,rate_edge_1hz_rng1;rate_edge_1hz_rng2;rate_edge_1hz_rng3,mean of run-level interface bitrates
+rate,edge 2 Hz,processed-frame ratio,1.000000000,ratio,3,rate_edge_2hz_rng1;rate_edge_2hz_rng2;rate_edge_2hz_rng3,mean of run-level ratios
+rate,edge 2 Hz,result-delivery ratio,1.000000000,ratio,3,rate_edge_2hz_rng1;rate_edge_2hz_rng2;rate_edge_2hz_rng3,mean of run-level ratios
+rate,edge 2 Hz,median pipeline latency,215.526580811,ms,3,rate_edge_2hz_rng1;rate_edge_2hz_rng2;rate_edge_2hz_rng3,mean of run-level medians; delivered results only
+rate,edge 2 Hz,UAV TAP TX bitrate,0.183248089,Mbit/s,3,rate_edge_2hz_rng1;rate_edge_2hz_rng2;rate_edge_2hz_rng3,mean of run-level interface bitrates
+rate,ground 1 Hz,processed-frame ratio,0.616666667,ratio,3,rate_ground_1hz_rng1;rate_ground_1hz_rng2;rate_ground_1hz_rng3,mean of run-level ratios
+rate,ground 1 Hz,result-delivery ratio,0.616666667,ratio,3,rate_ground_1hz_rng1;rate_ground_1hz_rng2;rate_ground_1hz_rng3,mean of run-level ratios
+rate,ground 1 Hz,median pipeline latency,523.607730865,ms,3,rate_ground_1hz_rng1;rate_ground_1hz_rng2;rate_ground_1hz_rng3,mean of run-level medians; delivered results only
+rate,ground 1 Hz,UAV TAP TX bitrate,0.310593511,Mbit/s,3,rate_ground_1hz_rng1;rate_ground_1hz_rng2;rate_ground_1hz_rng3,mean of run-level interface bitrates
+rate,ground 2 Hz,processed-frame ratio,0.052777778,ratio,3,rate_ground_2hz_rng1;rate_ground_2hz_rng2;rate_ground_2hz_rng3,mean of run-level ratios
+rate,ground 2 Hz,result-delivery ratio,0.052777778,ratio,3,rate_ground_2hz_rng1;rate_ground_2hz_rng2;rate_ground_2hz_rng3,mean of run-level ratios
+rate,ground 2 Hz,median pipeline latency,569.810072581,ms,3,rate_ground_2hz_rng1;rate_ground_2hz_rng2;rate_ground_2hz_rng3,mean of run-level medians; delivered results only
+rate,ground 2 Hz,UAV TAP TX bitrate,0.429551644,Mbit/s,3,rate_ground_2hz_rng1;rate_ground_2hz_rng2;rate_ground_2hz_rng3,mean of run-level interface bitrates

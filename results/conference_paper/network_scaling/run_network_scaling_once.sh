@@ -51,7 +51,7 @@ TAP_BEFORE="$RUN_RAW/tap_before.csv"
 TAP_AFTER="$RUN_RAW/tap_after.csv"
 METADATA="$RUN_RAW/metadata.txt"
 NS3_PGID=""; POSITION_PGID=""; OBSTACLE_PGID=""
-declare -a SERVER_PGIDS=() CLIENT_PGIDS=()
+declare -a SERVER_PIDS=() CLIENT_PIDS=() CLIENT_PGIDS=()
 
 stop_group() {
     local pgid="${1:-}"; [[ -n "$pgid" ]] || return 0
@@ -61,9 +61,19 @@ stop_group() {
     sleep 1
     sudo -n kill -KILL -- "-$pgid" 2>/dev/null || true
 }
+stop_pid() {
+    local pid="${1:-}"; [[ -n "$pid" ]] || return 0
+    sudo -n kill -INT -- "$pid" 2>/dev/null || true
+    for _ in {1..10}; do sudo -n kill -0 -- "$pid" 2>/dev/null || return 0; sleep 0.2; done
+    sudo -n kill -TERM -- "$pid" 2>/dev/null || true
+    sleep 1
+    sudo -n kill -KILL -- "$pid" 2>/dev/null || true
+}
 cleanup() {
     local status=$?; trap - EXIT INT TERM
-    for pgid in "${CLIENT_PGIDS[@]}" "${SERVER_PGIDS[@]}"; do stop_group "$pgid"; done
+    for pgid in "${CLIENT_PGIDS[@]}"; do stop_group "$pgid"; done
+    for pid in "${CLIENT_PIDS[@]}"; do stop_pid "$pid"; done
+    for pid in "${SERVER_PIDS[@]}"; do stop_pid "$pid"; done
     stop_group "$POSITION_PGID"; stop_group "$OBSTACLE_PGID"; stop_group "$NS3_PGID"
     exit "$status"
 }
@@ -108,51 +118,130 @@ while true; do
     sleep 0.25
 done
 sleep "$SETTLE_SECONDS"
-deadline=$((SECONDS + 30))
+deadline=$((SECONDS + 60))
 while ! grep -q '\[integration check\] OK:' "$NS3_LOG" 2>/dev/null; do
     if grep -q 'INCOMPLETE FEED' "$NS3_LOG" 2>/dev/null; then
         cat "$NS3_LOG" >&2; echo "ERROR: incomplete fixed position/link feed" >&2; exit 1
     fi
     kill -0 "$NS3_PGID" 2>/dev/null || { cat "$NS3_LOG" >&2; echo "ERROR: NS-3 exited before integration check" >&2; exit 1; }
-    (( SECONDS < deadline )) || { cat "$NS3_LOG" >&2; echo "ERROR: timed out waiting for NS-3 integration check" >&2; exit 1; }
+    (( SECONDS < deadline )) || {
+        echo "--- final NS-3 log ---" >&2
+        cat "$NS3_LOG" >&2
+        echo "ERROR: timed out after 60 wall-clock seconds waiting for NS-3 integration check" >&2
+        exit 1
+    }
     sleep 0.25
 done
 
 for uav in $(seq 1 "$N_ACTIVE"); do
     port=$((5200 + uav))
     server_log="$RUN_RAW/iperf_server_uav${uav}.log"
-    sudo -n setsid ip netns exec gcsns runuser -u multi_uav -- \
+    sudo -n ip netns exec gcsns \
         iperf3 -s -1 -p "$port" >"$server_log" 2>&1 &
-    SERVER_PGIDS+=("$!")
+    SERVER_PIDS+=("$!")
 done
-sleep 1
+deadline=$((SECONDS + 10))
+while true; do
+    all_servers_ready=true
+    for index in "${!SERVER_PIDS[@]}"; do
+        pid="${SERVER_PIDS[$index]}"
+        port=$((5201 + index))
+        if ! sudo -n kill -0 "$pid" 2>/dev/null; then
+            cat "$RUN_RAW/iperf_server_uav$((index + 1)).log" >&2
+            echo "ERROR: iperf3 server for UAV$((index + 1)) exited before becoming ready" >&2
+            exit 1
+        fi
+        sudo -n ip netns exec gcsns ss -H -ltn "sport = :$port" 2>/dev/null | grep -q . || all_servers_ready=false
+    done
+    $all_servers_ready && break
+    if (( SECONDS >= deadline )); then
+        for log in "$RUN_RAW"/iperf_server_uav*.log; do [[ -f "$log" ]] && cat "$log" >&2; done
+        echo "ERROR: iperf3 servers did not become ready within 10 seconds" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
 
-RELEASE_TIME="$(python3 -c 'import time; print(f"{time.time()+float(__import__("sys").argv[1]):.9f}")' "$RELEASE_LEAD_SECONDS")"
+RELEASE_FILE="$RUN_RAW/common_release_time.txt"
+declare -a CLIENT_READY_FILES=()
 for uav in $(seq 1 "$N_ACTIVE"); do
     port=$((5200 + uav))
     json="$RUN_RAW/iperf_uav${uav}.json"
     start_file="$RUN_RAW/client_uav${uav}_start.txt"
     end_file="$RUN_RAW/client_uav${uav}_end.txt"
-    sudo -n setsid ip netns exec "uav${uav}ns" runuser -u multi_uav -- bash -lc '
-        delay=$(python3 -c '\''import sys,time; print(max(0.0,float(sys.argv[1])-time.time()))'\'' "$1")
+    client_err="$RUN_RAW/iperf_uav${uav}.err"
+    ready_file="$RUN_RAW/client_uav${uav}_ready.txt"
+    sudo -n ip netns exec "uav${uav}ns" setsid bash -lc '
+        printf "%s\n" "$$" >"$1"
+        for _ in $(seq 1 200); do
+            [[ -s "$2" ]] && break
+            sleep 0.05
+        done
+        if [[ ! -s "$2" ]]; then
+            echo "common release timestamp was not provided" >"$9"
+            exit 1
+        fi
+        release_time=$(<"$2")
+        delay=$(python3 -c '\''import sys,time; print(max(0.0,float(sys.argv[1])-time.time()))'\'' "$release_time")
         sleep "$delay"
-        date +%s.%N >"$2"
-        iperf3 -c 10.42.0.10 -p "$3" --connect-timeout 5000 -u -b "$4" -t "$5" -J >"$6"
+        date +%s.%N >"$3"
+        timeout --signal=TERM --kill-after=2s 40s \
+            iperf3 -c 10.42.0.10 -p "$4" --connect-timeout 5000 \
+            -u -b "$5" -t "$6" -J >"$7" 2>"$9"
         status=$?
-        date +%s.%N >"$7"
+        date +%s.%N >"$8"
         exit "$status"
-    ' client-shell "$RELEASE_TIME" "$start_file" "$port" "$RATE" "$DURATION" "$json" "$end_file" &
-    CLIENT_PGIDS+=("$!")
+    ' client-shell "$ready_file" "$RELEASE_FILE" "$start_file" "$port" \
+        "$RATE" "$DURATION" "$json" "$end_file" "$client_err" &
+    CLIENT_PIDS+=("$!")
+    CLIENT_READY_FILES+=("$ready_file")
 done
+
+deadline=$((SECONDS + 10))
+while true; do
+    all_clients_ready=true
+    for index in "${!CLIENT_PIDS[@]}"; do
+        pid="${CLIENT_PIDS[$index]}"
+        ready_file="${CLIENT_READY_FILES[$index]}"
+        if ! sudo -n kill -0 "$pid" 2>/dev/null; then
+            cat "$RUN_RAW/iperf_uav$((index + 1)).err" >&2 2>/dev/null || true
+            echo "ERROR: UAV$((index + 1)) client wrapper exited before the common release" >&2
+            exit 1
+        fi
+        [[ -s "$ready_file" ]] || all_clients_ready=false
+    done
+    $all_clients_ready && break
+    (( SECONDS < deadline )) || {
+        echo "ERROR: clients did not enter their UAV namespaces within 10 seconds" >&2
+        exit 1
+    }
+    sleep 0.05
+done
+for ready_file in "${CLIENT_READY_FILES[@]}"; do
+    client_pgid="$(<"$ready_file")"
+    [[ "$client_pgid" =~ ^[1-9][0-9]*$ ]] || {
+        echo "ERROR: invalid client process-group ID in $ready_file" >&2
+        exit 1
+    }
+    CLIENT_PGIDS+=("$client_pgid")
+done
+
+RELEASE_TIME="$(python3 -c 'import sys,time; print("%.9f" % (time.time() + float(sys.argv[1])))' "$RELEASE_LEAD_SECONDS")"
+printf '%s\n' "$RELEASE_TIME" >"$RELEASE_FILE"
 
 snapshot_taps "$TAP_BEFORE"
 OFFICIAL_START="$RELEASE_TIME"
 echo "Official common release boundary: $OFFICIAL_START"
 client_failure=0
-for pid in "${CLIENT_PGIDS[@]}"; do wait "$pid" || client_failure=1; done
+for pid in "${CLIENT_PIDS[@]}"; do wait "$pid" || client_failure=1; done
+CLIENT_PIDS=()
 CLIENT_PGIDS=()
 (( client_failure == 0 )) || { echo "ERROR: at least one iperf3 client failed" >&2; exit 1; }
-OFFICIAL_END="$(python3 -c 'import sys; print(f"{float(sys.argv[1])+30.0:.9f}")' "$OFFICIAL_START")"
+server_failure=0
+for pid in "${SERVER_PIDS[@]}"; do wait "$pid" || server_failure=1; done
+SERVER_PIDS=()
+(( server_failure == 0 )) || { echo "ERROR: at least one iperf3 server failed" >&2; exit 1; }
+OFFICIAL_END="$(python3 -c 'import sys; print("%.9f" % (float(sys.argv[1]) + 30.0))' "$OFFICIAL_START")"
 snapshot_taps "$TAP_AFTER"
 NS3_WALL_END="$(date +%s.%N)"
 

@@ -1,0 +1,5 @@
+interface,rx_bytes,rx_packets,rx_errors,rx_dropped,tx_bytes,tx_packets,tx_errors,tx_dropped
+tap-gcs,670685,644,0,0,12501,114,0,10
+tap-uav1,28356,231,0,0,654980,528,0,10
+tap-uav2,675644,703,0,0,7692,56,0,8
+tap-uav3,675023,697,0,0,8313,62,0,0
