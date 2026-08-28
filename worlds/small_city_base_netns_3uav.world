@@ -4501,7 +4501,7 @@
 
     <!-- UAV 1 - SITL instance 0 - ports 9002/9003 -->
     <model name="iris_1_demo">
-      <pose>-18 2 0 0 0 0</pose>
+      <pose>-70 -22 0 0 0 0</pose>
       <include>
         <uri>model://iris_1_netns</uri>
       </include>
@@ -4509,7 +4509,7 @@
 
     <!-- UAV 2 - SITL instance 1 - ports 9012/9013 -->
     <model name="iris_2_demo">
-      <pose>-18 -2 0 0 0 0</pose>
+      <pose>-70 -27 0 0 0 0</pose>
       <include>
         <uri>model://iris_2_netns</uri>
       </include>
@@ -4517,7 +4517,7 @@
 
     <!-- UAV 3 - SITL instance 2 - ports 9022/9023 -->
     <model name="iris_3_demo">
-      <pose>-14 0 0 0 0 0</pose>
+      <pose>-70 -17 0 0 0 0</pose>
       <include>
         <uri>model://iris_3_netns</uri>
       </include>
@@ -4549,7 +4549,7 @@
          blocks its own links. -->
     <model name="gcs">
       <static>true</static>
-      <pose>-24 0 0 0 0 0</pose>
+      <pose>-70 -7 0 0 0 0</pose>
       <link name="cabinet">
         <pose>0 0 0.45 0 0 0</pose>
         <collision name="cabinet_col">

@@ -51,7 +51,7 @@ def move_gps(lat, lon, dist_m, bearing_deg):
 
 class WaypointFinder(Node):
     def __init__(self, uav_id, alt):
-        super().__init__('waypoint_finder')
+        super().__init__(f'waypoint_finder_uav{uav_id}')
         self.uav = uav_id
         self.alt = alt
         self.lat = None
