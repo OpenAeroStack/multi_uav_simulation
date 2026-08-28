@@ -3,6 +3,14 @@
 <sdf version="1.6">
   <world name="default">
 
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <latitude_deg>6.0792673</latitude_deg>
+      <longitude_deg>80.1921607</longitude_deg>
+      <elevation>31</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+
     <gui>
      <camera name="user_camera">
        <pose>-40.637 0.86 2.365 0 0.1899 0.476</pose>
@@ -19,6 +27,7 @@
       </sky>
       <background>0.35 0.35 0.35 1.0</background>
     </scene>
+
 
     <physics name='default_physics' default='0' type='ode'>
       <!-- CHANGED for ArduPilot SITL lockstep. Original values (max_step_size
@@ -4526,7 +4535,14 @@
          plugin block below (2.9 m = 0.9 m cabinet + 2.0 m mast) and must match
          world_pos_publisher.py's gcs_antenna_height parameter.
 
+         The name must stntenna on top of the mast. That offset is <gcs_antenna_height> in the
+         plugin block below (2.9 m = 0.9 m cabinet + 2.0 m mast) and must match
+         world_pos_publisher.py's gcs_antenna_height parameter.
+
          The name must stay free of material keywords (glass/wood/concrete/
+         metal/foliage/vehicle). The plugin filters this model out of ray hits
+         by name, so a keyword here would never be read anyway, but a rename
+         thay free of material keywords (glass/wood/concrete/
          metal/foliage/vehicle). The plugin filters this model out of ray hits
          by name, so a keyword here would never be read anyway, but a rename
          that dropped "gcs" would turn the station into an obstacle that
