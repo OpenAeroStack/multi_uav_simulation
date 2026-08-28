@@ -92,7 +92,8 @@ existing_nodes="$(ps -eo comm=,args= | awk -v relay="$RELAY" -v detector="$DETEC
 
 ros_in_namespace() {
     local namespace="$1"; shift
-    timeout 20s sudo -n ip netns exec "$namespace" runuser -u multi_uav -- bash -lc '
+    timeout --signal=TERM --kill-after=5s 20s \
+        sudo -n ip netns exec "$namespace" runuser -u multi_uav -- bash -lc '
         source /opt/ros/humble/setup.bash
         source /home/multi_uav/FYP/multi_uav_simulation/ros2/install/setup.bash
         exec "$@"
@@ -103,9 +104,11 @@ snapshot_taps() {
     local destination="$1"
     {
         echo "--- tap-uav1 ---"
-        sudo -n ip -s link show tap-uav1
+        timeout --signal=TERM --kill-after=2s 10s \
+            sudo -n ip -s link show tap-uav1
         echo "--- tap-gcs ---"
-        sudo -n ip -s link show tap-gcs
+        timeout --signal=TERM --kill-after=2s 10s \
+            sudo -n ip -s link show tap-gcs
     } >"$destination"
 }
 
@@ -269,12 +272,21 @@ done
 
 echo "Endpoints matched; fixed settling period: ${SETTLE_SECONDS}s"
 sleep "$SETTLE_SECONDS"
-{
-    echo "--- /ap/v1/navsat ---"
-    ros_in_namespace gcsns ros2 topic echo --once /ap/v1/navsat || true
-    echo "--- /ap/v1/pose/filtered ---"
-    ros_in_namespace gcsns ros2 topic echo --once /ap/v1/pose/filtered || true
-} >"$POSE_START" 2>&1
+: >"$POSE_START"
+echo "--- /ap/v1/navsat ---" >>"$POSE_START"
+if ! ros_in_namespace gcsns ros2 topic echo --once /ap/v1/navsat \
+    >>"$POSE_START" 2>&1; then
+    POSE_WARNING="WARNING: NavSat metadata was unavailable within the bounded capture timeout; continuing."
+    echo "$POSE_WARNING" >>"$POSE_START"
+    echo "$POSE_WARNING" >&2
+fi
+echo "--- /ap/v1/pose/filtered ---" >>"$POSE_START"
+if ! ros_in_namespace gcsns ros2 topic echo --once /ap/v1/pose/filtered \
+    >>"$POSE_START" 2>&1; then
+    POSE_WARNING="WARNING: filtered-pose metadata was unavailable within the bounded capture timeout; continuing."
+    echo "$POSE_WARNING" >>"$POSE_START"
+    echo "$POSE_WARNING" >&2
+fi
 
 snapshot_taps "$TAP_BEFORE"
 OFFICIAL_START_TIME="$(date +%s.%N)"
