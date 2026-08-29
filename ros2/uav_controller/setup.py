@@ -28,6 +28,7 @@ setup(
             'l_mission       = uav_controller.l_mission:main',
             'multi_mission   = uav_controller.multi_mission:main',
             'faculty_mission = uav_controller.faculty_mission:main',
+            'faculty_dynamic_mission = uav_controller.faculty_dynamic_mission:main',
             'airport_mission   = uav_controller.airport_mission:main',
             'position_accuracy_test = uav_controller.position_accuracy_test:main',
             'single_uav_mission = uav_controller.single_uav_mission:main',
