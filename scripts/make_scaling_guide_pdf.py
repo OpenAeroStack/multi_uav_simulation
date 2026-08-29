@@ -126,8 +126,8 @@ E = story.extend
 # ═══════════════════════════════ PAGE 1 ═══════════════════════════════
 A(para("Scaling Guide — Adding UAVs, Nodes and Boards", "title"))
 A(para("What an ns-3 node and a TAP actually are, how ROS 2 reaches across two "
-       "machines, and the exact checklist for adding one more drone or one more "
-       "Raspberry Pi.", "sub"))
+       "machines, and the checklist for adding <b>board N</b> — written so the same "
+       "procedure applies to every board, not one of them.", "sub"))
 
 A(para("1.  The four layers", "h1"))
 A(para("Every drone in this testbed exists in four places at once. Adding a UAV "
@@ -165,14 +165,14 @@ A(para("<b>Bridge (br-uavN)</b> — a Linux software switch. It joins the TAP to
 E(code("""
   THE FULL PATH OF ONE DETECTION
 
-  Pi: detector publishes /detections/uav1
-        |  real UDP packet, VLAN 43 tagged
+  Pi (board N): detector publishes /detections/uavN
+        |  real UDP packet, tagged with the radio VLAN
         v
-    switch --- host NIC --- eth-rf --- br-uav3 --- tap-uav3       REAL LINUX
+    switch --- host NIC --- eth-rf --- br-uavN --- tap-uavN       REAL LINUX
                                                        |
                                             TapBridge (the airlock)
                                                        |
-    ns-3 node 3 radio  ===>  simulated 802.11a air  ===>  ns-3 node 0 radio
+    ns-3 node N radio  ===>  simulated 802.11a air  ===>  ns-3 node 0 radio
                         distance / buildings / fading / contention
                                                        |
     tap-gcs --- br-gcs --- veth --- gcsns --- gcs_receiver        REAL LINUX
@@ -306,11 +306,23 @@ E(code("""
 A(PageBreak())
 
 # ═══════════════════════════════ PAGE 4 ═══════════════════════════════
-A(para("6.  Adding one more Raspberry Pi (hardware node)", "h1"))
+A(para("6.  Adding board N (hardware node)", "h1"))
 
-A(para("A Pi replaces the software namespace with real silicon. The addressing is "
-       "the part that must be right — every board gets its own VLAN ids so no two "
-       "boards can reach each other except through ns-3.", "body"))
+A(para("A Pi replaces the software namespace with real silicon. Everything below is "
+       "written for <b>board N</b> — substitute N and the same steps build any board.", "body"))
+
+A(para("The addressing formula", "h2"))
+
+E(code("""
+  BOARD N                  N = 1, 2, 3, ...
+
+  hostname                 uav-pi-0N
+  sensor VLAN id           9 + N              -> 10, 11, 12
+  sensor addresses         host 10.0.(N-1).1  /  Pi 10.0.(N-1).2
+  radio VLAN id            41 + N             -> 42, 43, 44
+  radio address            10.42.0.(11 + N)   -> .12, .13, .14
+  ns-3 node / tap          N / tap-uavN
+"""))
 
 E(table([
     ["Board", "Sensor VLAN", "Pi address", "Host address", "Radio VLAN", "Radio address"],
@@ -322,31 +334,30 @@ E(table([
 E(code("""
   ONE CABLE, TWO LOGICAL LINKS, PER BOARD
 
-     HOST                          SWITCH                       PI 4B
-     ----                          ------                       -----
-   eth-cam2 (VLAN 11) --+                        +-- eth0.11  10.0.1.2
-     10.0.1.1           |                        |     ^  camera in
-                        +==== one cable =========+     |
-   eth-rf.43 (VLAN 43)--+                        +-- eth0.43  10.42.0.13
-        |                                                 |  detections out
-        v                                                 |
-     br-uav3 --- tap-uav3 --- ns-3 node 3  <--------------+
-
-  The switch does not need to understand VLANs. Tagging happens at the
-  endpoints; the switch only has to forward tagged frames, which any
-  gigabit switch does. Measured through an unmanaged LS1005G:
-  1.4 ms, 0% loss, 942 Mbps, 0 retransmits.
+     HOST                          SWITCH                       PI 4B  (board N)
+     ----                          ------                       ----------------
+   eth-camN  (VLAN 9+N) --+                       +-- eth0.<9+N>   10.0.(N-1).2
+     10.0.(N-1).1         |                       |     ^  camera in
+                          +==== one cable ========+     |
+   eth-rf.<41+N>         -+                       +-- eth0.<41+N>  10.42.0.(11+N)
+        |                                                |  detections out
+        v                                                |
+     br-uavN --- tap-uavN --- ns-3 node N  <-------------+
 """))
 
-A(para("Host side (GUI)", "h2"))
-A(para("Network Connections &rarr; + &rarr; VLAN &rarr; Create. Parent = the USB "
-       "adapter <i>by MAC</i>, VLAN id = 11, name = eth-cam2. IPv4 Manual, "
-       "10.0.1.1/24, no gateway, and tick <i>Use this connection only for resources "
-       "on its network</i>. IPv6 Disabled.", "body"))
+A(para("The switch need not understand VLANs — tagging happens at the endpoints, so "
+       "it only has to forward tagged frames, which any gigabit switch does.", "note"))
 
-A(para("Pi side (netplan)", "h2"))
+A(para("Host side — GUI", "h2"))
+A(para("Network Connections &rarr; + &rarr; VLAN &rarr; Create. Connection name and "
+       "VLAN interface name = <b>eth-camN</b>. Parent = the USB adapter <i>selected by "
+       "MAC</i>, not \"via Wired connection\". VLAN id = <b>9+N</b>. Then IPv4 Settings: "
+       "Manual, address <b>10.0.(N-1).1 / 24</b>, gateway empty, and tick <i>Use this "
+       "connection only for resources on its network</i>. IPv6 Settings: Disabled.", "body"))
+
+A(para("Pi side — netplan", "h2"))
 E(code("""
-  # /etc/netplan/60-hitl-vlans.yaml     chmod 600
+  # /etc/netplan/60-hitl-vlans.yaml   chmod 600, root:root.  Shown for N=2.
   network:
     version: 2
     ethernets:
@@ -385,36 +396,36 @@ A(para("The node budget is the real constraint. Four nodes means GCS plus three 
        "not exist in reality.", "body"))
 
 A(para("Three ways past it", "h2"))
-A(para("<b>a. Route through the namespace.</b> Put the Pi behind uavNns instead of "
-       "beside it: uavNns gets a second interface, IP forwarding on, and the Pi uses it "
-       "as gateway. One MAC on the channel, so UseLocal is satisfied, and one node "
-       "genuinely equals one aircraft. Cost: DDS multicast discovery does not cross a "
-       "router, so unicast discovery peers become necessary.", "body"))
+A(para("<b>a. Route through the namespace.</b> Put the Pi behind uavNns rather than "
+       "beside it — uavNns gets a second interface and IP forwarding, and the Pi uses "
+       "it as gateway. One MAC on the channel, so UseLocal is satisfied and one node "
+       "equals one aircraft. Cost: DDS multicast does not cross a router, so unicast "
+       "discovery peers become necessary.", "body"))
 A(para("<b>b. Patch AdhocWifiMac::SupportsSendFrom() to return true</b>, then use "
        "TapBridge UseBridge and put both behind one bridge. Mechanically sound — ad-hoc "
        "frames carry the source in addr2 — but it is a simulator modification that has "
        "to be disclosed.", "body"))
-A(para("<b>c. Extend the scenario past four nodes.</b> The tapNames array and the "
-       "loops around it become N-parameterised. The largest change, and the right one "
-       "if the swarm grows.", "body"))
+A(para("<b>c. Extend the scenario past four nodes.</b> The tapNames array and its "
+       "loops become N-parameterised. The largest change, and the right one if the "
+       "swarm grows.", "body"))
 
 A(para("8.  Verification checklist", "h1"))
 
 E(table([
     ["Check", "Command", "Expected"],
-    ["One address, one interface", "ip -4 addr show | grep -c 10.0.1.2/24", "1, never 2"],
-    ["Sensor link", "ping -c 30 10.0.N.1", "~1.4 ms, 0% loss"],
-    ["Throughput", "iperf3 -c 10.0.N.2 -t 10", "~940 Mbps, 0 retr"],
+    ["One address, one interface", "ip -4 addr show | grep -c 10.0.(N-1).2/24", "1, never 2"],
+    ["Sensor link", "ping -c 30 10.0.(N-1).1", "~1.4 ms, 0% loss"],
+    ["Throughput", "iperf3 -c 10.0.(N-1).2 -t 10", "~940 Mbps, 0 retr"],
     ["Clock", "chronyc tracking | grep 'System time'", "a few microseconds"],
     ["Socket buffers", "sysctl net.core.rmem_max net.core.wmem_max", "both 536870912"],
     ["ns-3 sees the node", "grep 'missing node IDs' /tmp/ns3_single.log", "your node absent"],
     ["Node is moving", "grep '^t=' /tmp/ns3_single.log", "coordinates change"],
-    ["ISOLATION", "from Pi 1:  ping -c 30 10.42.0.13", "~75 ms, NOT 1.4 ms"],
+    ["ISOLATION", "from board M:  ping -c 30 10.42.0.(11+N)", "~75 ms, NOT 1.4 ms"],
 ], [42 * mm, 78 * mm, 45 * mm]))
 
 E(callout("The isolation check is the one that matters most. If two Pis answer each "
           "other in 1.4 ms, they are talking through the switch and skipping ns-3 — "
-          "the same class of fault as the shared-memory bypass that made DDS deliver "
+          "any two boards. It is the same class of fault as the shared-memory bypass "
           "detections without crossing the simulated radio at all. Nothing errors; "
           "the numbers simply describe a link that was never simulated.", "warn"))
 

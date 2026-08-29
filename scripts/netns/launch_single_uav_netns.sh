@@ -34,8 +34,10 @@ DDS_PARM="$PROJECT_DIR/params/uav1_dds_netns.parm"
 PI_LINK_IF="${PI_LINK_IF:-$(ls /sys/class/net 2>/dev/null | grep -m1 '^enx' || true)}"
 CAM_VLAN=10          # unimpaired camera link  (behaves like a camera cable)
 RF_VLAN=42           # impaired radio link     (goes through ns-3)
+RF_VLAN2=43          # board 2's radio link 
 CAM_VLAN_IF="eth-cam"
 RF_VLAN_IF="eth-rf"
+RF_VLAN_IF2="eth-rf2"
 CAM_HOST_IP="10.0.0.1"
 CAM_PI_IP="10.0.0.2"
 RF_PI_IP="10.42.0.12"   # the Pi is UAV2 on the wireless subnet
@@ -64,7 +66,7 @@ done
 for ns in gcsns uav1ns; do
     sudo ip netns del "$ns" 2>/dev/null || true
 done
-for br in br-gcs br-uav1 br-uav2; do
+for br in br-gcs br-uav1 br-uav2 br-uav3; do
     sudo ip link del "$br" type bridge 2>/dev/null || true
 done
 # NOTE: eth-cam is deliberately NOT in this list.
@@ -83,7 +85,7 @@ done
 # eth-rf stays here: it is a pure L2 leg into br-uav2, which is torn down with
 # ns-3 every run, so it has nothing to persist for.
 for link in tap-gcs tap-uav1 tap-uav2 tap-uav3 veth0h veth1h sim1h \
-            eth-rf; do
+            eth-rf eth-rf2; do
     sudo ip link del "$link" 2>/dev/null || true
 done
 sleep 2
@@ -120,7 +122,7 @@ for tap in tap-uav2 tap-uav3; do
     sudo ip link set "$tap" up
 done
 echo "  tap-uav2 up (UAV2 slot — the Pi edge node attaches here, see 1c)"
-echo "  tap-uav3 up (bare, unbridged, unused)"
+echo "  tap-uav3 up (UAV3 slot - Pi 2 attaches here, see 1c)"
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -176,6 +178,16 @@ if [[ -n "$PI_LINK_IF" ]] && [[ -d "/sys/class/net/$PI_LINK_IF" ]]; then
     sudo ip link add link "$PI_LINK_IF" name "$RF_VLAN_IF" type vlan id "$RF_VLAN" 2>/dev/null || true
     sudo ip link set "$RF_VLAN_IF" up
     sudo ip link set "$RF_VLAN_IF" master br-uav2
+
+    # Board 2: VLAN 43 -> br-uav3 -> tap-uav3 -> ns-3 node 3.
+    sudo ip link add name br-uav3 type bridge 2>/dev/null || true
+    sudo ip link set tap-uav3 master br-uav3
+    sudo ip link set br-uav3 up
+
+    sudo ip link add link "$PI_LINK_IF" name "$RF_VLAN_IF2" type vlan id "$RF_VLAN2" 2>/dev/null || true
+    sudo ip link set "$RF_VLAN_IF2" up
+    sudo ip link set "$RF_VLAN_IF2" master br-uav3
+
 
     sudo ip link set "$PI_LINK_IF" up
     echo "  $PI_LINK_IF: VLAN $CAM_VLAN -> $CAM_VLAN_IF ($CAM_HOST_IP) unimpaired camera link"
@@ -498,11 +510,13 @@ cleanup() {
     sudo ip link del br-gcs type bridge 2>/dev/null || true
     sudo ip link del br-uav1 type bridge 2>/dev/null || true
     sudo ip link del br-uav2 type bridge 2>/dev/null || true
+    sudo ip link del br-uav3 type bridge 2>/dev/null || true
+
     # eth-cam is left up on purpose — see the note in STEP 0. It is the sensor
     # cable, not part of the simulation, and tearing it down here is what left
     # the Pi unreachable between runs.
     for l in tap-gcs tap-uav1 tap-uav2 tap-uav3 veth0h veth1h sim1h \
-             eth-rf; do
+             eth-rf eth-rf2; do
         sudo ip link del "$l" 2>/dev/null || true
     done
     exit
