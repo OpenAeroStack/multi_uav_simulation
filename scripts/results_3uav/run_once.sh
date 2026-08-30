@@ -10,11 +10,13 @@ ROOT="$PROJECT/results_3uav/$MODE/$RUN_ID"
 DETECTOR="$PROJECT/ros2/uav_vision/uav_vision/detector.py"
 RELAY="$PROJECT/ros2/uav_vision/uav_vision/camera_relay.py"
 METRICS="$PROJECT/ros2/uav_vision/uav_vision/metrics_logger.py"
+DISCOVERY_SERVER_ADDRESS="10.42.0.10"
+DISCOVERY_SERVER_PORT=11811
 READINESS_TIMEOUT=60
 MODEL_TIMEOUT=180
 SETTLE_SECONDS=5
 DETECTOR_DDS_WARMUP_SECONDS=15
-LOGGER_DDS_SETTLE_SECONDS=10
+DETECTION_DDS_SERVER_SETTLE_SECONDS=10
 DISCOVERY_POLL_INTERVAL_SECONDS=2
 
 usage() { echo "Usage: $0 <edge|ground> <run_01> [duration_seconds]" >&2; }
@@ -42,6 +44,9 @@ READINESS_LOG="$ROOT/readiness.log"
 
 declare -A DETECTOR_PIDS=() METRICS_PIDS=() RELAY_PIDS=()
 declare -a WRAPPER_PIDS=()
+DISCOVERY_SERVER_PID=""
+DISCOVERY_SERVER_WRAPPER_PID=""
+PIDSTAT_PID=""
 SHUTDOWN_COMPLETE=0
 
 pid_alive() {
@@ -84,15 +89,48 @@ stop_process_set() {
         (( any_alive == 0 )) && return 0
         sleep 0.2
     done
-    echo "WARNING: one or more $label processes did not terminate" >&2
-    return 1
+    for uav in 1 2 3; do
+        pid="${process_pids[$uav]:-}"
+        if pid_alive "$pid"; then
+            echo "WARNING: $label UAV$uav did not stop after SIGTERM; sending SIGKILL" >&2
+            sudo -n kill -KILL "$pid" 2>/dev/null || true
+        fi
+    done
+    return 0
+}
+
+stop_discovery_server() {
+    [[ -n "$DISCOVERY_SERVER_PID" ]] || return 0
+    pid_alive "$DISCOVERY_SERVER_PID" &&
+        sudo -n kill -INT "$DISCOVERY_SERVER_PID" 2>/dev/null || true
+    local deadline=$((SECONDS + 5))
+    while (( SECONDS < deadline )); do
+        pid_alive "$DISCOVERY_SERVER_PID" || break
+        sleep 0.2
+    done
+    if pid_alive "$DISCOVERY_SERVER_PID"; then
+        sudo -n kill -TERM "$DISCOVERY_SERVER_PID" 2>/dev/null || true
+        sleep 1
+    fi
+    if pid_alive "$DISCOVERY_SERVER_PID"; then
+        sudo -n kill -KILL "$DISCOVERY_SERVER_PID" 2>/dev/null || true
+    fi
+    [[ -n "$DISCOVERY_SERVER_WRAPPER_PID" ]] &&
+        wait "$DISCOVERY_SERVER_WRAPPER_PID" 2>/dev/null || true
+    DISCOVERY_SERVER_PID=""
+    DISCOVERY_SERVER_WRAPPER_PID=""
 }
 
 shutdown_pipeline() {
     (( SHUTDOWN_COMPLETE == 0 )) || return 0
+    if pid_alive "$PIDSTAT_PID"; then
+        kill -TERM "$PIDSTAT_PID" 2>/dev/null || true
+        wait "$PIDSTAT_PID" 2>/dev/null || true
+    fi
     stop_process_set RELAY_PIDS relay || true
     stop_process_set DETECTOR_PIDS detector || true
     stop_process_set METRICS_PIDS "metrics logger" || true
+    stop_discovery_server
     for wrapper_pid in "${WRAPPER_PIDS[@]:-}"; do
         wait "$wrapper_pid" 2>/dev/null || true
     done
@@ -119,6 +157,8 @@ launch_python() {
         source /home/multi_uav/yolo_env/bin/activate
         export PYTHONUNBUFFERED=1
         export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+        export ROS_DOMAIN_ID=0
+        export ROS_DISCOVERY_SERVER=10.42.0.10:11811
         printf "%s\n" "$$" > "$1"
         shift
         exec python3 "$@"
@@ -171,6 +211,9 @@ ros_in_namespace() {
         source /opt/ros/humble/setup.bash
         source /home/multi_uav/FYP/multi_uav_simulation/ros2/install/setup.bash
         export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+        export ROS_DOMAIN_ID=0
+        export ROS_DISCOVERY_SERVER=10.42.0.10:11811
+        export ROS_SUPER_CLIENT=TRUE
         exec "$@"
     ' ros-shell "$@"
 }
@@ -223,17 +266,43 @@ wait_fixed_startup_period() {
     done
 }
 
-wait_for_endpoint_pairs() {
-    local kind="$1" deadline=$((SECONDS + READINESS_TIMEOUT))
-    local all_ready uav topic namespace info publisher_count subscriber_count state remaining
+check_detection_endpoints_once() {
+    local all_ready=1 uav topic info publisher_count subscriber_count state
+    require_all_alive detection_discovery || return 1
+    echo "Final detection DDS discovery check:"
+    for uav in 1 2 3; do
+        topic="/detections/uav${uav}"
+        info="$(ros_in_namespace gcsns ros2 topic info \
+            --no-daemon --spin-time 5 -v "$topic" 2>&1)" || info=""
+        publisher_count="$(awk '/^Publisher count:/ {print $3; exit}' <<<"$info")"
+        subscriber_count="$(awk '/^Subscription count:/ {print $3; exit}' <<<"$info")"
+        publisher_count="${publisher_count:-0}"
+        subscriber_count="${subscriber_count:-0}"
+        if [[ "$publisher_count" =~ ^[1-9][0-9]*$ ]] &&
+           [[ "$subscriber_count" =~ ^[1-9][0-9]*$ ]]; then
+            state=READY
+        else
+            state=FAILED
+            all_ready=0
+        fi
+        printf 'UAV%s publisher=%s subscriber=%s %s\n' \
+            "$uav" "$publisher_count" "$subscriber_count" "$state" | \
+            tee -a "$READINESS_LOG"
+    done
+    (( all_ready == 1 )) || {
+        echo "ERROR: one or more detection-result endpoint pairs were not discovered" >&2
+        return 1
+    }
+}
+
+wait_for_relay_endpoint_pairs() {
+    local deadline=$((SECONDS + READINESS_TIMEOUT))
+    local all_ready uav topic namespace info remaining
     while (( SECONDS < deadline )); do
-        require_all_alive "$kind" || return 1
+        require_all_alive relay_discovery || return 1
         all_ready=1
-        [[ "$kind" == detection_discovery ]] && echo "DDS discovery:"
         for uav in 1 2 3; do
-            if [[ "$kind" == detection_discovery ]]; then
-                topic="/detections/uav${uav}"; namespace=gcsns
-            elif [[ "$MODE" == edge ]]; then
+            if [[ "$MODE" == edge ]]; then
                 topic="/cluster/cam/uav${uav}"; namespace="uav${uav}ns"
             else
                 topic="/relay/uav${uav}/compressed"; namespace=gcsns
@@ -242,21 +311,9 @@ wait_for_endpoint_pairs() {
             # discovering the live endpoints in this namespace.
             info="$(ros_in_namespace "$namespace" ros2 topic info \
                 --no-daemon --spin-time 3 -v "$topic" 2>&1)" || info=""
-            publisher_count="$(awk '/^Publisher count:/ {print $3; exit}' <<<"$info")"
-            subscriber_count="$(awk '/^Subscription count:/ {print $3; exit}' <<<"$info")"
-            publisher_count="${publisher_count:-0}"
-            subscriber_count="${subscriber_count:-0}"
             if ! grep -Eq 'Publisher count: [1-9][0-9]*' <<<"$info" ||
                ! grep -Eq 'Subscription count: [1-9][0-9]*' <<<"$info"; then
                 all_ready=0
-                state=WAITING
-            else
-                state=READY
-            fi
-            if [[ "$kind" == detection_discovery ]]; then
-                printf 'UAV%s publisher=%s subscriber=%s %s\n' \
-                    "$uav" "$publisher_count" "$subscriber_count" "$state" | \
-                    tee -a "$READINESS_LOG"
             fi
         done
         (( all_ready == 1 )) && return 0
@@ -264,11 +321,9 @@ wait_for_endpoint_pairs() {
         (( remaining > 0 )) && echo "Waiting for all endpoints; up to ${remaining}s remain."
         sleep "$DISCOVERY_POLL_INTERVAL_SECONDS"
     done
-    echo "ERROR: timed out waiting for $kind endpoint matching" >&2
+    echo "ERROR: timed out waiting for relay endpoint matching" >&2
     for uav in 1 2 3; do
-        if [[ "$kind" == detection_discovery ]]; then
-            topic="/detections/uav${uav}"; namespace=gcsns
-        elif [[ "$MODE" == edge ]]; then
+        if [[ "$MODE" == edge ]]; then
             topic="/cluster/cam/uav${uav}"; namespace="uav${uav}ns"
         else
             topic="/relay/uav${uav}/compressed"; namespace=gcsns
@@ -279,6 +334,48 @@ wait_for_endpoint_pairs() {
     done
     return 1
 }
+
+echo "Starting Fast DDS Discovery Server in gcsns..."
+DISCOVERY_SERVER_LOG="$ROOT/logs/fastdds_discovery_server.log"
+: >"$DISCOVERY_SERVER_LOG"
+if [[ -n "$(sudo -n ip netns exec gcsns ss -H -lun \
+       "sport = :$DISCOVERY_SERVER_PORT")" ]]; then
+    echo "ERROR: Discovery Server address is already in use: "\
+         "$DISCOVERY_SERVER_ADDRESS:$DISCOVERY_SERVER_PORT" >&2
+    exit 1
+fi
+sudo -n setsid ip netns exec gcsns runuser -u "$RUN_USER" -- bash -lc '
+    source /opt/ros/humble/setup.bash
+    exec fastdds discovery -i 0 -l "$1" -p "$2"
+' discovery-server-shell "$DISCOVERY_SERVER_ADDRESS" "$DISCOVERY_SERVER_PORT" \
+    >"$DISCOVERY_SERVER_LOG" 2>&1 &
+DISCOVERY_SERVER_WRAPPER_PID=$!
+
+deadline=$((SECONDS + 10))
+while (( SECONDS < deadline )); do
+    listener="$(sudo -n ip netns exec gcsns ss -H -lunp \
+        "sport = :$DISCOVERY_SERVER_PORT")"
+    candidate_pid="$(sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' <<<"$listener" | head -1)"
+    if [[ "$candidate_pid" =~ ^[1-9][0-9]*$ ]] &&
+       pid_alive "$candidate_pid" &&
+       sudo -n tr '\0' ' ' <"/proc/$candidate_pid/cmdline" | \
+           grep -Fq fast-discovery-server; then
+        DISCOVERY_SERVER_PID="$candidate_pid"
+        break
+    fi
+    sleep 0.2
+done
+if [[ ! "$DISCOVERY_SERVER_PID" =~ ^[1-9][0-9]*$ ]] ||
+   ! pid_alive "$DISCOVERY_SERVER_PID" ||
+   ! sudo -n ip netns exec gcsns ss -H -lunp \
+       "sport = :$DISCOVERY_SERVER_PORT" | \
+       grep -Fq "pid=$DISCOVERY_SERVER_PID,"; then
+    echo "ERROR: Fast DDS Discovery Server did not bind "\
+         "$DISCOVERY_SERVER_ADDRESS:$DISCOVERY_SERVER_PORT" >&2
+    tail -80 "$DISCOVERY_SERVER_LOG" >&2 2>/dev/null || true
+    exit 1
+fi
+echo "Fast DDS Discovery Server ready: $DISCOVERY_SERVER_ADDRESS:$DISCOVERY_SERVER_PORT"
 
 echo "Starting all detectors..."
 for uav in 1 2 3; do
@@ -313,12 +410,11 @@ for uav in 1 2 3; do
         "CSV:" 20 "UAV$uav metrics logger"
 done
 
-echo "All metrics loggers created; DDS settling: ${LOGGER_DDS_SETTLE_SECONDS}s"
-wait_fixed_startup_period "$LOGGER_DDS_SETTLE_SECONDS" \
-    "Detector/logger DDS settling" 1
+echo "All metrics loggers created; Discovery Server settling: ${DETECTION_DDS_SERVER_SETTLE_SECONDS}s"
+wait_fixed_startup_period "$DETECTION_DDS_SERVER_SETTLE_SECONDS" \
+    "Detector/logger Discovery Server settling" 1
 
-echo "Waiting for all detection-result endpoints..."
-wait_for_endpoint_pairs detection_discovery
+check_detection_endpoints_once
 for uav in 1 2 3; do
     echo "UAV$uav detections: publisher matched subscriber" | tee -a "$READINESS_LOG"
 done
@@ -336,7 +432,7 @@ for uav in 1 2 3; do
 done
 
 echo "Waiting for all relay-to-detector endpoints..."
-wait_for_endpoint_pairs relay_discovery
+wait_for_relay_endpoint_pairs
 for uav in 1 2 3; do
     echo "UAV$uav camera relay: publisher matched detector subscriber" | tee -a "$READINESS_LOG"
 done
@@ -375,6 +471,7 @@ stop_process_set RELAY_PIDS relay
 stop_process_set DETECTOR_PIDS detector
 stop_process_set METRICS_PIDS "metrics logger"
 for wrapper_pid in "${WRAPPER_PIDS[@]}"; do wait "$wrapper_pid" 2>/dev/null || true; done
+stop_discovery_server
 SHUTDOWN_COMPLETE=1
 
 for uav in 1 2 3; do

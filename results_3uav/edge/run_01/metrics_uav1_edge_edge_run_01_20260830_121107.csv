@@ -1,0 +1,1 @@
+run_id,timestamp_s,mode,uav_id,frame_num,size_bytes,detection_count,latency_ms,inference_ms,compression_ms,decode_ms,pipeline_latency_ms,wireless_transit_ms,overhead_ms,navsat_age_ms
