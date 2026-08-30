@@ -28,8 +28,11 @@ SITL_READY_TIMEOUT=90
 DDS_READY_TIMEOUT=120
 MAVLINK_READY_TIMEOUT=90
 GAZEBO_STARTUP_SECONDS=30
+DISCOVERY_SERVER_ADDRESS="10.42.0.10"
+DISCOVERY_SERVER_PORT=11811
 
-NS3_PID=""; GAZEBO_PID=""; POSPUB_PID=""
+NS3_PID=""; GAZEBO_PID=""; POSPUB_PID=""; DISCOVERY_SERVER_PID=""
+DISCOVERY_SERVER_WRAPPER_PID=""
 declare -a AGENT_PIDS=() SITL_PIDS=() BRIDGE_PIDS=()
 
 usage() {
@@ -46,7 +49,7 @@ require_command() {
     command -v "$1" >/dev/null || { echo "ERROR: required command not found: $1" >&2; exit 1; }
 }
 
-for command_name in gazebo ros2 python3 ip ethtool timeout; do
+for command_name in gazebo ros2 python3 ip ethtool timeout fastdds ss; do
     require_command "$command_name"
 done
 require_file "$WORLD_PATH"
@@ -63,13 +66,13 @@ cleanup_owned_processes() {
     trap - EXIT INT TERM
     echo "Shutting down three-UAV pipeline..."
     for pid in "${BRIDGE_PIDS[@]}" "${SITL_PIDS[@]}" "${AGENT_PIDS[@]}" \
-               "$POSPUB_PID" "$GAZEBO_PID" "$NS3_PID"; do
+               "$POSPUB_PID" "$GAZEBO_PID" "$NS3_PID" "$DISCOVERY_SERVER_PID"; do
         [[ -n "$pid" ]] || continue
         sudo -n kill -INT "$pid" 2>/dev/null || true
     done
     sleep 2
     for pid in "${BRIDGE_PIDS[@]}" "${SITL_PIDS[@]}" "${AGENT_PIDS[@]}" \
-               "$POSPUB_PID" "$GAZEBO_PID" "$NS3_PID"; do
+               "$POSPUB_PID" "$GAZEBO_PID" "$NS3_PID" "$DISCOVERY_SERVER_PID"; do
         [[ -n "$pid" ]] || continue
         sudo -n kill -TERM "$pid" 2>/dev/null || true
     done
@@ -92,7 +95,7 @@ trap 'exit 143' TERM
 
 echo "=== [0/9] Scoped pre-flight cleanup ==="
 for pattern in drone_bridge micro_ros_agent '/build/sitl/bin/arducopter' \
-               three_uav_tapbridge_integrated gzserver gzclient; do
+               three_uav_tapbridge_integrated fast-discovery-server gzserver gzclient; do
     sudo -n pkill -9 -f -- "$pattern" 2>/dev/null || true
 done
 for ns in gcsns uav1ns uav2ns uav3ns; do sudo -n ip netns del "$ns" 2>/dev/null || true; done
@@ -125,6 +128,7 @@ setup_ns() {
     echo "  $ns: $address via $tap/$bridge"
 }
 setup_ns gcsns  tap-gcs  br-gcs  veth0h veth0n 10.42.0.10/24
+sudo -n ip addr add 10.42.0.1/24 dev br-gcs
 setup_ns uav1ns tap-uav1 br-uav1 veth1h veth1n 10.42.0.11/24
 setup_ns uav2ns tap-uav2 br-uav2 veth2h veth2n 10.42.0.12/24
 setup_ns uav3ns tap-uav3 br-uav3 veth3h veth3n 10.42.0.13/24
@@ -174,12 +178,43 @@ for uav in 1 2 3; do
 done
 echo "  All three GCS/UAV wireless paths respond."
 
+echo "=== [3b/9] Fast DDS Discovery Server in gcsns ==="
+DISCOVERY_SERVER_LOG="$LOG_ROOT/fastdds_discovery_server.log"; : >"$DISCOVERY_SERVER_LOG"
+sudo -n setsid ip netns exec gcsns runuser -u "$RUN_USER" -- bash -lc '
+    source /opt/ros/humble/setup.bash
+    exec fastdds discovery -i 0 -l "$1" -p "$2"
+' discovery-server-shell "$DISCOVERY_SERVER_ADDRESS" "$DISCOVERY_SERVER_PORT" \
+    >"$DISCOVERY_SERVER_LOG" 2>&1 &
+DISCOVERY_SERVER_WRAPPER_PID=$!
+deadline=$((SECONDS + 10))
+while (( SECONDS < deadline )); do
+    listener="$(sudo -n ip netns exec gcsns ss -H -lunp \
+        "sport = :$DISCOVERY_SERVER_PORT")"
+    candidate_pid="$(sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' <<<"$listener" | head -1)"
+    if [[ "$candidate_pid" =~ ^[1-9][0-9]*$ ]] &&
+       sudo -n kill -0 "$candidate_pid" 2>/dev/null &&
+       sudo -n tr '\0' ' ' <"/proc/$candidate_pid/cmdline" | \
+           grep -Fq fast-discovery-server; then
+        DISCOVERY_SERVER_PID="$candidate_pid"
+        break
+    fi
+    sleep 0.2
+done
+[[ "$DISCOVERY_SERVER_PID" =~ ^[1-9][0-9]*$ ]] || {
+    cat "$DISCOVERY_SERVER_LOG" >&2
+    echo "ERROR: Fast DDS Discovery Server startup timeout" >&2
+    exit 1
+}
+echo "  Discovery Server ready: $DISCOVERY_SERVER_ADDRESS:$DISCOVERY_SERVER_PORT"
+
 echo "=== [4/9] Gazebo three-UAV small-city world ==="
 export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:$HOME/FYP/small_city_gazebo_world/models:${GAZEBO_MODEL_PATH:-}"
 export GAZEBO_PLUGIN_PATH="$PROJECT_DIR/install/multi_uav_gazebo_plugins/lib:${GAZEBO_PLUGIN_PATH:-}"
 export GAZEBO_RESOURCE_PATH="$PROJECT_DIR:$PROJECT_DIR/worlds:${GAZEBO_RESOURCE_PATH:-}"
 GAZEBO_LOG="$LOG_ROOT/gazebo.log"; : >"$GAZEBO_LOG"
-gazebo --verbose "$WORLD_PATH" -s libgazebo_ros_init.so -s libgazebo_ros_factory.so \
+env -u ROS_DISCOVERY_SERVER -u ROS_SUPER_CLIENT \
+    RMW_IMPLEMENTATION=rmw_fastrtps_cpp ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0 \
+    gazebo --verbose "$WORLD_PATH" -s libgazebo_ros_init.so -s libgazebo_ros_factory.so \
     >"$GAZEBO_LOG" 2>&1 &
 GAZEBO_PID=$!
 echo "  Waiting ${GAZEBO_STARTUP_SECONDS}s for Gazebo..."
@@ -198,7 +233,9 @@ echo "  Gazebo has all three FDM listeners."
 
 echo "=== [5/9] Gazebo position feed to NS-3 ==="
 POSPUB_LOG="$LOG_ROOT/world_positions.log"; : >"$POSPUB_LOG"
-python3 "$PROJECT_DIR/scripts/world_pos_publisher.py" >"$POSPUB_LOG" 2>&1 &
+env -u ROS_DISCOVERY_SERVER -u ROS_SUPER_CLIENT \
+    RMW_IMPLEMENTATION=rmw_fastrtps_cpp ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0 \
+    python3 "$PROJECT_DIR/scripts/world_pos_publisher.py" >"$POSPUB_LOG" 2>&1 &
 POSPUB_PID=$!
 sleep 3
 kill -0 "$POSPUB_PID" 2>/dev/null || { cat "$POSPUB_LOG" >&2; echo "ERROR: position publisher exited" >&2; exit 1; }
@@ -292,6 +329,9 @@ for uav in 1 2 3; do
         source /opt/ros/humble/setup.bash
         source "$HOME/FYP/ardu_ws/install/setup.bash"
         source "$1"
+        export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+        export ROS_DOMAIN_ID=0
+        export ROS_DISCOVERY_SERVER=10.42.0.10:11811
         exec ros2 run uav_controller drone_bridge --ros-args \
             -p uav_id:="$2" -p mavlink_host:="$3" -p mavlink_port:="$4"
     ' bridge-shell "$PROJECT_DIR/ros2/install/setup.bash" "$uav" \

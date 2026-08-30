@@ -45,7 +45,6 @@ READINESS_LOG="$ROOT/readiness.log"
 declare -A DETECTOR_PIDS=() METRICS_PIDS=() RELAY_PIDS=()
 declare -a WRAPPER_PIDS=()
 DISCOVERY_SERVER_PID=""
-DISCOVERY_SERVER_WRAPPER_PID=""
 PIDSTAT_PID=""
 SHUTDOWN_COMPLETE=0
 
@@ -99,28 +98,6 @@ stop_process_set() {
     return 0
 }
 
-stop_discovery_server() {
-    [[ -n "$DISCOVERY_SERVER_PID" ]] || return 0
-    pid_alive "$DISCOVERY_SERVER_PID" &&
-        sudo -n kill -INT "$DISCOVERY_SERVER_PID" 2>/dev/null || true
-    local deadline=$((SECONDS + 5))
-    while (( SECONDS < deadline )); do
-        pid_alive "$DISCOVERY_SERVER_PID" || break
-        sleep 0.2
-    done
-    if pid_alive "$DISCOVERY_SERVER_PID"; then
-        sudo -n kill -TERM "$DISCOVERY_SERVER_PID" 2>/dev/null || true
-        sleep 1
-    fi
-    if pid_alive "$DISCOVERY_SERVER_PID"; then
-        sudo -n kill -KILL "$DISCOVERY_SERVER_PID" 2>/dev/null || true
-    fi
-    [[ -n "$DISCOVERY_SERVER_WRAPPER_PID" ]] &&
-        wait "$DISCOVERY_SERVER_WRAPPER_PID" 2>/dev/null || true
-    DISCOVERY_SERVER_PID=""
-    DISCOVERY_SERVER_WRAPPER_PID=""
-}
-
 shutdown_pipeline() {
     (( SHUTDOWN_COMPLETE == 0 )) || return 0
     if pid_alive "$PIDSTAT_PID"; then
@@ -130,7 +107,6 @@ shutdown_pipeline() {
     stop_process_set RELAY_PIDS relay || true
     stop_process_set DETECTOR_PIDS detector || true
     stop_process_set METRICS_PIDS "metrics logger" || true
-    stop_discovery_server
     for wrapper_pid in "${WRAPPER_PIDS[@]:-}"; do
         wait "$wrapper_pid" 2>/dev/null || true
     done
@@ -335,22 +311,7 @@ wait_for_relay_endpoint_pairs() {
     return 1
 }
 
-echo "Starting Fast DDS Discovery Server in gcsns..."
-DISCOVERY_SERVER_LOG="$ROOT/logs/fastdds_discovery_server.log"
-: >"$DISCOVERY_SERVER_LOG"
-if [[ -n "$(sudo -n ip netns exec gcsns ss -H -lun \
-       "sport = :$DISCOVERY_SERVER_PORT")" ]]; then
-    echo "ERROR: Discovery Server address is already in use: "\
-         "$DISCOVERY_SERVER_ADDRESS:$DISCOVERY_SERVER_PORT" >&2
-    exit 1
-fi
-sudo -n setsid ip netns exec gcsns runuser -u "$RUN_USER" -- bash -lc '
-    source /opt/ros/humble/setup.bash
-    exec fastdds discovery -i 0 -l "$1" -p "$2"
-' discovery-server-shell "$DISCOVERY_SERVER_ADDRESS" "$DISCOVERY_SERVER_PORT" \
-    >"$DISCOVERY_SERVER_LOG" 2>&1 &
-DISCOVERY_SERVER_WRAPPER_PID=$!
-
+echo "Verifying topology-owned Fast DDS Discovery Server..."
 deadline=$((SECONDS + 10))
 while (( SECONDS < deadline )); do
     listener="$(sudo -n ip netns exec gcsns ss -H -lunp \
@@ -372,7 +333,6 @@ if [[ ! "$DISCOVERY_SERVER_PID" =~ ^[1-9][0-9]*$ ]] ||
        grep -Fq "pid=$DISCOVERY_SERVER_PID,"; then
     echo "ERROR: Fast DDS Discovery Server did not bind "\
          "$DISCOVERY_SERVER_ADDRESS:$DISCOVERY_SERVER_PORT" >&2
-    tail -80 "$DISCOVERY_SERVER_LOG" >&2 2>/dev/null || true
     exit 1
 fi
 echo "Fast DDS Discovery Server ready: $DISCOVERY_SERVER_ADDRESS:$DISCOVERY_SERVER_PORT"
@@ -471,7 +431,6 @@ stop_process_set RELAY_PIDS relay
 stop_process_set DETECTOR_PIDS detector
 stop_process_set METRICS_PIDS "metrics logger"
 for wrapper_pid in "${WRAPPER_PIDS[@]}"; do wait "$wrapper_pid" 2>/dev/null || true; done
-stop_discovery_server
 SHUTDOWN_COMPLETE=1
 
 for uav in 1 2 3; do
