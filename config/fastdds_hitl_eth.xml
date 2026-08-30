@@ -52,13 +52,17 @@
              The address that does not exist on a given machine is ignored. -->
         <interfaceWhiteList>
           <address>127.0.0.1</address>
-          <!-- Camera link, VLAN 10 — unimpaired, never touches ns-3 -->
-          <address>10.0.0.1</address>    <!-- host : eth-cam   -->
-          <address>10.0.0.2</address>    <!-- Pi   : eth0.10   -->
-          <!-- Radio link, VLAN 42 — goes through ns-3 -->
-          <address>10.42.0.10</address>  <!-- gcsns: veth0n    -->
-          <address>10.42.0.12</address>  <!-- Pi   : eth0.42, the UAV2 slot -->
+          <!-- Camera links — unimpaired, never touch ns-3 -->
+          <address>10.0.0.1</address>    <!-- host : eth-cam   VLAN 10 -->
+          <address>10.0.0.2</address>    <!-- Pi 1 : eth0.10   VLAN 10 -->
+          <address>10.0.1.1</address>    <!-- host : eth-cam2  VLAN 11 -->
+          <address>10.0.1.2</address>    <!-- Pi 2 : eth0.11   VLAN 11 -->
+          <!-- Radio links — through ns-3 -->
+          <address>10.42.0.10</address>  <!-- gcsns: veth0n           -->
+          <address>10.42.0.12</address>  <!-- Pi 1 : eth0.42, node 2  -->
+          <address>10.42.0.14</address>  <!-- Pi 2 : eth0.43, node 4  -->
         </interfaceWhiteList>
+
 
         <!-- Sized for 2.76 MB image samples. These are the DDS-level buffers;
              they still require the kernel sysctl limits above to take effect. -->

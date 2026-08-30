@@ -14,20 +14,35 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RUN_USER="${SUDO_USER:-$USER}"
 
+# SITL and other children reconfigure the controlling terminal (they turn off
+# ONLCR, so a newline stops returning the cursor to column 0 and every line
+# prints one step further right). Save the settings now and restore them on
+# exit; every background process is also given its own stdin (< /dev/null) so
+# it cannot reach this terminal in the first place.
+TTY_SAVED=""
+[[ -t 0 ]] && TTY_SAVED="$(stty -g 2>/dev/null || true)"
+restore_tty() { [[ -n "$TTY_SAVED" ]] && stty "$TTY_SAVED" 2>/dev/null || true; }
+
 # Provides ARDUPILOT_HOME and other project-wide env vars
 source "$PROJECT_DIR/setup.sh"
 
 NS3_ROOT="$HOME/ns-allinone-3.38/ns-3.38"
-NS3_LOG="/tmp/ns3_single.log"
-GAZEBO_LOG="/tmp/gazebo_netns.log"
-AGENT_LOG="/tmp/agent_netns.log"
-BRIDGE_LOG="/tmp/bridge_netns.log"
-POSPUB_LOG="/tmp/pospub_netns.log"
+NS3_LOG="/tmp/ns3_2uav.log"
+GAZEBO_LOG="/tmp/gazebo_2uav.log"
+AGENT_LOG="/tmp/agent_2uav_uav1.log"
+BRIDGE_LOG="/tmp/bridge_2uav_uav1.log"
+POSPUB_LOG="/tmp/pospub_2uav.log"
 SITL_LOG_DIR="/tmp/sitl_netns_uav1"
+SITL_LOG_DIR2="/tmp/sitl_netns_uav2"
+AGENT_LOG2="/tmp/agent_2uav_uav2.log"
+BRIDGE_LOG2="/tmp/bridge_2uav_uav2.log"
+
 
 HOME_GPS="6.0790684,80.1915283,0.00,0"
-WORLD_PATH="$PROJECT_DIR/worlds/small_city_single_uav_netns.world"
+WORLD_PATH="$PROJECT_DIR/worlds/small_city_2uav_netns.world"
 DDS_PARM="$PROJECT_DIR/params/uav1_dds_netns.parm"
+DDS_PARM2="$PROJECT_DIR/params/uav2_dds_netns.parm"
+
 
 # ── HITL: the Pi edge node's two links over one cable (see STEP 1c) ─────────
 # Auto-detect the Pi-facing NIC; override by exporting PI_LINK_IF beforehand.
@@ -51,22 +66,36 @@ GAZEBO_STARTUP_SEC=30
 NS3_PID=""
 GAZEBO_PID=""
 SITL_PID=""
+SITL_PID2=""
 AGENT_PID=""
 BRIDGE_PID=""
+AGENT_PID2=""
+BRIDGE_PID2=""
 POSPUB_PID=""
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 0 — Cleanup
 # ═══════════════════════════════════════════════════════════════════════════
+restore_tty
 echo "=== [0] Pre-flight cleanup ==="
+# pkill -f matches FULL command lines -- including its own parent sudo, whose
+# cmdline is literally `sudo pkill -9 -f -- gzserver`. Without the bracket below
+# each iteration SIGKILLs its own sudo. That is the "line NN: PID Killed sudo
+# pkill" spam, and because sudo puts the terminal in no-echo for the password
+# prompt and is killed before it can restore it, the whole session is left with
+# ONLCR off -- every later line prints one step further right.
+#
+# `[g]zserver` as a REGEX matches "gzserver"; as literal text in sudo's own
+# command line it does not match that regex. Self-match solved, same targets hit.
 for pattern in drone_bridge micro_ros_agent '/build/sitl/bin/arducopter' \
                'three_uav_tapbridge_integrated' gzserver gzclient; do
-    sudo pkill -9 -f -- "$pattern" 2>/dev/null && echo "  killed: $pattern" || true
+    safe="[${pattern:0:1}]${pattern:1}"
+    sudo pkill -9 -f -- "$safe" 2>/dev/null && echo "  killed: $pattern" || true
 done
-for ns in gcsns uav1ns; do
+for ns in gcsns uav1ns uav2ns; do
     sudo ip netns del "$ns" 2>/dev/null || true
 done
-for br in br-gcs br-uav1 br-uav2 br-uav3; do
+for br in br-gcs br-uav1 br-uav2 br-uav3 br-uav4; do
     sudo ip link del "$br" type bridge 2>/dev/null || true
 done
 # NOTE: eth-cam is deliberately NOT in this list.
@@ -84,8 +113,8 @@ done
 #
 # eth-rf stays here: it is a pure L2 leg into br-uav2, which is torn down with
 # ns-3 every run, so it has nothing to persist for.
-for link in tap-gcs tap-uav1 tap-uav2 tap-uav3 veth0h veth1h sim1h \
-            eth-rf eth-rf2; do
+for link in tap-gcs tap-uav1 tap-uav2 tap-uav3 tap-uav4 veth0h veth1h veth2h \
+            sim1h sim2h eth-rf eth-rf2; do
     sudo ip link del "$link" 2>/dev/null || true
 done
 sleep 2
@@ -95,7 +124,8 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 1 — Real wireless topology: gcsns + uav1ns only
 # ═══════════════════════════════════════════════════════════════════════════
-echo "=== [1/8] Wireless topology: gcsns + uav1ns ==="
+restore_tty
+echo "=== [1/8] Wireless topology: gcsns + uav1ns + uav2ns ==="
 setup_ns() {
   local NS=$1 TAP=$2 BR=$3 VETH_H=$4 VETH_NS=$5 NS_IP=$6
   sudo ip netns add "$NS" 2>/dev/null || true
@@ -115,14 +145,18 @@ setup_ns() {
 }
 setup_ns gcsns  tap-gcs  br-gcs  veth0h veth0n 10.42.0.10/24
 setup_ns uav1ns tap-uav1 br-uav1 veth1h veth1n 10.42.0.11/24
+setup_ns uav2ns tap-uav3 br-uav3 veth2h veth2n 10.42.0.13/24
 
-echo "=== [1b] TAPs for the UAV2/UAV3 slots (ns-3 binary requires all four) ==="
-for tap in tap-uav2 tap-uav3; do
+
+
+restore_tty
+echo "=== [1b] TAPs for the Pi edge nodes ==="
+for tap in tap-uav2 tap-uav4; do
     sudo ip tuntap add dev "$tap" mode tap user "$RUN_USER" 2>/dev/null || true
     sudo ip link set "$tap" up
 done
-echo "  tap-uav2 up (UAV2 slot — the Pi edge node attaches here, see 1c)"
-echo "  tap-uav3 up (UAV3 slot - Pi 2 attaches here, see 1c)"
+echo "  tap-uav2 up (node 2 - Pi 1 attaches here, see 1c)"
+echo "  tap-uav4 up (node 4 - Pi 2 attaches here, see 1c)"
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -143,6 +177,7 @@ echo ""
 #
 # Skipped automatically when no Pi-facing NIC is present, so host-only runs are
 # unaffected.
+restore_tty
 echo "=== [1c] HITL: Pi edge node as UAV2 on the impaired link ==="
 if [[ -n "$PI_LINK_IF" ]] && [[ -d "/sys/class/net/$PI_LINK_IF" ]]; then
     sudo modprobe 8021q 2>/dev/null || true
@@ -179,14 +214,15 @@ if [[ -n "$PI_LINK_IF" ]] && [[ -d "/sys/class/net/$PI_LINK_IF" ]]; then
     sudo ip link set "$RF_VLAN_IF" up
     sudo ip link set "$RF_VLAN_IF" master br-uav2
 
-    # Board 2: VLAN 43 -> br-uav3 -> tap-uav3 -> ns-3 node 3.
-    sudo ip link add name br-uav3 type bridge 2>/dev/null || true
-    sudo ip link set tap-uav3 master br-uav3
-    sudo ip link set br-uav3 up
+    # Board 2: VLAN 43 -> br-uav4 -> tap-uav4 -> ns-3 node 4.
+    sudo ip link add name br-uav4 type bridge 2>/dev/null || true
+    sudo ip link set tap-uav4 master br-uav4
+    sudo ip link set br-uav4 up
+
 
     sudo ip link add link "$PI_LINK_IF" name "$RF_VLAN_IF2" type vlan id "$RF_VLAN2" 2>/dev/null || true
     sudo ip link set "$RF_VLAN_IF2" up
-    sudo ip link set "$RF_VLAN_IF2" master br-uav3
+    sudo ip link set "$RF_VLAN_IF2" master br-uav4
 
 
     sudo ip link set "$PI_LINK_IF" up
@@ -201,6 +237,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 2 — Management link: uav1ns <-> root (FDM physics, bypasses NS-3)
 # ═══════════════════════════════════════════════════════════════════════════
+restore_tty
 echo "=== [2/8] Management link (SITL <-> Gazebo physics) ==="
 sudo ip link add sim1h type veth peer name sim1n 2>/dev/null || true
 sudo ip addr add 172.31.1.1/30 dev sim1h 2>/dev/null || true
@@ -211,11 +248,23 @@ sudo ip netns exec uav1ns ip link set sim1n up
 sudo ethtool -K sim1h rx off tx off sg off tso off gso off gro off 2>/dev/null || true
 sudo ip netns exec uav1ns ethtool -K sim1n rx off tx off sg off tso off gso off gro off 2>/dev/null || true
 echo "  root=172.31.1.1 <-> uav1ns=172.31.1.2"
+
+sudo ip link add sim2h type veth peer name sim2n 2>/dev/null || true
+sudo ip addr add 172.31.2.1/30 dev sim2h 2>/dev/null || true
+sudo ip link set sim2h up
+sudo ip link set sim2n netns uav2ns
+sudo ip netns exec uav2ns ip addr add 172.31.2.2/30 dev sim2n 2>/dev/null || true
+sudo ip netns exec uav2ns ip link set sim2n up
+sudo ethtool -K sim2h rx off tx off sg off tso off gso off gro off 2>/dev/null || true
+sudo ip netns exec uav2ns ethtool -K sim2n rx off tx off sg off tso off gso off gro off 2>/dev/null || true
+echo "  root=172.31.2.1 <-> uav2ns=172.31.2.2"
+
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 3 — NS-3 wireless simulation (unmodified 4-node binary)
 # ═══════════════════════════════════════════════════════════════════════════
+restore_tty
 echo "=== [3/8] Building + starting ns-3 (three_uav_tapbridge_integrated) ==="
 (cd "$NS3_ROOT" && ./ns3 build three_uav_tapbridge_integrated)
 
@@ -223,9 +272,11 @@ echo "=== [3/8] Building + starting ns-3 (three_uav_tapbridge_integrated) ==="
 (
     cd "$NS3_ROOT"
     exec ./ns3 run "three_uav_tapbridge_integrated \
+        --nRadios=4 \
         --simTime=0 --uavAltitude=30"
-) > "$NS3_LOG" 2>&1 &
+) > "$NS3_LOG" 2>&1 < /dev/null &
 NS3_PID=$!
+restore_tty
 echo "  ns-3 PID=$NS3_PID  log=$NS3_LOG"
 
 echo "  Waiting for TAP attachment..."
@@ -237,7 +288,7 @@ while true; do
         exit 1
     fi
     all_up=true
-    for tap in tap-gcs tap-uav1 tap-uav2 tap-uav3; do
+    for tap in tap-gcs tap-uav1 tap-uav2 tap-uav3 tap-uav4; do
         carrier_file="/sys/class/net/$tap/carrier"
         [[ -r "$carrier_file" && "$(<"$carrier_file")" == 1 ]] || all_up=false
     done
@@ -262,6 +313,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 4 — Gazebo (root namespace)
 # ═══════════════════════════════════════════════════════════════════════════
+restore_tty
 echo "=== [4/8] Starting Gazebo ==="
 CITY="$HOME/FYP/small_city_gazebo_world"   # external city-world assets repo (models + terrain)
 export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:$CITY/models:${GAZEBO_MODEL_PATH:-}"
@@ -278,8 +330,9 @@ export GAZEBO_PLUGIN_PATH="$PROJECT_DIR/install/multi_uav_gazebo_plugins/lib:$HO
 # live on 10.42.0.x, and would break the netns DDS path. Harmless when no Pi is
 # attached (the address simply is not matched). See config/fastdds_hitl_eth.xml.
 FASTRTPS_DEFAULT_PROFILES_FILE="$PROJECT_DIR/config/fastdds_hitl_eth.xml" \
-gzserver --verbose "$WORLD_PATH" -s libgazebo_ros_init.so -s libgazebo_ros_factory.so > "$GAZEBO_LOG" 2>&1 &
+gzserver --verbose "$WORLD_PATH" -s libgazebo_ros_init.so -s libgazebo_ros_factory.so > "$GAZEBO_LOG" 2>&1 < /dev/null &
 GAZEBO_PID=$!
+restore_tty
 echo "  Waiting ${GAZEBO_STARTUP_SEC}s for Gazebo..."
 sleep "$GAZEBO_STARTUP_SEC"
 kill -0 "$GAZEBO_PID" 2>/dev/null || {
@@ -309,6 +362,7 @@ echo ""
 # without it node 2 is never covered by the feed and stays frozen even when
 # node 1 moves. Drop the mirror once the Pi shares node 1 (TapBridge UseBridge).
 # ═══════════════════════════════════════════════════════════════════════════
+restore_tty
 echo "=== [4b] Position publisher (feeds real UAV position to ns-3) ==="
 if [[ -f "$PROJECT_DIR/scripts/world_pos_publisher.py" ]]; then
     : > "$POSPUB_LOG"
@@ -322,8 +376,9 @@ if [[ -f "$PROJECT_DIR/scripts/world_pos_publisher.py" ]]; then
       export FASTRTPS_DEFAULT_PROFILES_FILE="$PROJECT_DIR/config/fastdds_hitl_eth.xml"
       exec python3 "$PROJECT_DIR/scripts/world_pos_publisher.py" \
            --ros-args -p n_uavs:=1 -p mirror:=2:1
-    ) > "$POSPUB_LOG" 2>&1 &
+    ) > "$POSPUB_LOG" 2>&1 < /dev/null &
     POSPUB_PID=$!
+restore_tty
     sleep 3
     if kill -0 "$POSPUB_PID" 2>/dev/null; then
         echo "  running: PID=$POSPUB_PID"
@@ -340,6 +395,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 5 — micro_ros_agent inside gcsns
 # ═══════════════════════════════════════════════════════════════════════════
+restore_tty
 echo "=== [5/8] micro_ros_agent inside gcsns ==="
 : > "$AGENT_LOG"
 sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
@@ -347,8 +403,9 @@ sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
     source "$HOME/ardu_ws/install/setup.bash"
     source "$1"
     exec ros2 run micro_ros_agent micro_ros_agent udp4 --port 2019
-' agent-shell "$PROJECT_DIR/ros2/install/setup.bash" > "$AGENT_LOG" 2>&1 &
+' agent-shell "$PROJECT_DIR/ros2/install/setup.bash" > "$AGENT_LOG" 2>&1 < /dev/null &
 AGENT_PID=$!
+restore_tty
 
 deadline=$((SECONDS + AGENT_READY_TIMEOUT))
 while ! sudo ip netns exec gcsns ss -H -lun "sport = :2019" | grep -q .; do
@@ -365,12 +422,41 @@ while ! sudo ip netns exec gcsns ss -H -lun "sport = :2019" | grep -q .; do
     sleep 0.2
 done
 echo "  agent ready on UDP 2019 inside gcsns"
+
+restore_tty
+echo "=== [5b/8] micro_ros_agent for UAV2 inside gcsns ==="
+: > "$AGENT_LOG2"
+sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
+    source /opt/ros/humble/setup.bash
+    source "$HOME/ardu_ws/install/setup.bash"
+    source "$1"
+    exec ros2 run micro_ros_agent micro_ros_agent udp4 --port 2020
+' agent-shell "$PROJECT_DIR/ros2/install/setup.bash" > "$AGENT_LOG2" 2>&1 < /dev/null &
+AGENT_PID2=$!
+restore_tty
+
+deadline=$((SECONDS + AGENT_READY_TIMEOUT))
+while ! sudo ip netns exec gcsns ss -H -lun "sport = :2020" | grep -q .; do
+    sudo kill -0 "$AGENT_PID2" 2>/dev/null || {
+        echo "ERROR: micro_ros_agent (UAV2) exited early." >&2
+        cat "$AGENT_LOG2" >&2
+        exit 1
+    }
+    (( SECONDS >= deadline )) && {
+        echo "ERROR: agent port 2020 never opened." >&2
+        cat "$AGENT_LOG2" >&2
+        exit 1
+    }
+    sleep 0.2
+done
+echo "  agent ready on UDP 2020 inside gcsns"
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 6 — SITL inside uav1ns
 # ═══════════════════════════════════════════════════════════════════════════
-echo "=== [6/8] SITL inside uav1ns ==="
+restore_tty
+echo "=== [6a/8] SITL inside uav1ns ==="
 mkdir -p "$SITL_LOG_DIR"
 chown "$RUN_USER":"$(id -gn "$RUN_USER")" "$SITL_LOG_DIR"
 
@@ -393,8 +479,31 @@ sudo ip netns exec uav1ns sudo -H -u "$RUN_USER" bash -c '
     --sim-address "172.31.1.1" \
     --home "$HOME_GPS" \
     --serial0=tcp:0.0.0.0:5760 \
-    > "$SITL_LOG_DIR/arducopter.log" 2>&1 &
+    > "$SITL_LOG_DIR/arducopter.log" 2>&1 < /dev/null &
 SITL_PID=$!
+restore_tty
+
+
+restore_tty
+echo "=== [6b/8] SITL inside uav2ns ==="
+mkdir -p "$SITL_LOG_DIR2"
+chown "$RUN_USER":"$(id -gn "$RUN_USER")" "$SITL_LOG_DIR2"
+sudo ip netns exec uav2ns sudo -H -u "$RUN_USER" bash -c '
+    cd "$1"
+    shift
+    exec strace -f -e trace=none -o /dev/null "$@"
+' sitl-shell \
+    "$SITL_LOG_DIR2" \
+    "$ARDUPILOT_HOME/build/sitl/bin/arducopter" \
+    --wipe --model gazebo-iris --speedup 1 --sysid 2 --instance 1 \
+    --defaults "$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm,$DDS_PARM2" \
+    --sim-address "172.31.2.1" \
+    --home "$HOME_GPS" \
+    --serial0=tcp:0.0.0.0:5770 \
+    > "$SITL_LOG_DIR2/arducopter.log" 2>&1 < /dev/null &
+SITL_PID2=$!
+restore_tty
+echo "  SITL2 PID=$SITL_PID2  log=$SITL_LOG_DIR2/arducopter.log"
 
 
 
@@ -426,6 +535,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 7 — Verify DDS GPS + SITL TCP reachable from gcsns
 # ═══════════════════════════════════════════════════════════════════════════
+restore_tty
 echo "=== [7/8] Verifying DDS GPS + MAVLink reachability from gcsns ==="
 
 echo "  Waiting for /ap/v1/navsat publisher + valid GPS..."
@@ -464,6 +574,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 8 — drone_bridge inside gcsns
 # ═══════════════════════════════════════════════════════════════════════════
+restore_tty
 echo "=== [8/8] Starting drone_bridge inside gcsns ==="
 : > "$BRIDGE_LOG"
 sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
@@ -472,8 +583,9 @@ sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
     source "$1"
     exec ros2 run uav_controller drone_bridge --ros-args \
         -p uav_id:=1 -p mavlink_host:=10.42.0.11 -p mavlink_port:=5760
-' bridge-shell "$PROJECT_DIR/ros2/install/setup.bash" > "$BRIDGE_LOG" 2>&1 &
+' bridge-shell "$PROJECT_DIR/ros2/install/setup.bash" > "$BRIDGE_LOG" 2>&1 < /dev/null &
 BRIDGE_PID=$!
+restore_tty
 sleep 3
 sudo kill -0 "$BRIDGE_PID" 2>/dev/null || {
     echo "ERROR: drone_bridge exited during startup." >&2
@@ -483,6 +595,29 @@ sudo kill -0 "$BRIDGE_PID" 2>/dev/null || {
 echo "  drone_bridge running: PID=$BRIDGE_PID"
 echo ""
 
+restore_tty
+echo "=== [8b/8] drone_bridge for UAV2 inside gcsns ==="
+: > "$BRIDGE_LOG2"
+sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
+    source /opt/ros/humble/setup.bash
+    source "$HOME/ardu_ws/install/setup.bash"
+    source "$1"
+    exec ros2 run uav_controller drone_bridge --ros-args \
+        -p uav_id:=2 -p mavlink_host:=10.42.0.13 -p mavlink_port:=5770 \
+        -p takeoff_altitude:=25.0
+' bridge-shell "$PROJECT_DIR/ros2/install/setup.bash" > "$BRIDGE_LOG2" 2>&1 < /dev/null &
+BRIDGE_PID2=$!
+restore_tty
+sleep 3
+sudo kill -0 "$BRIDGE_PID2" 2>/dev/null || {
+    echo "ERROR: drone_bridge (UAV2) exited during startup." >&2
+    cat "$BRIDGE_LOG2" >&2
+    exit 1
+}
+echo "  drone_bridge UAV2 running: PID=$BRIDGE_PID2"
+echo ""
+
+restore_tty
 echo "════════════════════════════════════════════════════════════"
 echo " PIPELINE READY — nothing auto-launched beyond this point."
 echo "════════════════════════════════════════════════════════════"
@@ -494,31 +629,36 @@ echo "      source $PROJECT_DIR/ros2/install/setup.bash"
 echo "      python3 $PROJECT_DIR/ros2/uav_controller/uav_controller/uav1_patrol_mission.py"
 echo "  '"
 echo ""
-echo "  PIDs: ns3=$NS3_PID gazebo=$GAZEBO_PID sitl=$SITL_PID agent=$AGENT_PID bridge=$BRIDGE_PID"
+echo "  PIDs: ns3=$NS3_PID gazebo=$GAZEBO_PID sitl=$SITL_PID sitl2=$SITL_PID2 agent=$AGENT_PID bridge=$BRIDGE_PID"
 echo "  Logs: $NS3_LOG  $GAZEBO_LOG  $SITL_LOG_DIR/arducopter.log  $AGENT_LOG  $BRIDGE_LOG"
 echo "  Ctrl+C to shut down everything."
 echo ""
 
 cleanup() {
+    restore_tty
     echo "Shutting down..."
-    kill "$BRIDGE_PID" "$AGENT_PID" "$SITL_PID" "$POSPUB_PID" "$GAZEBO_PID" \
+    kill "$BRIDGE_PID" "$BRIDGE_PID2" "$AGENT_PID" "$AGENT_PID2" "$SITL_PID" "$SITL_PID2" "$POSPUB_PID" "$GAZEBO_PID" \
          "$NS3_PID" 2>/dev/null || true
     sleep 1
     sudo ip netns del gcsns 2>/dev/null || true
     sudo ip netns del uav1ns 2>/dev/null || true
+    sudo ip netns del uav2ns 2>/dev/null || true
+
     sudo ip link del br-gcs type bridge 2>/dev/null || true
     sudo ip link del br-uav1 type bridge 2>/dev/null || true
     sudo ip link del br-uav2 type bridge 2>/dev/null || true
     sudo ip link del br-uav3 type bridge 2>/dev/null || true
+    sudo ip link del br-uav4 type bridge 2>/dev/null || true
 
     # eth-cam is left up on purpose — see the note in STEP 0. It is the sensor
     # cable, not part of the simulation, and tearing it down here is what left
     # the Pi unreachable between runs.
-    for l in tap-gcs tap-uav1 tap-uav2 tap-uav3 veth0h veth1h sim1h \
-             eth-rf eth-rf2; do
+    for l in tap-gcs tap-uav1 tap-uav2 tap-uav3 tap-uav4 veth0h veth1h veth2h \
+             sim1h sim2h eth-rf eth-rf2; do
         sudo ip link del "$l" 2>/dev/null || true
     done
     exit
 }
 trap cleanup INT TERM
+trap restore_tty EXIT
 wait

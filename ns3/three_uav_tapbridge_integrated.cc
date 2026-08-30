@@ -168,7 +168,7 @@ struct PhyCounters
   uint64_t rxOkBytes   = 0;
   uint64_t rxDropped  = 0;
 };
-static std::array<PhyCounters, 4> g_phyStats;
+static std::vector<PhyCounters> g_phyStats;
 
 static void PhyTxEndCb(uint32_t nodeId, Ptr<const Packet> p)
 {
@@ -604,7 +604,14 @@ static void FlashNodeOnPhyRxEnd(AnimationInterface* anim, uint32_t nodeId,
 int main(int argc, char* argv[])
 {
   // ── Command line ─────────────────────────────────────────────────────────
-  std::array<std::string, 4> tapNames = {"tap-gcs", "tap-uav1", "tap-uav2", "tap-uav3"};
+  // Number of radio nodes BESIDES the GCS -- not the number of aircraft.
+  // Each aircraft needs TWO: its autopilot (SITL, in a namespace) and its
+  // companion computer (a Pi). They cannot share one, because TapBridge in
+  // UseLocal mode tracks a single MAC address per TAP. So two aircraft with
+  // onboard vision is nRadios=4:
+  //     node 0 GCS | node 1 SITL1 | node 2 Pi1 | node 3 SITL2 | node 4 Pi2
+  uint32_t nRadios = 3;
+  std::vector<std::string> tapNames;    // filled in after the command line is parsed
 
   double      simTime        = 0.0;    // 0 = run until killed (live mission)
   double      distance       = 50.0;   // initial UAV separation, m
@@ -659,10 +666,8 @@ int main(int argc, char* argv[])
   std::string animFile       = "three_uav_anim.xml";
 
   CommandLine cmd(__FILE__);
-  cmd.AddValue("tap0",           "TAP name for GCS",                    tapNames[0]);
-  cmd.AddValue("tap1",           "TAP name for UAV1",                   tapNames[1]);
-  cmd.AddValue("tap2",           "TAP name for UAV2",                   tapNames[2]);
-  cmd.AddValue("tap3",           "TAP name for UAV3",                   tapNames[3]);
+  cmd.AddValue("nRadios",        "Radio nodes besides the GCS (2 per aircraft: "
+                                 "SITL + Pi). 2 aircraft = 4.",           nRadios);
   cmd.AddValue("simTime",        "Sim duration s (0=unlimited)",        simTime);
   cmd.AddValue("distance",       "Initial UAV separation m",            distance);
   cmd.AddValue("uavAltitude",    "Initial UAV altitude m",              uavAltitude);
@@ -690,6 +695,15 @@ int main(int argc, char* argv[])
   cmd.AddValue("snrLogFile",     "Per-packet SNR CSV (empty=off)",      snrLogFile);
   cmd.AddValue("animFile",       "NetAnim XML output path",             animFile);
   cmd.Parse(argc, argv);
+
+  // TAP names follow the node numbering: node 0 is the GCS, nodes 1..nRadios are
+  // aircraft. Generated rather than passed in, so adding a node cannot leave
+  // the names and the node count disagreeing.
+  if (nRadios < 1) { NS_FATAL_ERROR("nRadios must be >= 1"); }
+  tapNames.push_back("tap-gcs");
+  for (uint32_t i = 1; i <= nRadios; ++i)
+    { tapNames.push_back("tap-uav" + std::to_string(i)); }
+  g_phyStats.resize(nRadios + 1);
 
   // ADDED: explicit RNG run control. Without it, two "identical" runs draw the
   // same fading sequence, which quietly understates variance in any averaged
@@ -723,14 +737,12 @@ int main(int argc, char* argv[])
                     StringValue("ns3::RealtimeSimulatorImpl"));
   GlobalValue::Bind("ChecksumEnabled", BooleanValue(true));
 
-  // ── Nodes: 0 = GCS, 1..3 = UAVs ──────────────────────────────────────────
+  // ── Nodes: 0 = GCS, 1..nRadios = radios (SITL and Pi, 2 per aircraft) ────
   NodeContainer nodes;
-  nodes.Create(4);
+  nodes.Create(nRadios + 1);
 
   NodeContainer uavNodes;
-  uavNodes.Add(nodes.Get(1));
-  uavNodes.Add(nodes.Get(2));
-  uavNodes.Add(nodes.Get(3));
+  for (uint32_t i = 1; i<= nRadios; ++i) uavNodes.Add(nodes.Get(i));
 
   // ── Mobility ─────────────────────────────────────────────────────────────
   //
@@ -763,9 +775,15 @@ int main(int argc, char* argv[])
 
   MobilityHelper uavMob;
   Ptr<ListPositionAllocator> uavPos = CreateObject<ListPositionAllocator>();
-  uavPos->Add(Vector(0.0,          0.0,                  uavAltitude));
-  uavPos->Add(Vector(distance,     0.0,                  uavAltitude));
-  uavPos->Add(Vector(distance/2.0, distance * 0.866,     uavAltitude));
+  
+  // Evenly spaced on a circle so any node count gets distinct start positions.
+  // Only used before the ROS feed arrives (and for the whole run in standalone).
+  for (uint32_t i = 0; i < nRadios; ++i)
+    {
+      double a = 2.0 * M_PI * i / nRadios;
+      uavPos->Add(Vector(distance * std::cos(a), distance * std::sin(a), uavAltitude));
+    }
+
   uavMob.SetPositionAllocator(uavPos);
 
   if (standalone)
