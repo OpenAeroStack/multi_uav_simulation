@@ -4555,12 +4555,87 @@
 
     <!-- Publishes /link_obstacle_loss for all six node pairs and draws their
          ray markers in Gazebo. -->
-    <plugin name="obstacle_raycast" filename="libobstacle_raycast_plugin.so">
-      <n_uavs>3</n_uavs>
+    <!-- ============================================================
+        Dynamic obstacle ray-casting
+
+        n_uavs = 0:
+          automatically discover iris_1, iris_2, ..., iris_N
+        ============================================================ -->
+
+    <plugin name="obstacle_raycast"
+            filename="libobstacle_raycast_plugin.so">
+
+      <!-- 0 = automatically detect UAV models -->
+      <n_uavs>0</n_uavs>
+
+      <!-- UAV model naming convention -->
       <uav_prefix>iris_</uav_prefix>
+
+      <!-- Include node 0 / ground station -->
       <gcs_enabled>true</gcs_enabled>
+
       <gcs_model>gcs</gcs_model>
+
+      <!-- GCS radio is 2.9 m above model origin -->
       <gcs_antenna_height>2.9</gcs_antenna_height>
+
+      <!-- UAV model origin is currently treated as antenna point -->
+      <uav_antenna_height>0.0</uav_antenna_height>
+
+
+      <!-- ==============================
+          Update rates
+          ============================== -->
+
+      <!-- Publish /link_obstacle_loss at 10 Hz -->
+      <update_rate_hz>10.0</update_rate_hz>
+
+      <!-- Re-scan Gazebo UAV models once per second -->
+      <model_refresh_rate_hz>1.0</model_refresh_rate_hz>
+
+
+      <!-- ==============================
+          Obstacle loss model
+          ============================== -->
+
+      <!-- Generic obstacle -->
+      <default_obstacle_loss_db>8.0</default_obstacle_loss_db>
+
+      <!-- Buildings / concrete -->
+      <concrete_loss_db>12.0</concrete_loss_db>
+
+      <!-- Trees / foliage -->
+      <foliage_loss_db>4.0</foliage_loss_db>
+
+      <!-- Cars / vehicles -->
+      <vehicle_loss_db>6.0</vehicle_loss_db>
+
+      <!-- Humans do not significantly affect our channel model -->
+      <human_loss_db>0.0</human_loss_db>
+
+
+      <!-- ==============================
+          Ray-casting configuration
+          ============================== -->
+
+      <ray_advance_epsilon_m>0.05</ray_advance_epsilon_m>
+
+      <endpoint_guard_m>0.10</endpoint_guard_m>
+
+      <max_ray_hits>64</max_ray_hits>
+
+
+      <!--
+          Comma-separated substrings.
+
+          Any collision whose scoped name contains one of these
+          strings is not treated as a radio obstacle.
+      -->
+
+      <ignore_tokens>
+        noloss,ground_plane
+      </ignore_tokens>
+
     </plugin>
 
     <!-- Publishes ground-truth poses on /gazebo/model_states. -->

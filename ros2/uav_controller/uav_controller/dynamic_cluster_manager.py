@@ -63,9 +63,9 @@ class DynamicClusterManager(Node):
 
         self.num_uavs = int(self.get_parameter("num_uavs").value)
 
-        if not 3 <= self.num_uavs <= 10:
+        if self.num_uavs < 1:
             raise ValueError(
-                f"num_uavs must be between 3 and 10; received {self.num_uavs}"
+                f"num_uavs must be >= 1; received {self.num_uavs}"
             )
 
         self.election_period = float(
@@ -432,14 +432,30 @@ class DynamicClusterManager(Node):
             if value >= self.member_min_snr
         )
 
-        average_neighbor_quality = (
-            sum(self.normalize_snr(value) for value in neighbor_snrs)
-            / len(neighbor_snrs)
-        )
+        if neighbor_snrs:
 
-        neighbor_coverage = (
-            reachable_neighbors / max(self.num_uavs - 1, 1)
-        )
+            average_neighbor_quality = (
+                sum(
+                    self.normalize_snr(value)
+                    for value in neighbor_snrs
+                )
+                / len(neighbor_snrs)
+            )
+
+            neighbor_coverage = (
+                reachable_neighbors
+                / len(neighbor_snrs)
+            )
+
+        else:
+
+            # N=1:
+            # there are no UAV-to-UAV neighbors to evaluate.
+            #
+            # Treat this criterion as satisfied rather than
+            # dividing by zero or permanently disqualifying UAV1.
+            average_neighbor_quality = 1.0
+            neighbor_coverage = 1.0
 
         neighbor_score = (
             0.70 * average_neighbor_quality
@@ -486,9 +502,14 @@ class DynamicClusterManager(Node):
             + self.weights["obstacle"] * obstacle_robustness
         )
 
+        has_required_neighbor = (
+            self.num_uavs == 1
+            or reachable_neighbors >= 1
+        )
+
         is_candidate = (
             gcs_snr >= self.candidate_min_gcs_snr
-            and reachable_neighbors >= 1
+            and has_required_neighbor
         )
 
         return {

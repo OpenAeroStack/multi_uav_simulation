@@ -47,27 +47,18 @@ ENABLE_GAZEBO_GUI="${ENABLE_GAZEBO_GUI:-1}"
 OBSTACLE_READY_TIMEOUT_SEC="${OBSTACLE_READY_TIMEOUT_SEC:-90}"
 NS3_INTEGRATION_TIMEOUT_SEC="${NS3_INTEGRATION_TIMEOUT_SEC:-100}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
-TAPS=(tap-gcs tap-uav1 tap-uav2 tap-uav3)
+TAPS=()
 AGENT_PIDS=()
-AGENT_PORTS=(2019 2020 2021)
-AGENT_LOGS=(
-    /tmp/micro_ros_agent_uav1.log
-    /tmp/micro_ros_agent_uav2.log
-    /tmp/micro_ros_agent_uav3.log
-)
+AGENT_PORTS=()
+AGENT_LOGS=()
+
 BRIDGE_PIDS=()
-BRIDGE_LOGS=(
-    /tmp/drone_bridge_uav1.log
-    /tmp/drone_bridge_uav2.log
-    /tmp/drone_bridge_uav3.log
-)
+BRIDGE_LOGS=()
+
 SITL_PIDS=()
 SOCAT_PIDS=()
-SITL_LOGS=(
-    /tmp/multi_uav_sitl/uav1/arducopter.log
-    /tmp/multi_uav_sitl/uav2/arducopter.log
-    /tmp/multi_uav_sitl/uav3/arducopter.log
-)
+SITL_LOGS=()
+
 GAZEBO_LOG=/tmp/gazebo_city.log
 WORLD_POS_LOG=/tmp/world_pos_publisher.log
 MISSION_LOG=/tmp/city_mission.log
@@ -191,12 +182,12 @@ cleanup_previous_instances() {
         'dynamic_cluster_manager'
         'drone_bridge'
         '/build/sitl/bin/arducopter'
-        'micro_ros_agent.*udp4.*--port (2019|2020|2021)'
+        
         '[w]orld_pos_publisher.py'
         'scratch_three-uav_three-uav'
         'three_uav_tapbridge_rt'
         'three_uav_tapbridge_integrated'
-        'gzserver.*city_3uav\.world'
+        'gzserver.*city_[0-9]+uav\.world'
         'gzclient'
         'world_pos_publisher\.py'
         'micro_ros_agent'
@@ -340,29 +331,31 @@ prepare_netanim_output() {
 ######### we implement bidirectional connectivity verification between GCS and UAVs through ns-3 wireless simulation ########
 
 verify_bidirectional_wireless() {
-    local namespace
-    local uav_ip
+    local row
+    local uid namespace wireless_ip dds_port
+    local mavlink_port gazebo_fdm_port
+    local sitl_fdm_port gazebo_ip
+    local takeoff_altitude dds_file
 
     echo "=== Verifying bidirectional ns-3 wireless connectivity ==="
 
-    for entry in \
-        "uav1 10.42.0.11" \
-        "uav2 10.42.0.12" \
-        "uav3 10.42.0.13"
-    do
-        read -r namespace uav_ip <<<"$entry"
+    for row in "${FLEET_ROWS[@]}"; do
+        IFS=$'\t' read -r \
+            uid namespace wireless_ip dds_port mavlink_port \
+            gazebo_fdm_port sitl_fdm_port gazebo_ip \
+            takeoff_altitude dds_file <<< "$row"
 
         echo "GCS -> $namespace"
         sudo ip netns exec gcsns \
-            ping -c 3 -W 2 "$uav_ip" || {
-                echo "ERROR: gcsns cannot reach $namespace at $uav_ip" >&2
+            ping -c 3 -W 2 "$wireless_ip" || {
+                echo "ERROR: gcsns cannot reach $namespace at $wireless_ip" >&2
                 return 1
             }
 
         echo "$namespace -> GCS"
         sudo ip netns exec "$namespace" \
             ping -c 3 -W 2 10.42.0.10 || {
-                echo "ERROR: $namespace cannot reach the GCS DDS agent" >&2
+                echo "ERROR: $namespace cannot reach GCS." >&2
                 return 1
             }
     done
@@ -550,9 +543,241 @@ fi
 source "$PROJECT_DIR/setup.sh"
 BINARY="$ARDUPILOT_HOME/build/sitl/bin/arducopter"
 BASE_DEFAULTS="$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm"
-UAV1_DEFAULTS="$BASE_DEFAULTS,$PROJECT_DIR/params/uav1_dds.parm"
-UAV2_DEFAULTS="$BASE_DEFAULTS,$PROJECT_DIR/params/uav2_dds.parm"
-UAV3_DEFAULTS="$BASE_DEFAULTS,$PROJECT_DIR/params/uav3_dds.parm"
+
+###############################################################################
+# Dynamic fleet + DDS configuration
+###############################################################################
+
+FLEET_CONFIG="$PROJECT_DIR/config/fleet.yaml"
+DDS_PARAM_DIR="$PROJECT_DIR/generated/params"
+
+if [[ ! -f "$FLEET_CONFIG" ]]; then
+    echo "ERROR: Fleet configuration not found:" >&2
+    echo "  $FLEET_CONFIG" >&2
+    exit 1
+fi
+
+
+###############################################################################
+# Read dynamic fleet information from YAML
+###############################################################################
+
+read -r FLEET_NUM_UAVS DDS_BASE DDS_STRIDE < <(
+    python3 - "$FLEET_CONFIG" <<'PY'
+import sys
+import yaml
+
+config_path = sys.argv[1]
+
+with open(config_path, "r", encoding="utf-8") as f:
+    cfg = yaml.safe_load(f)
+
+num_uavs = int(cfg["fleet"]["num_uavs"])
+
+ports = cfg["ports"]
+
+dds_base = int(ports.get("dds_base", 2019))
+dds_stride = int(ports.get("dds_stride", 1))
+
+print(
+    num_uavs,
+    dds_base,
+    dds_stride,
+)
+PY
+)
+
+
+if [[ -z "$FLEET_NUM_UAVS" ]]; then
+    echo "ERROR: Failed to read fleet size." >&2
+    exit 1
+fi
+
+if (( FLEET_NUM_UAVS < 1 )); then
+    echo "ERROR: Invalid fleet size: $FLEET_NUM_UAVS" >&2
+    exit 1
+fi
+
+
+echo "============================================================"
+echo "DYNAMIC DDS CONFIGURATION"
+echo "============================================================"
+echo "Fleet UAV count : $FLEET_NUM_UAVS"
+echo "DDS base port   : $DDS_BASE"
+echo "DDS stride      : $DDS_STRIDE"
+echo
+
+
+###############################################################################
+# Generate parameter files
+###############################################################################
+
+echo "Generating dynamic DDS parameter files..."
+
+python3 "$PROJECT_DIR/scripts/generate_dds_params.py" \
+    --count "$FLEET_NUM_UAVS" \
+    --clean
+
+
+###############################################################################
+# Verify generated files
+###############################################################################
+
+echo "Verifying generated DDS parameter files..."
+
+python3 "$PROJECT_DIR/scripts/verify_dds_params.py" \
+    --count "$FLEET_NUM_UAVS"
+
+
+###############################################################################
+# Dynamic DDS / micro-ROS arrays
+###############################################################################
+
+DDS_PARAM_FILES=()
+UAV_DEFAULTS=()
+
+AGENT_PORTS=()
+AGENT_LOGS=()
+
+
+for ((uav_id=1; uav_id<=FLEET_NUM_UAVS; uav_id++)); do
+
+    dds_port=$(( DDS_BASE + (uav_id - 1) * DDS_STRIDE ))
+
+    dds_file="$DDS_PARAM_DIR/uav${uav_id}_dds.parm"
+
+    if [[ ! -f "$dds_file" ]]; then
+        echo "ERROR: Missing generated DDS file:" >&2
+        echo "  $dds_file" >&2
+        exit 1
+    fi
+
+
+    ###########################################################################
+    # Save DDS parameter file
+    ###########################################################################
+
+    DDS_PARAM_FILES[$uav_id]="$dds_file"
+
+
+    ###########################################################################
+    # ArduPilot defaults
+    ###########################################################################
+
+    UAV_DEFAULTS[$uav_id]="$BASE_DEFAULTS,$dds_file"
+
+
+    ###########################################################################
+    # Backward-compatible UAV1_DEFAULTS, UAV2_DEFAULTS, ...
+    #
+    # This lets your existing hard-coded SITL section continue working
+    # temporarily while we convert SITL itself to a dynamic loop.
+    ###########################################################################
+
+    printf -v \
+        "UAV${uav_id}_DEFAULTS" \
+        '%s' \
+        "${UAV_DEFAULTS[$uav_id]}"
+
+
+    ###########################################################################
+    # One micro-ROS agent per UAV
+    ###########################################################################
+
+    AGENT_PORTS+=("$dds_port")
+
+    AGENT_LOGS+=(
+        "/tmp/micro_ros_agent_uav${uav_id}.log"
+    )
+
+
+    echo "UAV${uav_id}:"
+    echo "  DDS port : $dds_port"
+    echo "  DDS parm : $dds_file"
+
+done
+
+
+echo
+echo "Dynamic DDS configuration ready."
+echo "============================================================"
+
+
+###############################################################################
+# Load dynamic per-UAV runtime configuration
+###############################################################################
+
+echo
+echo "============================================================"
+echo "LOADING DYNAMIC FLEET RUNTIME CONFIGURATION"
+echo "============================================================"
+
+mapfile -t FLEET_ROWS < <(
+    python3 "$PROJECT_DIR/scripts/fleet_runtime_rows.py"
+)
+
+UAV_COUNT="${#FLEET_ROWS[@]}"
+
+
+###############################################################################
+# Dynamic TAP list
+###############################################################################
+
+TAPS=("tap-gcs")
+
+for ((uid=1; uid<=UAV_COUNT; uid++)); do
+    TAPS+=("tap-uav${uid}")
+done
+
+echo "Dynamic TAP devices: ${TAPS[*]}"
+
+if (( UAV_COUNT < 1 )); then
+    echo "ERROR: No UAV runtime rows were generated." >&2
+    exit 1
+fi
+
+echo "Runtime UAV count: $UAV_COUNT"
+echo
+
+for row in "${FLEET_ROWS[@]}"; do
+
+    IFS=$'\t' read -r \
+        uid \
+        namespace \
+        wireless_ip \
+        dds_port \
+        mavlink_port \
+        gazebo_fdm_port \
+        sitl_fdm_port \
+        gazebo_ip \
+        takeoff_altitude \
+        dds_file \
+        <<< "$row"
+
+    echo "UAV$uid:"
+    echo "  namespace   = $namespace"
+    echo "  wireless IP = $wireless_ip"
+    echo "  DDS         = $dds_port"
+    echo "  MAVLink     = $mavlink_port"
+    echo "  Gazebo FDM  = $gazebo_fdm_port"
+    echo "  SITL FDM    = $sitl_fdm_port"
+    echo "  Gazebo IP   = $gazebo_ip"
+    echo "  takeoff     = $takeoff_altitude"
+    echo "  DDS file    = $dds_file"
+done
+
+echo "============================================================"
+echo
+
+
+
+
+
+
+
+
+
+
 HOME_GPS="37.3382,-121.8863,0,0"
 validate_dds_param_file() {
     local file="$1"
@@ -605,9 +830,8 @@ validate_dds_param_file() {
 
 ###### Validating dds parameters ################
 
-validate_dds_param_file "$PROJECT_DIR/params/uav1_dds.parm" 2019
-validate_dds_param_file "$PROJECT_DIR/params/uav2_dds.parm" 2020
-validate_dds_param_file "$PROJECT_DIR/params/uav3_dds.parm" 2021
+python3 "$PROJECT_DIR/scripts/verify_dds_params.py" \
+    --count "$FLEET_NUM_UAVS"
 
 ## cleanupt process
 sudo -v
@@ -651,12 +875,25 @@ echo "=== Building ns-3 target: three_uav_tapbridge_integrated ==="
 (cd "$NS3_ROOT" && ./ns3 build three_uav_tapbridge_integrated)
 
 : >"$NS3_LOG"
+###############################################################################
+# Build dynamic ns-3 TAP arguments
+###############################################################################
+
+NS3_TAP_ARGS="--tap0=tap-gcs"
+
+for ((uid=1; uid<=UAV_COUNT; uid++)); do
+    NS3_TAP_ARGS+=" --tap${uid}=tap-uav${uid}"
+done
+
+echo "Dynamic ns-3 TAP arguments:"
+echo "  $NS3_TAP_ARGS"
 
 echo "=== Starting real-time ns-3 wireless simulation ==="
 (
     cd "$NS3_ROOT"
     exec ./ns3 run "three_uav_tapbridge_integrated \
-        --tap0=tap-gcs --tap1=tap-uav1 --tap2=tap-uav2 --tap3=tap-uav3 \
+        --numUavs=$UAV_COUNT \
+        $NS3_TAP_ARGS \
         --simTime=0 \
         --txPowerDbm=35 --rxSensitivity=-82 --noiseFloor=-94 \
         --mLos=3.0 --mNlos=1.0 --emaAlpha=0.3 \
@@ -711,7 +948,7 @@ for tap in "${TAPS[@]}"; do
     echo "  $tap carrier=$carrier flags=$flags"
 done
 
-verify_bidirectional_wireless
+
 
 verify_wireless_network() {
     local destination namespace tap bridge
@@ -800,54 +1037,157 @@ fi
 
 
 # BEGIN GAZEBO FDM READINESS FUNCTION
+###############################################################################
+# Wait until Gazebo has created one ArduPilot FDM socket for every UAV.
+#
+# Mapping:
+#
+# UAV1 -> 9002
+# UAV2 -> 9012
+# UAV3 -> 9022
+# UAV4 -> 9032
+# ...
+###############################################################################
+
+###############################################################################
+# Wait for Gazebo ArduPilot FDM endpoints for every configured UAV
+###############################################################################
+
 wait_for_gazebo_fdm_ports() {
+
     local timeout_sec="${1:-60}"
     local deadline=$((SECONDS + timeout_sec))
-    local -a required_ports=(9002 9012 9022)
-    local -a missing_ports=()
-    local port
 
+    local -a required_ports=()
+    local -a missing_ports=()
+
+    local row
+    local uid namespace wireless_ip dds_port
+    local mavlink_port gazebo_fdm_port
+    local sitl_fdm_port gazebo_ip
+    local takeoff_altitude dds_file
+
+
+    ###########################################################################
+    # Build expected port array from FLEET_ROWS
+    ###########################################################################
+
+    for row in "${FLEET_ROWS[@]}"; do
+
+        IFS=$'\t' read -r \
+            uid \
+            namespace \
+            wireless_ip \
+            dds_port \
+            mavlink_port \
+            gazebo_fdm_port \
+            sitl_fdm_port \
+            gazebo_ip \
+            takeoff_altitude \
+            dds_file \
+            <<< "$row"
+
+        required_ports+=("$gazebo_fdm_port")
+
+    done
+
+
+    echo
     echo "Waiting for Gazebo ArduPilot FDM ports..."
+    echo "Expected: ${required_ports[*]}"
+
+
+    ###########################################################################
+    # Wait until all sockets exist
+    ###########################################################################
 
     while (( SECONDS < deadline )); do
+
         missing_ports=()
 
         for port in "${required_ports[@]}"; do
+
             if ! ss -H -lun "sport = :$port" | grep -q .; then
                 missing_ports+=("$port")
             fi
+
         done
 
+
         if [[ ${#missing_ports[@]} -eq 0 ]]; then
-            echo "Gazebo FDM ports ready: ${required_ports[*]}"
+
+            echo "All Gazebo FDM ports are ready:"
+            echo "  ${required_ports[*]}"
+
             return 0
+
         fi
 
-        if [[ -n "${GAZEBO_PID:-}" ]] &&
-           ! kill -0 "$GAZEBO_PID" 2>/dev/null; then
-            echo "ERROR: Gazebo exited while waiting for FDM ports." >&2
-            tail -n 120 "${GAZEBO_LOG:-/tmp/gazebo_city.log}" >&2 || true
-            return 1
-        fi
 
         sleep 0.25
+
     done
 
-    echo "ERROR: Gazebo FDM ports did not become ready." >&2
-    echo "Missing UDP ports: ${missing_ports[*]}" >&2
-    echo "----- Gazebo log -----" >&2
-    tail -n 120 "${GAZEBO_LOG:-/tmp/gazebo_city.log}" >&2 || true
+
+    ###########################################################################
+    # Timeout
+    ###########################################################################
+
+    echo "ERROR: Timed out waiting for Gazebo FDM ports." >&2
+    echo "Expected: ${required_ports[*]}" >&2
+    echo "Missing : ${missing_ports[*]}" >&2
+
     echo "----- UDP sockets -----" >&2
     ss -lunp >&2 || true
 
+    echo "----- Gazebo log -----" >&2
+    tail -n 100 "${GAZEBO_LOG:-/tmp/gazebo_city.log}" >&2 || true
+
     return 1
 }
+
+
+
 # END GAZEBO FDM READINESS FUNCTION
 
 echo "=== Starting Gazebo in the root namespace ==="
 
 SMALL_CITY_DIR="$HOME/simulation/small_city_gazebo_world"
-WORLD_PATH="$PROJECT_DIR/worlds/city_3uav.world"
+###############################################################################
+# Generate Gazebo world for the selected fleet size
+###############################################################################
+
+GENERATED_WORLD_DIR="$PROJECT_DIR/generated/worlds"
+
+mkdir -p "$GENERATED_WORLD_DIR"
+
+WORLD_PATH="$GENERATED_WORLD_DIR/city_${UAV_COUNT}uav.world"
+
+echo
+echo "============================================================"
+echo "GENERATING DYNAMIC GAZEBO WORLD"
+echo "============================================================"
+echo "Fleet size : $UAV_COUNT"
+echo "World      : $WORLD_PATH"
+echo
+
+python3 "$PROJECT_DIR/scripts/generate_gazebo_fleet.py" \
+    --config "$PROJECT_DIR/config/fleet.yaml" \
+    --template "$PROJECT_DIR/worlds/city_3uav.world" \
+    --output "$WORLD_PATH" \
+    --models-dir "$PROJECT_DIR/models" \
+    --count "$UAV_COUNT"
+
+if [[ ! -f "$WORLD_PATH" ]]; then
+    echo "ERROR: Dynamic Gazebo world was not generated:" >&2
+    echo "  $WORLD_PATH" >&2
+    exit 1
+fi
+
+echo
+echo "Dynamic Gazebo world ready:"
+echo "  $WORLD_PATH"
+echo "============================================================"
 
 if [[ ! -d "$SMALL_CITY_DIR" ]]; then
     echo "ERROR: Small-city directory not found: $SMALL_CITY_DIR" >&2
@@ -1043,61 +1383,112 @@ wait_for_root_topic_publisher() {
 }
 
 validate_world_position_payload() {
+
     local payload="$1"
 
-    awk '
+    awk -v n="$UAV_COUNT" '
+
       function numeric(s) {
         return s ~ /^[-+]?[0-9]+([.][0-9]*)?([eE][-+]?[0-9]+)?$/ ||
                s ~ /^[-+]?[.][0-9]+([eE][-+]?[0-9]+)?$/
       }
+
       {
         gsub(/[\[\],]/, " ")
-        for (i = 1; i <= NF; ++i)
-          if (numeric($i)) values[++count] = $i
+
+        for (i = 1; i <= NF; ++i) {
+          if (numeric($i))
+            values[++count] = $i
+        }
       }
+
       END {
-        if (count == 0 || count % 4 != 0) exit 1
+
+        # Each node is:
+        # id, x, y, z
+        if (count == 0 || count % 4 != 0)
+          exit 1
+
         for (i = 1; i <= count; i += 4) {
+
           id = values[i] + 0
-          if (id != int(id) || id < 0 || id > 3) exit 1
+
+          if (id != int(id))
+            exit 1
+
+          if (id < 0 || id > n)
+            exit 1
+
           seen[id] = 1
         }
-        for (id = 0; id <= 3; ++id)
-          if (!seen[id]) exit 1
+
+        # Require GCS=0 plus UAV1..UAVN
+        for (id = 0; id <= n; ++id) {
+          if (!seen[id])
+            exit 1
+        }
       }
+
     ' <<<"$payload"
 }
 
 validate_obstacle_loss_payload() {
+
     local payload="$1"
 
-    awk '
+    awk -v n="$UAV_COUNT" '
+
       function numeric(s) {
         return s ~ /^[-+]?[0-9]+([.][0-9]*)?([eE][-+]?[0-9]+)?$/ ||
                s ~ /^[-+]?[.][0-9]+([eE][-+]?[0-9]+)?$/
       }
+
       {
         gsub(/[\[\],]/, " ")
-        for (i = 1; i <= NF; ++i)
-          if (numeric($i)) values[++count] = $i
+
+        for (i = 1; i <= NF; ++i) {
+          if (numeric($i))
+            values[++count] = $i
+        }
       }
+
       END {
-        if (count == 0 || count % 3 != 0) exit 1
+
+        # Every link = a,b,loss
+        if (count == 0 || count % 3 != 0)
+          exit 1
+
         for (i = 1; i <= count; i += 3) {
+
           a = values[i] + 0
           b = values[i + 1] + 0
           loss = values[i + 2] + 0
-          if (a != int(a) || b != int(b) || a < 0 || b > 3 || a >= b)
+
+          if (a != int(a) || b != int(b))
             exit 1
-          if (!numeric(values[i + 2]) || loss < 0)
+
+          if (a < 0 || b > n || a >= b)
             exit 1
+
+          if (loss < 0)
+            exit 1
+
           pairs[a "-" b] = 1
         }
-        required[1] = "0-1"; required[2] = "0-2"; required[3] = "0-3"
-        required[4] = "1-2"; required[5] = "1-3"; required[6] = "2-3"
-        for (i = 1; i <= 6; ++i)
-          if (!pairs[required[i]]) exit 1
+
+        # Require every unique pair from node0..nodeN
+        for (a = 0; a <= n; ++a) {
+
+          for (b = a + 1; b <= n; ++b) {
+
+            key = a "-" b
+
+            if (!pairs[key])
+              exit 1
+          }
+        }
       }
+
     ' <<<"$payload"
 }
 
@@ -1166,7 +1557,7 @@ run_ros_in_root \
     --ros-args \
     -p model_states_topic:=/gazebo/model_states \
     -p uav_prefix:=iris_ \
-    -p n_uavs:=3 \
+    -p n_uavs:="$UAV_COUNT" \
     -p rate_hz:=10.0 \
     -p gcs_enabled:=true \
     -p gcs_model:=gcs \
@@ -1242,7 +1633,7 @@ validate_obstacle_pipeline() {
         "world-position payload containing node IDs 0,1,2,3"
     receive_and_validate_pipeline_payload \
         /link_obstacle_loss validate_obstacle_loss_payload \
-        "six-link obstacle-loss payload with finite non-negative losses"
+        "dynamic obstacle-loss payload for $UAV_COUNT UAVs"
     wait_for_ns3_integration_check
     echo "Obstacle pipeline ready."
 
@@ -1408,7 +1799,7 @@ wait_for_sitl_ready() {
 
             echo "----- Gazebo messages for $namespace -----" >&2
             grep -iE \
-                "$namespace|iris_[123]|ArduPilot|Broken.*connection" \
+                "$namespace|iris_[0-9]+|ArduPilot|Broken.*connection" \
                 "${GAZEBO_LOG:-/tmp/gazebo_city.log}" |
                 tail -n 80 >&2 || true
             echo "------------------------------------------" >&2
@@ -1519,44 +1910,197 @@ while true; do
     sleep 0.2
 done
 
+
 echo "micro_ros_agent ports ready inside gcsns:"
-sudo ip netns exec gcsns ss -lunp \
-    "( sport = :2019 or sport = :2020 or sport = :2021 )"
+
+sudo ip netns exec gcsns ss -lunp
 # BEGIN GAZEBO FDM READINESS GATE
 wait_for_gazebo_fdm_ports 60
 # END GAZEBO FDM READINESS GATE
 
-echo "=== Starting namespaced SITL instances sequentially ==="
+###############################################################################
+# Dynamic SITL startup
+###############################################################################
 
-echo "--- Starting UAV1 SITL ---"
-launch_sitl uav1 0 1 5760 172.31.1.1 "$UAV1_DEFAULTS"
+echo
+echo "============================================================"
+echo "STARTING DYNAMIC SITL FLEET"
+echo "============================================================"
 
-wait_for_sitl_ready \
-    uav1 9003 "${SITL_PIDS[0]}" \
-    /tmp/multi_uav_sitl/uav1/arducopter.log
+SITL_PIDS=()
+SITL_LOGS=()
 
-echo "UAV1 SITL startup complete."
-sleep 2
 
-echo "--- Starting UAV2 SITL ---"
-launch_sitl uav2 1 2 5770 172.31.2.1 "$UAV2_DEFAULTS"
+for row in "${FLEET_ROWS[@]}"; do
 
-wait_for_sitl_ready \
-    uav2 9013 "${SITL_PIDS[1]}" \
-    /tmp/multi_uav_sitl/uav2/arducopter.log
+    IFS=$'\t' read -r \
+        uid \
+        namespace \
+        wireless_ip \
+        dds_port \
+        mavlink_port \
+        gazebo_fdm_port \
+        sitl_fdm_port \
+        gazebo_ip \
+        takeoff_altitude \
+        dds_file \
+        <<< "$row"
 
-echo "UAV2 SITL startup complete."
-sleep 2
 
-echo "--- Starting UAV3 SITL ---"
-launch_sitl uav3 2 3 5780 172.31.3.1 "$UAV3_DEFAULTS"
+    ###########################################################################
+    # UAV identity
+    ###########################################################################
 
-wait_for_sitl_ready \
-    uav3 9023 "${SITL_PIDS[2]}" \
-    /tmp/multi_uav_sitl/uav3/arducopter.log
+    instance=$((uid - 1))
+    sysid="$uid"
 
-echo "UAV3 SITL startup complete."
-echo "All three SITL instances are running."
+
+    ###########################################################################
+    # Check DDS parameter file
+    ###########################################################################
+
+    if [[ ! -f "$dds_file" ]]; then
+
+        echo "ERROR: DDS parameter file missing:" >&2
+        echo "  $dds_file" >&2
+
+        exit 1
+
+    fi
+
+
+    ###########################################################################
+    # ArduPilot defaults
+    ###########################################################################
+
+    defaults="$BASE_DEFAULTS,$dds_file"
+
+
+    ###########################################################################
+    # SITL log
+    ###########################################################################
+
+    sitl_log="/tmp/multi_uav_sitl/${namespace}/arducopter.log"
+
+    SITL_LOGS+=("$sitl_log")
+
+
+    ###########################################################################
+    # Verify namespace exists
+    ###########################################################################
+
+    if ! sudo ip netns list |
+        awk '{print $1}' |
+        grep -qx "$namespace"; then
+
+        echo "ERROR: Namespace does not exist: $namespace" >&2
+        exit 1
+
+    fi
+
+
+    ###########################################################################
+    # Display configuration
+    ###########################################################################
+
+    echo
+    echo "------------------------------------------------------------"
+    echo "Launching UAV$uid"
+    echo "------------------------------------------------------------"
+
+    echo "namespace        : $namespace"
+    echo "instance         : $instance"
+    echo "SYSID            : $sysid"
+    echo "wireless IP      : $wireless_ip"
+    echo "DDS port         : $dds_port"
+    echo "MAVLink TCP      : $mavlink_port"
+    echo "Gazebo FDM       : $gazebo_fdm_port"
+    echo "SITL FDM         : $sitl_fdm_port"
+    echo "Gazebo IP        : $gazebo_ip"
+    echo "takeoff altitude : $takeoff_altitude"
+    echo "DDS file         : $dds_file"
+    echo "SITL log         : $sitl_log"
+
+
+    ###########################################################################
+    # Launch ArduPilot SITL
+    ###########################################################################
+
+    launch_sitl \
+        "$namespace" \
+        "$instance" \
+        "$sysid" \
+        "$mavlink_port" \
+        "$gazebo_ip" \
+        "$defaults"
+
+
+    ###########################################################################
+    # Get the actual ArduCopter PID
+    ###########################################################################
+
+    pid_index=$((uid - 1))
+
+    sitl_pid="${SITL_PIDS[$pid_index]}"
+
+
+    if [[ -z "$sitl_pid" ]]; then
+
+        echo "ERROR: No SITL PID recorded for UAV$uid." >&2
+        exit 1
+
+    fi
+
+
+    ###########################################################################
+    # Wait for this SITL instance
+    ###########################################################################
+
+    wait_for_sitl_ready \
+        "$namespace" \
+        "$sitl_fdm_port" \
+        "$sitl_pid" \
+        "$sitl_log"
+
+
+    echo
+    echo "✓ UAV$uid SITL ready."
+    echo
+
+
+    ###########################################################################
+    # Start UAVs sequentially
+    ###########################################################################
+
+    if (( uid < UAV_COUNT )); then
+        sleep 8
+    fi
+
+done
+
+
+###############################################################################
+# Final SITL summary
+###############################################################################
+
+echo
+echo "============================================================"
+echo "ALL $UAV_COUNT SITL INSTANCES ARE RUNNING"
+echo "============================================================"
+
+for ((uid=1; uid<=UAV_COUNT; uid++)); do
+
+    index=$((uid - 1))
+
+    echo "UAV$uid:"
+    echo "  namespace = uav$uid"
+    echo "  PID       = ${SITL_PIDS[$index]}"
+    echo "  log       = ${SITL_LOGS[$index]}"
+
+done
+
+echo "============================================================"
+echo
 
 run_ros_in_gcsns() {
     sudo ip netns exec gcsns \
@@ -1733,15 +2277,102 @@ start_drone_bridge() {
     echo "Started $node_name: PID=$! MAVLink=$mavlink_host:$mavlink_port log=$log_file"
 }
 
-echo "=== Starting drone_bridge nodes inside gcsns (ROS_DOMAIN_ID=$ROS_DOMAIN_ID) ==="
-wait_for_sitl_tcp 1 10.42.0.11 5760
-start_drone_bridge 1 drone_bridge_uav1 10.42.0.11 5760 60.0 "${BRIDGE_LOGS[0]}"
+###############################################################################
+# Dynamic drone_bridge startup
+###############################################################################
 
-wait_for_sitl_tcp 2 10.42.0.12 5770
-start_drone_bridge 2 drone_bridge_uav2 10.42.0.12 5770 40.0 "${BRIDGE_LOGS[1]}"
+echo
+echo "============================================================"
+echo "STARTING DYNAMIC DRONE BRIDGES"
+echo "============================================================"
 
-wait_for_sitl_tcp 3 10.42.0.13 5780
-start_drone_bridge 3 drone_bridge_uav3 10.42.0.13 5780 50.0 "${BRIDGE_LOGS[2]}"
+# Reset runtime bridge arrays.
+BRIDGE_PIDS=()
+BRIDGE_LOGS=()
+
+
+for row in "${FLEET_ROWS[@]}"; do
+
+    ###########################################################################
+    # Read one UAV configuration row
+    ###########################################################################
+
+    IFS=$'\t' read -r \
+        uid \
+        namespace \
+        wireless_ip \
+        dds_port \
+        mavlink_port \
+        gazebo_fdm_port \
+        sitl_fdm_port \
+        gazebo_ip \
+        takeoff_altitude \
+        dds_file \
+        <<< "$row"
+
+
+    ###########################################################################
+    # ROS node name and log
+    ###########################################################################
+
+    node_name="drone_bridge_uav${uid}"
+
+    bridge_log="/tmp/drone_bridge_uav${uid}.log"
+
+    BRIDGE_LOGS+=("$bridge_log")
+
+
+    ###########################################################################
+    # Display configuration
+    ###########################################################################
+
+    echo
+    echo "------------------------------------------------------------"
+    echo "Starting drone_bridge for UAV$uid"
+    echo "------------------------------------------------------------"
+
+    echo "node name        : $node_name"
+    echo "namespace        : $namespace"
+    echo "wireless IP      : $wireless_ip"
+    echo "MAVLink endpoint : $wireless_ip:$mavlink_port"
+    echo "DDS port         : $dds_port"
+    echo "takeoff altitude : $takeoff_altitude"
+    echo "log              : $bridge_log"
+
+
+    ###########################################################################
+    # Make sure SITL is reachable from GCS through ns-3
+    ###########################################################################
+
+    wait_for_sitl_tcp \
+        "$uid" \
+        "$wireless_ip" \
+        "$mavlink_port"
+
+
+    ###########################################################################
+    # Start one generic drone_bridge instance
+    ###########################################################################
+
+    start_drone_bridge \
+        "$uid" \
+        "$node_name" \
+        "$wireless_ip" \
+        "$mavlink_port" \
+        "$takeoff_altitude" \
+        "$bridge_log"
+
+
+    echo "✓ drone_bridge for UAV$uid started."
+
+done
+
+
+echo
+echo "============================================================"
+echo "ALL $UAV_COUNT DRONE BRIDGES ARE RUNNING"
+echo "============================================================"
+echo
 
 verify_mission_prerequisites() {
     local i
@@ -1788,12 +2419,9 @@ start_dynamic_cluster_manager() {
         echo "ERROR: A dynamic_cluster_manager process is already running." >&2
         return 1
     fi
+    CLUSTER_NUM_UAVS="$UAV_COUNT"
 
-    if [[ "$CLUSTER_NUM_UAVS" != "3" ]]; then
-        echo "ERROR: This launcher currently contains a 3-UAV Gazebo/ns-3 scenario." >&2
-        echo "CLUSTER_NUM_UAVS must remain 3 until the fleet launcher is generalized." >&2
-        return 1
-    fi
+
 
     if ! run_ros_in_root ros2 pkg executables uav_controller 2>/dev/null |
         grep -qE '^uav_controller[[:space:]]+dynamic_cluster_manager$'; then
@@ -1867,11 +2495,14 @@ start_city_mission() {
             source "$2"
             set -u
             export ROS_DOMAIN_ID="$3"
-            exec ros2 run uav_controller city_mission
+            exec ros2 run uav_controller city_mission \
+            --ros-args \
+            -p num_uavs:="$4"
         ' mission-shell \
         "$HOME/ardu_ws/install/setup.bash" \
         "$PROJECT_DIR/ros2/install/setup.bash" \
         "$ROS_DOMAIN_ID" \
+        "$UAV_COUNT" \
         >"$MISSION_LOG" 2>&1 &
     MISSION_PID=$!
 

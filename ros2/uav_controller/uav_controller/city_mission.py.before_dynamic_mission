@@ -14,15 +14,15 @@ Cluster roles:
 Mission phases:
   1. All 3 takeoff simultaneously from stage area
        UAV1 → 60m, UAV2 → 40m, UAV3 → 50m  (vertical separation)
-  2. Takeoff barrier: all airborne confirmed
+  2. barrier_takeoff: all airborne confirmed
   3. UAV1 flies to city centre and begins circle patrol
      UAV2 flies to pond area
      UAV3 flies to mountain area
-  4. Positions barrier: all at patrol positions
+  4. barrier_positions: all at patrol positions
   5. UAV1 completes circle, transitions to hover (relay mode)
      UAV2 sweeps pond zone (P1 → P2)
      UAV3 sweeps mountain zone (P1 → P2)
-  6. Sweep barrier: all sweeps complete
+  6. barrier_sweep: all sweeps complete
   7. All hold 10s at final positions
   8. All RTL simultaneously — UAV1 last (keeps relay active)
 
@@ -46,7 +46,6 @@ import time
 
 import rclpy
 from rclpy.node import Node
-from rclpy.executors import ExternalShutdownException
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import NavSatFix, Image
 from std_msgs.msg import Float32, String, Bool
@@ -113,10 +112,13 @@ SWEEP_DIST   = 50.0   # m per leg
 HOLD_TIME    = 10.0   # s
 WP_RADIUS    =  4.0   # m arrival threshold
 
-# Extra UAVs copy the same turn pattern as their leader, but on a nearby
-# parallel lane so two aircraft at the same altitude do not converge on
-# exactly the same GPS waypoint.
-FOLLOWER_LANE_OFFSET_M = 10.0
+N_DRONES = 3
+
+# Barriers synchronise all 3 threads at key phase transitions
+barrier_takeoff   = threading.Barrier(N_DRONES)
+barrier_positions = threading.Barrier(N_DRONES)
+barrier_sweep     = threading.Barrier(N_DRONES)
+barrier_hold      = threading.Barrier(N_DRONES)
 
 errors      = []
 errors_lock = threading.Lock()
@@ -141,41 +143,12 @@ class CityMission(Node):
     def __init__(self):
         super().__init__('city_mission')
 
-        # --------------------------------------------------------------
-        # Dynamic fleet size
-        # --------------------------------------------------------------
-        self.declare_parameter('num_uavs', 3)
-
-        self.num_uavs = int(
-            self.get_parameter('num_uavs').value
-        )
-
-        if self.num_uavs not in (3, 4, 5):
-            raise ValueError(
-                'city_mission currently supports num_uavs = 3, 4, or 5; '
-                f'received {self.num_uavs}'
-            )
-
-        self.get_logger().info(
-            f'City mission configured for {self.num_uavs} UAVs'
-        )
-
-        # --------------------------------------------------------------
-        # Dynamic mission barriers
-        # --------------------------------------------------------------
-        self.barriers = {
-            'takeoff': threading.Barrier(self.num_uavs),
-            'positions': threading.Barrier(self.num_uavs),
-            'sweep': threading.Barrier(self.num_uavs),
-            'hold': threading.Barrier(self.num_uavs),
-        }
-
         self.states          = {}
         self.takeoff_clients = {}
         self.rtl_clients     = {}
         self.goto_pubs       = {}
 
-        for uid in range(1, self.num_uavs + 1):
+        for uid in [1, 2, 3]:
             ns = f'/uav{uid}'
             s  = DroneState()
             self.states[uid] = s
@@ -199,30 +172,22 @@ class CityMission(Node):
         # Cluster status publisher
         self.pub_cluster = self.create_publisher(String, '/cluster/status', 10)
 
-        # --------------------------------------------------------------
-        # Dynamic camera relay
-        # --------------------------------------------------------------
+        # Camera relay
         self.pub_cam = {
-            uid: self.create_publisher(
-                Image,
-                f'/cluster/cam/uav{uid}',
-                10,
-            )
-            for uid in range(1, self.num_uavs + 1)
+            1: self.create_publisher(Image, '/cluster/cam/uav1', 10),
+            2: self.create_publisher(Image, '/cluster/cam/uav2', 10),
+            3: self.create_publisher(Image, '/cluster/cam/uav3', 10),
         }
-
-        for uid in range(1, self.num_uavs + 1):
+        for uid in [1, 2, 3]:
             self.create_subscription(
                 Image,
                 f'/uav{uid}/camera/image_raw',
                 self._make_cam_cb(uid),
-                10,
-            )
-
+                10)
         self.get_logger().info(
-            f'Camera relay active for UAV1..UAV{self.num_uavs}'
-        )
-        self.mission_done = threading.Event()
+            'Camera relay active: '
+            '/uav{1,2,3}/camera/image_raw → /cluster/cam/uav{1,2,3}')
+
         threading.Thread(target=self._run_all, daemon=True).start()
 
     # ── callbacks ─────────────────────────────────────────────────────────────
@@ -300,35 +265,18 @@ class CityMission(Node):
         return False
 
     def _publish_cluster_status(self):
-
-        if any(
-            self.states[uid].lat is None
-            for uid in range(1, self.num_uavs + 1)
-        ):
+        s = self.states
+        if any(s[i].lat is None for i in [1,2,3]):
             return
-
-        entries = []
-
-        for uid in range(1, self.num_uavs + 1):
-
-            state = self.states[uid]
-
-            entries.append(
-                f'UAV{uid}('
-                f'lat={state.lat:.5f} '
-                f'lon={state.lon:.5f} '
-                f'alt={state.rel_alt:.1f}m '
-                f'mode={state.mode}'
-                f')'
-            )
-
         msg = String()
-
         msg.data = (
-            'CLUSTER_STATUS | '
-            + ' | '.join(entries)
+            f'CLUSTER_STATUS | '
+            f'HEAD=UAV1(alt={s[1].rel_alt:.1f}m mode={s[1].mode}) | '
+            f'M1=UAV2(lat={s[2].lat:.5f} lon={s[2].lon:.5f} '
+            f'alt={s[2].rel_alt:.1f}m) | '
+            f'M2=UAV3(lat={s[3].lat:.5f} lon={s[3].lon:.5f} '
+            f'alt={s[3].rel_alt:.1f}m)'
         )
-
         self.pub_cluster.publish(msg)
 
     def _circle_patrol(self, uid, centre_lat, centre_lon,
@@ -373,7 +321,7 @@ class CityMission(Node):
                     self.takeoff_clients[1], 1, '/takeoff', 90):
                 raise RuntimeError('UAV1 takeoff failed')
             time.sleep(1.0)
-            self.barriers['takeoff'].wait()
+            barrier_takeoff.wait()
 
             # Phase 2 — fly to city centre
             self.get_logger().info('[UAV1] Phase 2 — Flying to city centre')
@@ -385,7 +333,7 @@ class CityMission(Node):
             self.get_logger().info(
                 '[UAV1] ✓ Broadcasting /cluster/status every 2s')
 
-            self.barriers['positions'].wait()
+            barrier_positions.wait()
 
             # Phase 3 — circle patrol over city
             self.get_logger().info('[UAV1] Phase 3 — City circle patrol')
@@ -399,12 +347,12 @@ class CityMission(Node):
             self._fly_to(1, CITY_LAT, CITY_LON, HEAD_ALT,
                          'City Centre Hover')
 
-            self.barriers['sweep'].wait()
+            barrier_sweep.wait()
 
             # Phase 5 — hold then RTL last
             self.get_logger().info(f'[UAV1] Holding {HOLD_TIME}s')
             time.sleep(HOLD_TIME)
-            self.barriers['hold'].wait()
+            barrier_hold.wait()
 
             # Members RTL first — wait 5s then CH follows
             time.sleep(5.0)
@@ -442,13 +390,13 @@ class CityMission(Node):
                     self.takeoff_clients[2], 2, '/takeoff', 90):
                 raise RuntimeError('UAV2 takeoff failed')
             time.sleep(1.0)
-            self.barriers['takeoff'].wait()
+            barrier_takeoff.wait()
 
             # Phase 2 — fly to pond area
             self.get_logger().info('[UAV2] Phase 2 — Flying to pond area')
             self._fly_to(2, POND_LAT, POND_LON, POND_ALT, 'Pond Area')
 
-            self.barriers['positions'].wait()
+            barrier_positions.wait()
 
             # Phase 3 — sweep pond zone
             # Leg 1: north edge of pond
@@ -462,11 +410,11 @@ class CityMission(Node):
 
             self._fly_to(2, POND_LAT, POND_LON, POND_ALT, 'Pond Centre')
 
-            self.barriers['sweep'].wait()
+            barrier_sweep.wait()
 
             self.get_logger().info(f'[UAV2] Holding {HOLD_TIME}s')
             time.sleep(HOLD_TIME)
-            self.barriers['hold'].wait()
+            barrier_hold.wait()
 
             self.get_logger().info('[UAV2] RTL')
             self._call_service(self.rtl_clients[2], 2, '/rtl')
@@ -500,13 +448,13 @@ class CityMission(Node):
                     self.takeoff_clients[3], 3, '/takeoff', 90):
                 raise RuntimeError('UAV3 takeoff failed')
             time.sleep(1.0)
-            self.barriers['takeoff'].wait()
+            barrier_takeoff.wait()
 
             # Phase 2 — fly to mountain area
             self.get_logger().info('[UAV3] Phase 2 — Flying to mountain area')
             self._fly_to(3, MTN_LAT, MTN_LON, MTN_ALT, 'Mountain Area')
 
-            self.barriers['positions'].wait()
+            barrier_positions.wait()
 
             # Phase 3 — sweep mountain zone
             # Leg 1: further into mountain
@@ -520,11 +468,11 @@ class CityMission(Node):
 
             self._fly_to(3, MTN_LAT, MTN_LON, MTN_ALT, 'Mountain Entry')
 
-            self.barriers['sweep'].wait()
+            barrier_sweep.wait()
 
             self.get_logger().info(f'[UAV3] Holding {HOLD_TIME}s')
             time.sleep(HOLD_TIME)
-            self.barriers['hold'].wait()
+            barrier_hold.wait()
 
             self.get_logger().info('[UAV3] RTL')
             self._call_service(self.rtl_clients[3], 3, '/rtl')
@@ -535,424 +483,90 @@ class CityMission(Node):
             with errors_lock:
                 errors.append((3, str(e)))
 
-
-    def _mission_uav4(self):
-        """
-        UAV4 — Pond follower.
-
-        Spawn placement is handled by fleet.yaml:
-          UAV4 is positioned midway between UAV1 and UAV2.
-
-        Mission behaviour:
-          - same altitude as UAV2 (40 m)
-          - same pond patrol turn sequence as UAV2
-          - nearby parallel lane to avoid putting UAV2/UAV4 on the exact
-            same GPS point at the same altitude
-        """
-        uid = 4
-        s = self.states[uid]
-
-        # Shift the pond patrol centre 10 m east. The turn pattern remains
-        # north -> south -> centre, identical to UAV2.
-        patrol_lat, patrol_lon = move_gps(
-            POND_LAT, POND_LON, FOLLOWER_LANE_OFFSET_M, 90.0
-        )
-
-        try:
-            self.get_logger().info(
-                '[UAV4] Pond follower — Waiting for GPS...'
-            )
-
-            while s.lat is None:
-                time.sleep(0.3)
-
-            self.get_logger().info(
-                '[UAV4] GPS ready. Waiting 15s...'
-            )
-            time.sleep(15.0)
-
-            # Phase 1 — takeoff to same altitude as UAV2
-            self.get_logger().info(
-                '[UAV4] Phase 1 — Takeoff to 40m'
-            )
-
-            if not self._call_service(
-                    self.takeoff_clients[uid], uid, '/takeoff', 90):
-                raise RuntimeError('UAV4 takeoff failed')
-
-            time.sleep(1.0)
-            self.barriers['takeoff'].wait()
-
-            # Phase 2 — fly to parallel pond lane
-            self.get_logger().info(
-                '[UAV4] Phase 2 — Flying to pond follower lane'
-            )
-
-            self._fly_to(
-                uid,
-                patrol_lat,
-                patrol_lon,
-                POND_ALT,
-                'Pond Follower Area'
-            )
-
-            self.barriers['positions'].wait()
-
-            # Phase 3 — exact same turn pattern as UAV2:
-            # north edge -> south edge -> centre.
-            self.get_logger().info(
-                '[UAV4] Phase 3 — Pond sweep leg 1 (north)'
-            )
-
-            p1_lat, p1_lon = move_gps(
-                patrol_lat,
-                patrol_lon,
-                SWEEP_DIST,
-                0.0
-            )
-
-            self._fly_to(
-                uid,
-                p1_lat,
-                p1_lon,
-                POND_ALT,
-                'Pond Follower North Edge'
-            )
-
-            self.get_logger().info(
-                '[UAV4] Phase 3 — Pond sweep leg 2 (south)'
-            )
-
-            p2_lat, p2_lon = move_gps(
-                patrol_lat,
-                patrol_lon,
-                SWEEP_DIST,
-                180.0
-            )
-
-            self._fly_to(
-                uid,
-                p2_lat,
-                p2_lon,
-                POND_ALT,
-                'Pond Follower South Edge'
-            )
-
-            self._fly_to(
-                uid,
-                patrol_lat,
-                patrol_lon,
-                POND_ALT,
-                'Pond Follower Centre'
-            )
-
-            self.barriers['sweep'].wait()
-
-            self.get_logger().info(
-                f'[UAV4] Holding {HOLD_TIME}s'
-            )
-            time.sleep(HOLD_TIME)
-
-            self.barriers['hold'].wait()
-
-            self.get_logger().info('[UAV4] RTL')
-            self._call_service(
-                self.rtl_clients[uid], uid, '/rtl'
-            )
-
-            self.get_logger().info(
-                '[UAV4] ✅ Mission complete'
-            )
-
-        except Exception as e:
-            self.get_logger().error(
-                f'[UAV4] ERROR: {e}'
-            )
-
-            with errors_lock:
-                errors.append((uid, str(e)))
-
-
-    def _mission_uav5(self):
-        """
-        UAV5 — Mountain follower.
-
-        Spawn placement is handled by fleet.yaml:
-          UAV5 is positioned midway between UAV1 and UAV3.
-
-        Mission behaviour:
-          - same altitude as UAV3 (50 m)
-          - same mountain patrol turn sequence as UAV3
-          - nearby parallel lane to avoid putting UAV3/UAV5 on the exact
-            same GPS point at the same altitude
-        """
-        uid = 5
-        s = self.states[uid]
-
-        # Shift the mountain patrol centre 10 m west. The sweep bearings
-        # remain 60 deg -> 120 deg -> centre, identical to UAV3.
-        patrol_lat, patrol_lon = move_gps(
-            MTN_LAT, MTN_LON, FOLLOWER_LANE_OFFSET_M, 270.0
-        )
-
-        try:
-            self.get_logger().info(
-                '[UAV5] Mountain follower — Waiting for GPS...'
-            )
-
-            while s.lat is None:
-                time.sleep(0.3)
-
-            self.get_logger().info(
-                '[UAV5] GPS ready. Waiting 15s...'
-            )
-            time.sleep(15.0)
-
-            # Phase 1 — takeoff to same altitude as UAV3
-            self.get_logger().info(
-                '[UAV5] Phase 1 — Takeoff to 50m'
-            )
-
-            if not self._call_service(
-                    self.takeoff_clients[uid], uid, '/takeoff', 90):
-                raise RuntimeError('UAV5 takeoff failed')
-
-            time.sleep(1.0)
-            self.barriers['takeoff'].wait()
-
-            # Phase 2 — fly to parallel mountain lane
-            self.get_logger().info(
-                '[UAV5] Phase 2 — Flying to mountain follower lane'
-            )
-
-            self._fly_to(
-                uid,
-                patrol_lat,
-                patrol_lon,
-                MTN_ALT,
-                'Mountain Follower Area'
-            )
-
-            self.barriers['positions'].wait()
-
-            # Phase 3 — exact same turn pattern as UAV3.
-            self.get_logger().info(
-                '[UAV5] Phase 3 — Mountain sweep leg 1 (deeper)'
-            )
-
-            p1_lat, p1_lon = move_gps(
-                patrol_lat,
-                patrol_lon,
-                SWEEP_DIST,
-                60.0
-            )
-
-            self._fly_to(
-                uid,
-                p1_lat,
-                p1_lon,
-                MTN_ALT,
-                'Mountain Follower Deep'
-            )
-
-            p2_lat, p2_lon = move_gps(
-                patrol_lat,
-                patrol_lon,
-                SWEEP_DIST,
-                120.0
-            )
-
-            self._fly_to(
-                uid,
-                p2_lat,
-                p2_lon,
-                MTN_ALT,
-                'Mountain Follower Ridge'
-            )
-
-            self._fly_to(
-                uid,
-                patrol_lat,
-                patrol_lon,
-                MTN_ALT,
-                'Mountain Follower Entry'
-            )
-
-            self.barriers['sweep'].wait()
-
-            self.get_logger().info(
-                f'[UAV5] Holding {HOLD_TIME}s'
-            )
-            time.sleep(HOLD_TIME)
-
-            self.barriers['hold'].wait()
-
-            self.get_logger().info('[UAV5] RTL')
-            self._call_service(
-                self.rtl_clients[uid], uid, '/rtl'
-            )
-
-            self.get_logger().info(
-                '[UAV5] ✅ Mission complete'
-            )
-
-        except Exception as e:
-            self.get_logger().error(
-                f'[UAV5] ERROR: {e}'
-            )
-
-            with errors_lock:
-                errors.append((uid, str(e)))
-
-
     # ── launch all threads ────────────────────────────────────────────────────
 
     def _run_all(self):
         self.get_logger().info('')
         self.get_logger().info(
-            '╔══════════════════════════════════════════════════════╗'
-        )
+            '╔══════════════════════════════════════════════════════╗')
         self.get_logger().info(
-            f'║      City Surveillance Mission — {self.num_uavs} UAVs'
-        )
+            '║        City Surveillance Mission — 3 UAVs           ║')
         self.get_logger().info(
-            '║'
-        )
+            '║                                                      ║')
         self.get_logger().info(
-            '║  UAV1 → original city / relay mission @ 60m'
-        )
+            '║  UAV1 → CLUSTER HEAD                                 ║')
         self.get_logger().info(
-            '║  UAV2 → original pond sweep mission       @ 40m'
-        )
+            '║          city circle (r=60m) then hover @ 60m       ║')
         self.get_logger().info(
-            '║  UAV3 → original mountain sweep mission   @ 50m'
-        )
-
-        if self.num_uavs >= 4:
-            self.get_logger().info(
-                '║  UAV4 → UAV2-style pond follower          @ 40m'
-            )
-
-        if self.num_uavs >= 5:
-            self.get_logger().info(
-                '║  UAV5 → UAV3-style mountain follower      @ 50m'
-            )
-
+            '║  UAV2 → Member: pond side sweep          @ 40m      ║')
         self.get_logger().info(
-            '╚══════════════════════════════════════════════════════╝'
-        )
+            '║  UAV3 → Member: mountain side sweep      @ 50m      ║')
+        self.get_logger().info(
+            '║                                                      ║')
+        self.get_logger().info(
+            '║  Monitor cluster:                                    ║')
+        self.get_logger().info(
+            '║    ros2 topic echo /cluster/status                   ║')
+        self.get_logger().info(
+            '║  Monitor cameras:                                    ║')
+        self.get_logger().info(
+            '║    ros2 run image_view image_view                    ║')
+        self.get_logger().info(
+            '║      --ros-args -r image:=/cluster/cam/uav2         ║')
+        self.get_logger().info(
+            '╚══════════════════════════════════════════════════════╝')
         self.get_logger().info('')
-
         self.get_logger().info(
-            '[Mission] Waiting 15s for ROS2 subscriptions...'
-        )
+            '[Mission] Waiting 15s for ROS2 subscriptions...')
         time.sleep(15.0)
 
-        # UAV1-UAV3 are always present and retain the original mission.
         threads = [
             threading.Thread(
                 target=self._mission_uav1,
-                name='UAV1-HEAD',
-                daemon=True
-            ),
+                name='UAV1-HEAD', daemon=True),
             threading.Thread(
                 target=self._mission_uav2,
-                name='UAV2-Pond',
-                daemon=True
-            ),
+                name='UAV2-Pond', daemon=True),
             threading.Thread(
                 target=self._mission_uav3,
-                name='UAV3-Mountain',
-                daemon=True
-            ),
+                name='UAV3-Mountain', daemon=True),
         ]
-
-        # Add followers only when they exist in the selected fleet.
-        if self.num_uavs >= 4:
-            threads.append(
-                threading.Thread(
-                    target=self._mission_uav4,
-                    name='UAV4-Pond-Follower',
-                    daemon=True
-                )
-            )
-
-        if self.num_uavs >= 5:
-            threads.append(
-                threading.Thread(
-                    target=self._mission_uav5,
-                    name='UAV5-Mountain-Follower',
-                    daemon=True
-                )
-            )
-
-        self.get_logger().info(
-            f'[Mission] Starting {len(threads)} mission workers...'
-        )
 
         for t in threads:
             t.start()
-
         for t in threads:
             t.join()
 
         self.get_logger().info('')
-
         if errors:
             self.get_logger().error(
-                '╔══════════════════════════════════════╗'
-            )
+                '╔══════════════════════════════════════╗')
             self.get_logger().error(
-                '║  MISSION FINISHED WITH ERRORS        ║'
-            )
-
+                '║  MISSION FINISHED WITH ERRORS        ║')
             for uid, err in errors:
-                self.get_logger().error(
-                    f'║  UAV{uid}: {err}'
-                )
-
+                self.get_logger().error(f'║  UAV{uid}: {err}')
             self.get_logger().error(
-                '╚══════════════════════════════════════╝'
-            )
-
+                '╚══════════════════════════════════════╝')
         else:
             self.get_logger().info(
-                '╔══════════════════════════════════════╗'
-            )
+                '╔══════════════════════════════════════╗')
             self.get_logger().info(
-                '║   CITY MISSION COMPLETE  ✅          ║'
-            )
+                '║   CITY MISSION COMPLETE  ✅          ║')
             self.get_logger().info(
-                '╚══════════════════════════════════════╝'
-            )
+                '╚══════════════════════════════════════╝')
 
-        self.get_logger().info(
-            '[Mission] All mission worker threads finished.'
-        )
-
-        self.mission_done.set()
 
 def main(args=None):
     rclpy.init(args=args)
     node = CityMission()
-
     try:
-        while rclpy.ok() and not node.mission_done.is_set():
-            rclpy.spin_once(
-                node,
-                timeout_sec=0.5,
-            )
-
-    except (KeyboardInterrupt, ExternalShutdownException):
+        rclpy.spin(node)
+    except KeyboardInterrupt:
         pass
-
     finally:
-        try:
-            node.destroy_node()
-        except Exception:
-            pass
+        node.destroy_node()
+        rclpy.shutdown()
 
-        if rclpy.ok():
-            rclpy.shutdown()
+
 if __name__ == '__main__':
     main()

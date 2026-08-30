@@ -1,0 +1,280 @@
+# ============================================================
+# Dynamic Multi-UAV Fleet Configuration
+#
+# This is the main configuration file for deciding how many
+# UAVs exist in one simulation run.
+#
+# Change:
+#
+#     fleet:
+#       num_uavs: 3
+#
+# to:
+#
+#     num_uavs: 5
+#
+# for example.
+#
+# Everything else such as IPs, ports, TAPs and namespaces
+# will be generated automatically.
+# ============================================================
+
+
+fleet:
+  # Number of UAVs in the simulation.
+  num_uavs: 4
+
+
+# ============================================================
+# Ground Control Station
+# ============================================================
+
+gcs:
+  id: 0
+
+  # Linux network namespace.
+  namespace: "gcsns"
+
+  # TAP used by NS-3.
+  tap: "tap-gcs"
+
+  # Wireless network address.
+  wireless_ip: "10.42.0.10"
+
+  # Gazebo model name.
+  gazebo_model: "gcs"
+
+  # Used by obstacle ray-casting.
+  antenna_height_m: 2.9
+
+
+# ============================================================
+# Wireless / namespace configuration
+# ============================================================
+
+network:
+
+  # Current NS-3 wireless network.
+  wireless_subnet: "10.42.0.0/24"
+
+  # UAV1 starts here.
+  #
+  # UAV1 = 10.42.0.11
+  # UAV2 = 10.42.0.12
+  # UAV3 = 10.42.0.13
+  # UAV4 = 10.42.0.14
+  # ...
+  uav_ip_start: "10.42.0.11"
+
+  # Linux namespaces:
+  #
+  # uav1
+  # uav2
+  # uav3
+  # ...
+  namespace_prefix: "uav"
+
+  # TAP devices:
+  #
+  # tap-uav1
+  # tap-uav2
+  # ...
+  tap_prefix: "tap-uav"
+
+  # Separate Gazebo/SITL simulation-network address.
+  #
+  # UAV1 -> 172.31.1.1
+  # UAV2 -> 172.31.2.1
+  # ...
+  sim_ip_template: "172.31.{id}.1"
+
+
+# ============================================================
+# Port allocation
+# ============================================================
+
+ports:
+
+  # DDS / micro-ROS Agent
+  #
+  # UAV1 = 2019
+  # UAV2 = 2020
+  # UAV3 = 2021
+  # UAV4 = 2022
+  dds_base: 2019
+  dds_stride: 1
+
+
+  # MAVLink TCP
+  #
+  # UAV1 = 5760
+  # UAV2 = 5770
+  # UAV3 = 5780
+  # UAV4 = 5790
+  mavlink_base: 5760
+  mavlink_stride: 10
+
+
+  # Gazebo ArduPilot FDM listener
+  #
+  # UAV1 = 9002
+  # UAV2 = 9012
+  # UAV3 = 9022
+  gazebo_fdm_base: 9002
+
+
+  # SITL-side FDM port
+  #
+  # UAV1 = 9003
+  # UAV2 = 9013
+  # UAV3 = 9023
+  sitl_fdm_base: 9003
+
+
+  # Both FDM port groups increase by 10 per UAV.
+  fdm_stride: 10
+
+
+# ============================================================
+# ArduPilot DDS configuration
+# ============================================================
+
+dds:
+
+  domain_id: 0
+
+  timeout_ms: 1000
+
+  max_retry: 0
+
+  # Use MAVLink SYSID in AP_DDS namespace.
+  use_ns: 1
+
+
+# ============================================================
+# Gazebo configuration
+# ============================================================
+
+gazebo:
+
+  # Gazebo UAV models become:
+  #
+  # iris_1
+  # iris_2
+  # iris_3
+  # ...
+  uav_prefix: "iris_"
+
+  # Default starting point.
+  #
+  # Your existing UAV1 starts here.
+  spawn_origin:
+    - -70.0
+    - -22.0
+    - 0.0
+
+  # UAVs are separated by 5 metres to avoid overlap
+  # during initialization/takeoff.
+  spawn_spacing_m: 5.0
+
+
+# ============================================================
+# NS-3 simulation defaults
+#
+# These are stored in fleet.json so later the launcher and
+# validation scripts can use one source of truth.
+# ============================================================
+
+simulation:
+
+  tx_power_dbm: 35.0
+
+  rx_sensitivity_dbm: -82.0
+
+  noise_floor_dbm: -94.0
+
+  pathloss_exponent: 2.0
+
+  reference_distance_m: 1.0
+
+  reference_loss_db: 46.73
+
+  m_los: 3.0
+
+  m_nlos: 1.0
+
+  ema_alpha: 0.3
+
+  block_threshold_db: 3.0
+
+  clear_threshold_db: 1.0
+
+
+# ============================================================
+# Defaults for automatically generated UAVs
+# ============================================================
+
+defaults:
+
+  takeoff_altitude_m: 50.0
+
+  mission_profile: "generic"
+
+
+# ============================================================
+# Optional individual UAV overrides
+#
+# These preserve your existing 3-UAV mission.
+#
+# If num_uavs becomes 4 or 5, UAV4/UAV5 will automatically
+# use the defaults above unless you add an override here.
+# ============================================================
+
+uav_overrides:
+
+  "1":
+    spawn:
+      - -70.0
+      - -22.0
+      - 0.0
+
+    takeoff_altitude_m: 60.0
+
+    mission_profile: "city"
+
+
+  "2":
+    spawn:
+      - -70.0
+      - -27.0
+      - 0.0
+
+    takeoff_altitude_m: 40.0
+
+    mission_profile: "pond"
+
+
+  "3":
+    spawn:
+      - -70.0
+      - -17.0
+      - 0.0
+
+    takeoff_altitude_m: 50.0
+
+    mission_profile: "mountain"
+  "4":
+    spawn:
+      - -70.0
+      - -24.5
+      - 0.0
+    takeoff_altitude_m: 40.0
+    mission_profile: "pond_follower"
+
+  "5":
+    spawn:
+      - -70.0
+      - -19.5
+      - 0.0
+    takeoff_altitude_m: 50.0
+    mission_profile: "mountain_follower"

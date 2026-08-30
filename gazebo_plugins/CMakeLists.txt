@@ -1,6 +1,3 @@
-# multi_uav_gazebo_plugins/CMakeLists.txt
-
-
 cmake_minimum_required(VERSION 3.8)
 project(multi_uav_gazebo_plugins)
 
@@ -8,7 +5,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
-find_package(gazebo_dev REQUIRED)   # Gazebo Classic 11 ROS2 integration package
+find_package(gazebo_dev REQUIRED)
 find_package(gazebo_ros REQUIRED)
 
 add_library(obstacle_raycast_plugin SHARED
@@ -22,7 +19,11 @@ target_link_libraries(obstacle_raycast_plugin
   ${GAZEBO_LIBRARIES})
 
 ament_target_dependencies(obstacle_raycast_plugin
-  rclcpp std_msgs geometry_msgs gazebo_dev gazebo_ros)
+  rclcpp
+  std_msgs
+  geometry_msgs
+  gazebo_dev
+  gazebo_ros)
 
 install(TARGETS obstacle_raycast_plugin
   LIBRARY DESTINATION lib

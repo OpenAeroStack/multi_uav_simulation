@@ -5,14 +5,12 @@
 //    - three_uav_tapbridge_obstacle_loss.cc  (ROS 2 / Gazebo co-simulation)
 //    - three_uav_tapbridge_rt_new.cc         (small_city_world-wimukthi branch)
 //
-//  Topology: 4 nodes. All four positions come from Gazebo over ROS -- the GCS
+//  Topology: N+1 nodes. All positions come from Gazebo over ROS -- the GCS
 //  is a real model in the world, not a hard-coded coordinate in this file.
 //      node 0 = GCS   (ground station)      tap-gcs   10.42.0.10
-//      node 1 = UAV1                        tap-uav1  10.42.0.11
-//      node 2 = UAV2                        tap-uav2  10.42.0.12
-//      node 3 = UAV3                        tap-uav3  10.42.0.13
+//      node 1..N = UAV1..UAVN                 tap-uav1..N  10.42.0.11 onward
 //
-//  6 links are modelled: 3 GCS<->UAV + 3 UAV<->UAV. The GCS links are the ones
+//  N(N+1)/2 undirected links are modelled: N GCS<->UAV plus all UAV<->UAV.
 //  that matter most -- the station sits at ground level, so it is by far the
 //  likeliest to be occluded by buildings.
 //
@@ -26,10 +24,10 @@
 //            host is ~1.4 Mbps -- keep iperf3 / video below that or you are
 //            measuring the wall clock, not the channel.
 //
-//  ROS 2 topics (ids are NS-3 node ids: 0=GCS, 1-3=UAVs -- no offset anywhere):
+//  ROS 2 topics (ids are NS-3 node ids: 0=GCS, 1..N=UAVs -- no offset):
 //     sub  /uav_world_positions   Float32MultiArray [id,x,y,z, ...]
 //     sub  /link_obstacle_loss    Float32MultiArray [i,j,loss_dB, ...]
-//                                 6 links: 3 GCS<->UAV + 3 UAV<->UAV
+//                                 all N(N+1)/2 unique node pairs
 //     pub  /ns3_link_rssi         Float32MultiArray [a,b,rssi_dBm, ...]
 //     pub  /ns3_link_snr          Float32MultiArray [a,b,snr_dB, ...]
 //
@@ -52,6 +50,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -61,8 +60,10 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 using namespace ns3;
 
@@ -74,7 +75,7 @@ NS_LOG_COMPONENT_DEFINE("ThreeUavIntegrated");
 //  The GCS now exists in Gazebo too, so the ray-caster and the position
 //  publisher were renumbered to match NS-3 exactly:
 //
-//      id 0 = GCS,  id 1..3 = UAV1..UAV3     (everywhere: ROS, Gazebo, NS-3)
+//      id 0 = GCS,  id 1..N = UAV1..UAVN     (everywhere: ROS, Gazebo, NS-3)
 //
 //  Ids are therefore used AS-IS -- there is no mapping step at all.
 //
@@ -96,9 +97,10 @@ NS_LOG_COMPONENT_DEFINE("ThreeUavIntegrated");
 //    3. CheckIntegration() reports any node or link the feed never covered.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Bit k set once node k has received at least one position update. Written
-// from the NS-3 thread inside ApplyFeed(), read by CheckIntegration().
-static std::atomic<uint32_t> g_posSeenMask{0};
+// Dynamic position-readiness state. Index 0 = GCS, 1..N = UAV1..UAVN.
+// Both ApplyFeed() and CheckIntegration() run on the NS-3 simulation thread,
+// so this does not need atomics or a fixed-width bit mask.
+static std::vector<bool> g_posSeen;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Cross-thread feed buffers
@@ -115,7 +117,7 @@ static std::atomic<uint32_t> g_posSeenMask{0};
 //  Ptr<DynamicObstacleLossModel> and NodeContainer by value into lambdas
 //  constructed on the ROS thread and handed to Simulator::ScheduleWithContext.
 //  It SIGSEGV'd inside PropagationLossModel::CalcRxPower after ~34 s of an
-//  all-links-blocked run (6 links x 10 Hz of obstacle reports = the highest
+//  all-links-blocked run (all pair reports at 10 Hz = the highest
 //  Ptr-copy rate of any scenario). The same pattern is present in the older
 //  three_uav_tapbridge_obstacle_loss.cc, where the lower message rate simply
 //  made it rare enough to look stable.
@@ -168,7 +170,7 @@ struct PhyCounters
   uint64_t rxOkBytes   = 0;
   uint64_t rxDropped  = 0;
 };
-static std::array<PhyCounters, 4> g_phyStats;
+static std::vector<PhyCounters> g_phyStats;
 
 static void PhyTxEndCb(uint32_t nodeId, Ptr<const Packet> p)
 {
@@ -273,7 +275,7 @@ public:
   { std_msgs::msg::Float32MultiArray m; m.data = d; m_snrPub->publish(m); }
 
 private:
-  // [id, x, y, z, ...] with id = NS-3 node id: 0 = GCS, 1..3 = UAV1..UAV3.
+  // [id, x, y, z, ...] with id = NS-3 node id: 0 = GCS, 1..N = UAV1..UAVN.
   // The GCS arrives on this topic exactly like the UAVs -- world_pos_publisher
   // reads its model pose from Gazebo and adds the antenna height. Nothing here
   // special-cases node 0.
@@ -301,14 +303,14 @@ private:
       }
   }
 
-  // [i, j, loss_dB, ...] with i,j = NS-3 node ids (0 = GCS, 1..3 = UAVs).
+  // [i, j, loss_dB, ...] with i,j = NS-3 node ids (0 = GCS, 1..N = UAVs).
   //
   // RESOLVED (was a KNOWN GAP here): the ray-caster used to cover UAV<->UAV
   // pairs only, so the three GCS<->UAV links never received a report and were
   // modelled as permanently clear line-of-sight -- the most optimistic
   // possible assumption applied to the link most likely to be blocked.
-  // obstacle_raycast_plugin now loops over all n_nodes_ and publishes all 6
-  // links. If a link still shows known=0 in the validation CSV, the reports
+  // obstacle_raycast_plugin should loop over all n_nodes_ and publish every
+  // unique pair for the configured fleet size. If a link still shows known=0 in the validation CSV, the reports
   // are not arriving -- see CheckIntegration(), which says so explicitly
   // rather than leaving it to be inferred from a zero column.
   void OnObstacleLoss(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
@@ -377,7 +379,7 @@ static void ApplyFeed(NodeContainer nodes,
       if (mob)
         {
           mob->SetPosition(kv.second);
-          g_posSeenMask.fetch_or(1u << id);      // for CheckIntegration()
+          if (id < g_posSeen.size()) g_posSeen[id] = true; // for CheckIntegration()
         }
       else
         {
@@ -506,11 +508,10 @@ static void CheckIntegration(NodeContainer nodes,
                              Ptr<DynamicObstacleLossModel> obstacleLoss,
                              double finalTimeoutSec)
 {
-  const uint32_t mask = g_posSeenMask.load();
   std::ostringstream missingPos, missingLoss;
 
   for (uint32_t i = 0; i < nodes.GetN(); ++i)
-    if (!(mask & (1u << i)))
+    if (i >= g_posSeen.size() || !g_posSeen[i])
       missingPos << ' ' << (i == 0 ? "GCS(0)" : "UAV" + std::to_string(i)
                                                 + "(" + std::to_string(i) + ")");
 
@@ -598,98 +599,146 @@ static void FlashNodeOnPhyRxEnd(AnimationInterface* anim, uint32_t nodeId,
   Simulator::Schedule(Seconds(0.1), &RestoreNodeColor, anim, nodeId, oR, oG, oB);
 }
 
+// -----------------------------------------------------------------------------
+//  Dynamic NetAnim colour helper
+// -----------------------------------------------------------------------------
+static std::array<uint8_t, 3> GetUavColor(uint32_t uavId)
+{
+  static const std::array<std::array<uint8_t, 3>, 10> palette = {{
+    {255,   0,   0},   // red
+    {  0, 200,   0},   // green
+    {  0,  80, 255},   // blue
+    {255, 120,   0},   // orange
+    {180,   0, 220},   // purple
+    {  0, 180, 180},   // cyan
+    {220, 180,   0},   // yellow/gold
+    {255,  80, 160},   // pink
+    {100, 100, 255},   // indigo
+    {120, 200,  80}    // lime
+  }};
+
+  if (uavId == 0)
+    return {255, 255, 255};
+
+  return palette[(uavId - 1) % palette.size()];
+}
+
 // =============================================================================
 //  main()
 // =============================================================================
 int main(int argc, char* argv[])
 {
   // ── Command line ─────────────────────────────────────────────────────────
-  std::array<std::string, 4> tapNames = {"tap-gcs", "tap-uav1", "tap-uav2", "tap-uav3"};
+  // Startup-time dynamic fleet size. Node 0 is always the GCS; nodes 1..N are
+  // UAV1..UAVN. TAP names are generated from gcsTap + uavTapPrefix.
+  uint32_t    numUavs         = 3;
+  std::string gcsTap          = "tap-gcs";
+  std::string uavTapPrefix    = "tap-uav";
+
+  // Legacy per-TAP overrides are kept temporarily so the existing 3-UAV
+  // launcher still works while it is being migrated. For N>3, UAV4..N use the
+  // generated prefix names unless a future manifest-driven launcher changes it.
+  std::string legacyTap0      = "";
+  std::string legacyTap1      = "";
+  std::string legacyTap2      = "";
+  std::string legacyTap3      = "";
 
   double      simTime        = 0.0;    // 0 = run until killed (live mission)
-  double      distance       = 50.0;   // initial UAV separation, m
+  double      distance       = 50.0;   // standalone spawn spacing, m
   double      uavAltitude    = 20.0;   // m AGL
   double      txPowerDbm     = 20.0;   // typical UAV datalink radio
   double      rxSensitivity  = -82.0;  // 802.11a default
-  // Noise floor for SNR: kTB over a 20 MHz 802.11a channel plus a ~7 dB
-  // receiver noise figure => -174 + 10*log10(20e6) + 7 = -94 dBm.
-  // (802.11a and 802.11n HT20 are both 20 MHz, so the number is unchanged
-  //  from the obstacle_loss script -- only the justification differs.)
   double      noiseFloor     = -94.0;
   double      statsPeriod    = 0.5;    // s, ROS publish + validation CSV rate
   double      posLogPeriod   = 2.0;    // s, 0 = off
 
-  // Obstacle model knobs -- previously reachable only by editing C++.
   double      mLos           = 3.0;
   double      mNlos          = 1.0;
   double      emaAlpha       = 0.3;
   double      blockThreshDb  = 3.0;
   double      clearThreshDb  = 1.0;
 
-  bool        standalone     = false;  // true = no ROS, Gauss-Markov mobility
-  double      uavSpeed       = 5.0;    // m/s, standalone mobility only
+  bool        standalone     = false;
+  double      uavSpeed       = 5.0;
 
-  // Initial GCS position. In ROS mode this is only a placeholder until the
-  // first /uav_world_positions message arrives; it must nonetheless be sane
-  // because path loss is computed from it during the first ~0.1 s, and it is
-  // what the GCS stays at if the feed never arrives (CheckIntegration() says
-  // so loudly at t=10 s rather than letting it pass as a working run).
-  // In --standalone it is the permanent position.
-  //
-  // Defaults match <model name="gcs"> in multi_uav_plugin.world: pose (0,6,0)
-  // plus the 2.9 m antenna height. small_city_base.world puts the station at
-  // (-24,0,0) instead, so pass --gcsX=-24 --gcsY=0 when using that world.
-
-  // Using small_city_base.world as the default
+  // Placeholder in ROS mode; permanent position in standalone mode.
   double      gcsX           = -24.0;
   double      gcsY           = 0.0;
   double      gcsZ           = 0.0;
 
-  double      delayMs        = 0.0;    // 0 = physical speed-of-light delay
-  double      lossRate       = 0.0;    // extra burst loss, 0 = off
+  double      delayMs        = 0.0;
+  double      lossRate       = 0.0;
   bool        enableNetAnim  = false;
-  // TapBridge needs root and pre-created TAP devices. Turning it off lets the
-  // channel be exercised unprivileged (CI, model debugging) -- otherwise
-  // --standalone still aborts in CreateTap() and is useless for that purpose.
   bool        enableTap      = true;
   uint32_t    rngRun         = 1;
 
   std::string csvPath        = "";
   std::string snrLogFile     = "";
-  std::string animFile       = "three_uav_anim.xml";
+  std::string animFile       = "multi_uav_anim.xml";
 
   CommandLine cmd(__FILE__);
-  cmd.AddValue("tap0",           "TAP name for GCS",                    tapNames[0]);
-  cmd.AddValue("tap1",           "TAP name for UAV1",                   tapNames[1]);
-  cmd.AddValue("tap2",           "TAP name for UAV2",                   tapNames[2]);
-  cmd.AddValue("tap3",           "TAP name for UAV3",                   tapNames[3]);
-  cmd.AddValue("simTime",        "Sim duration s (0=unlimited)",        simTime);
-  cmd.AddValue("distance",       "Initial UAV separation m",            distance);
-  cmd.AddValue("uavAltitude",    "Initial UAV altitude m",              uavAltitude);
-  cmd.AddValue("txPowerDbm",     "Transmit power dBm",                  txPowerDbm);
-  cmd.AddValue("rxSensitivity",  "PHY Rx sensitivity dBm",              rxSensitivity);
-  cmd.AddValue("noiseFloor",     "Receiver noise floor dBm for SNR",    noiseFloor);
-  cmd.AddValue("statsPeriod",    "ROS publish / CSV period s",          statsPeriod);
-  cmd.AddValue("posLogPeriod",   "Position log period s (0=off)",       posLogPeriod);
-  cmd.AddValue("mLos",           "Nakagami m, clear line-of-sight",     mLos);
-  cmd.AddValue("mNlos",          "Nakagami m, obstacle-blocked",        mNlos);
-  cmd.AddValue("emaAlpha",       "Obstacle-loss EMA factor (1=none)",   emaAlpha);
-  cmd.AddValue("blockThreshDb",  "Loss above this -> NLoS fading",      blockThreshDb);
-  cmd.AddValue("clearThreshDb",  "Loss below this -> LoS fading",       clearThreshDb);
-  cmd.AddValue("gcsX",           "Initial GCS x (m)",                   gcsX);
-  cmd.AddValue("gcsY",           "Initial GCS y (m)",                   gcsY);
-  cmd.AddValue("gcsZ",           "Initial GCS antenna height z (m)",    gcsZ);
-  cmd.AddValue("standalone",     "Run without ROS (Gauss-Markov mob.)", standalone);
-  cmd.AddValue("uavSpeed",       "UAV speed m/s (standalone only)",     uavSpeed);
-  cmd.AddValue("delayMs",        "Fixed extra prop delay ms (0=phys.)", delayMs);
-  cmd.AddValue("lossRate",       "Extra burst error rate [0-1], 0=off", lossRate);
-  cmd.AddValue("enableNetAnim",  "Write NetAnim XML",                   enableNetAnim);
-  cmd.AddValue("enableTap",      "Install TapBridge (needs root+TAPs)", enableTap);
-  cmd.AddValue("rngRun",         "RNG run number (reproducibility)",    rngRun);
-  cmd.AddValue("csvPath",        "Per-link validation CSV (empty=off)", csvPath);
-  cmd.AddValue("snrLogFile",     "Per-packet SNR CSV (empty=off)",      snrLogFile);
-  cmd.AddValue("animFile",       "NetAnim XML output path",             animFile);
+  cmd.AddValue("numUavs",        "Number of UAVs (node 0 is GCS)",          numUavs);
+  cmd.AddValue("gcsTap",         "TAP name for GCS",                       gcsTap);
+  cmd.AddValue("uavTapPrefix",   "Prefix for generated UAV TAP names",      uavTapPrefix);
+
+  // Backward-compatible options for the current launcher.
+  cmd.AddValue("tap0",           "Legacy override for GCS TAP",             legacyTap0);
+  cmd.AddValue("tap1",           "Legacy override for UAV1 TAP",            legacyTap1);
+  cmd.AddValue("tap2",           "Legacy override for UAV2 TAP",            legacyTap2);
+  cmd.AddValue("tap3",           "Legacy override for UAV3 TAP",            legacyTap3);
+
+  cmd.AddValue("simTime",        "Sim duration s (0=unlimited)",            simTime);
+  cmd.AddValue("distance",       "Standalone UAV spawn spacing m",          distance);
+  cmd.AddValue("uavAltitude",    "Initial UAV altitude m",                  uavAltitude);
+  cmd.AddValue("txPowerDbm",     "Transmit power dBm",                      txPowerDbm);
+  cmd.AddValue("rxSensitivity",  "PHY Rx sensitivity dBm",                  rxSensitivity);
+  cmd.AddValue("noiseFloor",     "Receiver noise floor dBm for SNR",        noiseFloor);
+  cmd.AddValue("statsPeriod",    "ROS publish / CSV period s",              statsPeriod);
+  cmd.AddValue("posLogPeriod",   "Position log period s (0=off)",           posLogPeriod);
+  cmd.AddValue("mLos",           "Nakagami m, clear line-of-sight",         mLos);
+  cmd.AddValue("mNlos",          "Nakagami m, obstacle-blocked",            mNlos);
+  cmd.AddValue("emaAlpha",       "Obstacle-loss EMA factor (1=none)",       emaAlpha);
+  cmd.AddValue("blockThreshDb",  "Loss above this -> NLoS fading",          blockThreshDb);
+  cmd.AddValue("clearThreshDb",  "Loss below this -> LoS fading",           clearThreshDb);
+  cmd.AddValue("gcsX",           "Initial GCS x (m)",                       gcsX);
+  cmd.AddValue("gcsY",           "Initial GCS y (m)",                       gcsY);
+  cmd.AddValue("gcsZ",           "Initial GCS antenna height z (m)",        gcsZ);
+  cmd.AddValue("standalone",     "Run without ROS (Gauss-Markov mob.)",     standalone);
+  cmd.AddValue("uavSpeed",       "UAV speed m/s (standalone only)",         uavSpeed);
+  cmd.AddValue("delayMs",        "Fixed extra prop delay ms (0=phys.)",     delayMs);
+  cmd.AddValue("lossRate",       "Extra burst error rate [0-1], 0=off",     lossRate);
+  cmd.AddValue("enableNetAnim",  "Write NetAnim XML",                       enableNetAnim);
+  cmd.AddValue("enableTap",      "Install TapBridge (needs root+TAPs)",     enableTap);
+  cmd.AddValue("rngRun",         "RNG run number (reproducibility)",        rngRun);
+  cmd.AddValue("csvPath",        "Per-link validation CSV (empty=off)",     csvPath);
+  cmd.AddValue("snrLogFile",     "Per-packet SNR CSV (empty=off)",          snrLogFile);
+  cmd.AddValue("animFile",       "NetAnim XML output path",                 animFile);
   cmd.Parse(argc, argv);
+
+  // 10.42.0.10 is GCS and the final usable /24 host is 10.42.0.254, so with
+  // sequential assignment this topology can represent at most 244 UAVs.
+  if (numUavs < 1 || numUavs > 244)
+    {
+      NS_FATAL_ERROR("numUavs must be in range 1..244 for 10.42.0.0/24 with "
+                     "GCS at 10.42.0.10");
+    }
+
+  const uint32_t numNodes = numUavs + 1;
+
+  std::vector<std::string> tapNames(numNodes);
+  tapNames[0] = gcsTap;
+  for (uint32_t i = 1; i <= numUavs; ++i)
+    tapNames[i] = uavTapPrefix + std::to_string(i);
+
+  // Apply old launcher overrides when provided.
+  if (!legacyTap0.empty()) tapNames[0] = legacyTap0;
+  if (numUavs >= 1 && !legacyTap1.empty()) tapNames[1] = legacyTap1;
+  if (numUavs >= 2 && !legacyTap2.empty()) tapNames[2] = legacyTap2;
+  if (numUavs >= 3 && !legacyTap3.empty()) tapNames[3] = legacyTap3;
+
+  // Dynamic global state must be sized after numUavs is parsed.
+  g_posSeen.assign(numNodes, false);
+  g_phyStats.assign(numNodes, PhyCounters{});
 
   // ADDED: explicit RNG run control. Without it, two "identical" runs draw the
   // same fading sequence, which quietly understates variance in any averaged
@@ -723,18 +772,17 @@ int main(int argc, char* argv[])
                     StringValue("ns3::RealtimeSimulatorImpl"));
   GlobalValue::Bind("ChecksumEnabled", BooleanValue(true));
 
-  // ── Nodes: 0 = GCS, 1..3 = UAVs ──────────────────────────────────────────
+  // ── Nodes: 0 = GCS, 1..N = UAV1..UAVN ───────────────────────────────────
   NodeContainer nodes;
-  nodes.Create(4);
+  nodes.Create(numNodes);
 
   NodeContainer uavNodes;
-  uavNodes.Add(nodes.Get(1));
-  uavNodes.Add(nodes.Get(2));
-  uavNodes.Add(nodes.Get(3));
+  for (uint32_t i = 1; i <= numUavs; ++i)
+    uavNodes.Add(nodes.Get(i));
 
   // ── Mobility ─────────────────────────────────────────────────────────────
   //
-  //  ROS mode (default): ALL FOUR nodes get ConstantVelocityMobilityModel and
+  //  ROS mode (default): ALL N+1 nodes get ConstantVelocityMobilityModel and
   //  are driven entirely by /uav_world_positions -- including the GCS, which
   //  Gazebo now publishes as id 0.
   //
@@ -763,14 +811,22 @@ int main(int argc, char* argv[])
 
   MobilityHelper uavMob;
   Ptr<ListPositionAllocator> uavPos = CreateObject<ListPositionAllocator>();
-  uavPos->Add(Vector(0.0,          0.0,                  uavAltitude));
-  uavPos->Add(Vector(distance,     0.0,                  uavAltitude));
-  uavPos->Add(Vector(distance/2.0, distance * 0.866,     uavAltitude));
+
+  // Dynamic square-grid placeholder/standalone formation. In ROS mode these
+  // positions are replaced by /uav_world_positions as soon as Gazebo reports.
+  const uint32_t gridCols = static_cast<uint32_t>(
+    std::ceil(std::sqrt(static_cast<double>(numUavs))));
+  for (uint32_t k = 0; k < numUavs; ++k)
+    {
+      const uint32_t row = k / gridCols;
+      const uint32_t col = k % gridCols;
+      uavPos->Add(Vector(col * distance, row * distance, uavAltitude));
+    }
   uavMob.SetPositionAllocator(uavPos);
 
   if (standalone)
     {
-      const double halfXY = 200.0;
+      const double halfXY = std::max(200.0, (gridCols + 1.0) * distance);
       const double altMin = std::max(1.0, uavAltitude - 5.0);
       const double altMax = uavAltitude + 5.0;
       uavMob.SetMobilityModel(
@@ -943,7 +999,7 @@ int main(int argc, char* argv[])
     }
 
   // ── Internet stack + addressing ──────────────────────────────────────────
-  //  .10 = GCS, .11/.12/.13 = UAV1/2/3
+  //  .10 = GCS, .11 onward = UAV1..UAVN
   InternetStackHelper internet;
   internet.Install(nodes);
 
@@ -998,7 +1054,8 @@ int main(int argc, char* argv[])
           g_snrFile << "time_s,rx_node,freq_mhz,pkt_bytes,signal_dbm,noise_dbm,snr_db\n";
           for (uint32_t i = 0; i < devices.GetN(); ++i)
             {
-              std::string ctx = "/NodeList/" + std::to_string(i)
+              const uint32_t nodeId = nodes.Get(i)->GetId();
+              std::string ctx = "/NodeList/" + std::to_string(nodeId)
                 + "/DeviceList/0/$ns3::WifiNetDevice/Phy/MonitorSnifferRx";
               Config::Connect(ctx, MakeCallback(&MonitorSnifferCallback));
             }
@@ -1016,7 +1073,6 @@ int main(int argc, char* argv[])
   //  bound. On a live realtime mission that costs wall-clock time you do not
   //  have at a ~1.4 Mbps ceiling. Enable only for short bounded runs.
   std::unique_ptr<AnimationInterface> anim;
-  const std::array<std::array<uint8_t,3>,3> clr = {{{255,0,0},{0,200,0},{0,80,255}}};
   if (enableNetAnim)
     {
       anim = std::make_unique<AnimationInterface>(animFile);
@@ -1028,22 +1084,29 @@ int main(int argc, char* argv[])
       anim->UpdateNodeDescription(nodes.Get(0), "GCS " + tapNames[0]);
       anim->UpdateNodeColor(nodes.Get(0), 255, 255, 255);
       anim->UpdateNodeSize(nodes.Get(0), 7.0, 7.0);
-      for (uint32_t i = 0; i < 3; ++i)
+
+      for (uint32_t uavId = 1; uavId <= numUavs; ++uavId)
         {
-          anim->UpdateNodeDescription(nodes.Get(i+1),
-            "UAV" + std::to_string(i+1) + " " + tapNames[i+1]);
-          anim->UpdateNodeColor(nodes.Get(i+1), clr[i][0], clr[i][1], clr[i][2]);
-          anim->UpdateNodeSize(nodes.Get(i+1), 5.0, 5.0);
+          const auto color = GetUavColor(uavId);
+          anim->UpdateNodeDescription(nodes.Get(uavId),
+            "UAV" + std::to_string(uavId) + " " + tapNames[uavId]);
+          anim->UpdateNodeColor(nodes.Get(uavId), color[0], color[1], color[2]);
+          anim->UpdateNodeSize(nodes.Get(uavId), 5.0, 5.0);
         }
-      for (uint32_t i = 0; i < devices.GetN() && i < 4; ++i)
+
+      for (uint32_t i = 0; i < devices.GetN(); ++i)
         {
           Ptr<WifiNetDevice> wnd = DynamicCast<WifiNetDevice>(devices.Get(i));
           if (!wnd || !wnd->GetPhy()) continue;
-          uint8_t r = 255, g = 255, b = 255;
-          if (i >= 1 && i <= 3) { r = clr[i-1][0]; g = clr[i-1][1]; b = clr[i-1][2]; }
+
+          std::array<uint8_t, 3> color = (i == 0)
+            ? std::array<uint8_t, 3>{255, 255, 255}
+            : GetUavColor(i);
+
           wnd->GetPhy()->TraceConnectWithoutContext("PhyRxEnd",
             MakeBoundCallback(&FlashNodeOnPhyRxEnd, anim.get(),
-                              nodes.Get(i)->GetId(), r, g, b));
+                              nodes.Get(i)->GetId(),
+                              color[0], color[1], color[2]));
         }
     }
 
@@ -1099,10 +1162,17 @@ int main(int argc, char* argv[])
                 << ", mNlos=" << mNlos << ", ema=" << emaAlpha
                 << ", block/clear=" << blockThreshDb << '/' << clearThreshDb
                 << ") -> LogDistance(n=2.0, Lref=46.73dB @1m)");
-  NS_LOG_UNCOND("  Node ids : 0 = GCS, 1-3 = UAV1-3 -- ROS/Gazebo ids are used "
-                "as-is, no offset");
-  NS_LOG_UNCOND("  Links    : " << (nodes.GetN() * (nodes.GetN() - 1) / 2)
-                << " (3 GCS<->UAV + 3 UAV<->UAV)"
+  const uint32_t totalLinks = numNodes * (numNodes - 1) / 2;
+  const uint32_t gcsUavLinks = numUavs;
+  const uint32_t uavUavLinks = numUavs * (numUavs - 1) / 2;
+  NS_LOG_UNCOND("  Fleet    : " << numUavs << " UAV(s), " << numNodes
+                << " total radio nodes");
+  NS_LOG_UNCOND("  Node ids : 0 = GCS, 1-" << numUavs
+                << " = UAV1-UAV" << numUavs
+                << " -- ROS/Gazebo ids are used as-is, no offset");
+  NS_LOG_UNCOND("  Links    : " << totalLinks
+                << " (" << gcsUavLinks << " GCS<->UAV + "
+                << uavUavLinks << " UAV<->UAV)"
                 << (standalone ? ""
                                : "; integration checked from t=10s to t=90s"));
   NS_LOG_UNCOND("  GCS init : (" << gcsX << ", " << gcsY << ", " << gcsZ << ") m"
