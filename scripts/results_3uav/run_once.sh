@@ -13,6 +13,9 @@ METRICS="$PROJECT/ros2/uav_vision/uav_vision/metrics_logger.py"
 READINESS_TIMEOUT=60
 MODEL_TIMEOUT=180
 SETTLE_SECONDS=5
+DETECTOR_DDS_WARMUP_SECONDS=15
+LOGGER_DDS_SETTLE_SECONDS=10
+DISCOVERY_POLL_INTERVAL_SECONDS=2
 
 usage() { echo "Usage: $0 <edge|ground> <run_01> [duration_seconds]" >&2; }
 [[ "$MODE" == edge || "$MODE" == ground ]] || { usage; exit 2; }
@@ -115,6 +118,7 @@ launch_python() {
         source /home/multi_uav/FYP/multi_uav_simulation/ros2/install/setup.bash
         source /home/multi_uav/yolo_env/bin/activate
         export PYTHONUNBUFFERED=1
+        export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
         printf "%s\n" "$$" > "$1"
         shift
         exec python3 "$@"
@@ -166,6 +170,7 @@ ros_in_namespace() {
     timeout 10s sudo -n ip netns exec "$namespace" runuser -u "$RUN_USER" -- bash -lc '
         source /opt/ros/humble/setup.bash
         source /home/multi_uav/FYP/multi_uav_simulation/ros2/install/setup.bash
+        export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
         exec "$@"
     ' ros-shell "$@"
 }
@@ -193,12 +198,38 @@ require_all_alive() {
     done
 }
 
+wait_fixed_startup_period() {
+    local duration="$1" stage="$2" include_metrics="$3"
+    local deadline=$((SECONDS + duration)) uav elapsed
+    while (( SECONDS < deadline )); do
+        for uav in 1 2 3; do
+            pid_alive "${DETECTOR_PIDS[$uav]:-}" || {
+                echo "ERROR: UAV$uav detector exited during $stage" >&2
+                tail -80 "$ROOT/logs/detector_uav${uav}.log" >&2 2>/dev/null || true
+                return 1
+            }
+            if (( include_metrics )); then
+                pid_alive "${METRICS_PIDS[$uav]:-}" || {
+                    echo "ERROR: UAV$uav metrics logger exited during $stage" >&2
+                    tail -80 "$ROOT/logs/metrics_uav${uav}.log" >&2 2>/dev/null || true
+                    return 1
+                }
+            fi
+        done
+        elapsed=$((duration - (deadline - SECONDS)))
+        (( elapsed < 0 )) && elapsed=0
+        echo "$stage: ${elapsed}/${duration}s"
+        sleep 1
+    done
+}
+
 wait_for_endpoint_pairs() {
     local kind="$1" deadline=$((SECONDS + READINESS_TIMEOUT))
-    local all_ready uav topic namespace info
+    local all_ready uav topic namespace info publisher_count subscriber_count state remaining
     while (( SECONDS < deadline )); do
         require_all_alive "$kind" || return 1
         all_ready=1
+        [[ "$kind" == detection_discovery ]] && echo "DDS discovery:"
         for uav in 1 2 3; do
             if [[ "$kind" == detection_discovery ]]; then
                 topic="/detections/uav${uav}"; namespace=gcsns
@@ -211,13 +242,27 @@ wait_for_endpoint_pairs() {
             # discovering the live endpoints in this namespace.
             info="$(ros_in_namespace "$namespace" ros2 topic info \
                 --no-daemon --spin-time 3 -v "$topic" 2>&1)" || info=""
+            publisher_count="$(awk '/^Publisher count:/ {print $3; exit}' <<<"$info")"
+            subscriber_count="$(awk '/^Subscription count:/ {print $3; exit}' <<<"$info")"
+            publisher_count="${publisher_count:-0}"
+            subscriber_count="${subscriber_count:-0}"
             if ! grep -Eq 'Publisher count: [1-9][0-9]*' <<<"$info" ||
                ! grep -Eq 'Subscription count: [1-9][0-9]*' <<<"$info"; then
                 all_ready=0
+                state=WAITING
+            else
+                state=READY
+            fi
+            if [[ "$kind" == detection_discovery ]]; then
+                printf 'UAV%s publisher=%s subscriber=%s %s\n' \
+                    "$uav" "$publisher_count" "$subscriber_count" "$state" | \
+                    tee -a "$READINESS_LOG"
             fi
         done
         (( all_ready == 1 )) && return 0
-        sleep 0.5
+        remaining=$((deadline - SECONDS))
+        (( remaining > 0 )) && echo "Waiting for all endpoints; up to ${remaining}s remain."
+        sleep "$DISCOVERY_POLL_INTERVAL_SECONDS"
     done
     echo "ERROR: timed out waiting for $kind endpoint matching" >&2
     for uav in 1 2 3; do
@@ -252,6 +297,10 @@ for uav in 1 2 3; do
         "UAV$uav detection publisher"
 done
 
+echo "All detector publishers created; DDS discovery warmup: ${DETECTOR_DDS_WARMUP_SECONDS}s"
+wait_fixed_startup_period "$DETECTOR_DDS_WARMUP_SECONDS" \
+    "Detector DDS warmup" 0
+
 echo "Starting all metrics loggers..."
 for uav in 1 2 3; do
     launch_python gcsns metrics "$uav" "$ROOT/logs/metrics_uav${uav}.log" \
@@ -263,6 +312,10 @@ for uav in 1 2 3; do
     wait_for_log_marker "${METRICS_PIDS[$uav]}" "$ROOT/logs/metrics_uav${uav}.log" \
         "CSV:" 20 "UAV$uav metrics logger"
 done
+
+echo "All metrics loggers created; DDS settling: ${LOGGER_DDS_SETTLE_SECONDS}s"
+wait_fixed_startup_period "$LOGGER_DDS_SETTLE_SECONDS" \
+    "Detector/logger DDS settling" 1
 
 echo "Waiting for all detection-result endpoints..."
 wait_for_endpoint_pairs detection_discovery
