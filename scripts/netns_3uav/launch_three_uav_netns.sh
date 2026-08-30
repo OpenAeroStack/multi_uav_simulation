@@ -28,11 +28,8 @@ SITL_READY_TIMEOUT=90
 DDS_READY_TIMEOUT=120
 MAVLINK_READY_TIMEOUT=90
 GAZEBO_STARTUP_SECONDS=30
-DISCOVERY_SERVER_ADDRESS="10.42.0.10"
-DISCOVERY_SERVER_PORT=11811
 
 NS3_PID=""; GAZEBO_PID=""; POSPUB_PID=""; DISCOVERY_SERVER_PID=""
-DISCOVERY_SERVER_WRAPPER_PID=""
 declare -a AGENT_PIDS=() SITL_PIDS=() BRIDGE_PIDS=()
 
 usage() {
@@ -128,7 +125,13 @@ setup_ns() {
     echo "  $ns: $address via $tap/$bridge"
 }
 setup_ns gcsns  tap-gcs  br-gcs  veth0h veth0n 10.42.0.10/24
-sudo -n ip addr add 10.42.0.1/24 dev br-gcs
+# NOTE: the root namespace deliberately has NO address on 10.42.0.0/24.
+# Giving br-gcs an IP here put every root-namespace DDS participant
+# (gazebo, world_pos_publisher, the 3 camera_controllers, obstacle plugin)
+# onto the wireless subnet, so their SIMPLE multicast discovery flooded the
+# ns-3 channel (~1700 frames/s, ~490 ms RTT) and starved cross-ns-3 DDS
+# discovery for the vision pipeline. The camera path reaches the UAV
+# namespaces over the management veths (172.31.x), not this address.
 setup_ns uav1ns tap-uav1 br-uav1 veth1h veth1n 10.42.0.11/24
 setup_ns uav2ns tap-uav2 br-uav2 veth2h veth2n 10.42.0.12/24
 setup_ns uav3ns tap-uav3 br-uav3 veth3h veth3n 10.42.0.13/24
@@ -178,34 +181,11 @@ for uav in 1 2 3; do
 done
 echo "  All three GCS/UAV wireless paths respond."
 
-echo "=== [3b/9] Fast DDS Discovery Server in gcsns ==="
-DISCOVERY_SERVER_LOG="$LOG_ROOT/fastdds_discovery_server.log"; : >"$DISCOVERY_SERVER_LOG"
-sudo -n setsid ip netns exec gcsns runuser -u "$RUN_USER" -- bash -lc '
-    source /opt/ros/humble/setup.bash
-    exec fastdds discovery -i 0 -l "$1" -p "$2"
-' discovery-server-shell "$DISCOVERY_SERVER_ADDRESS" "$DISCOVERY_SERVER_PORT" \
-    >"$DISCOVERY_SERVER_LOG" 2>&1 &
-DISCOVERY_SERVER_WRAPPER_PID=$!
-deadline=$((SECONDS + 10))
-while (( SECONDS < deadline )); do
-    listener="$(sudo -n ip netns exec gcsns ss -H -lunp \
-        "sport = :$DISCOVERY_SERVER_PORT")"
-    candidate_pid="$(sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' <<<"$listener" | head -1)"
-    if [[ "$candidate_pid" =~ ^[1-9][0-9]*$ ]] &&
-       sudo -n kill -0 "$candidate_pid" 2>/dev/null &&
-       sudo -n tr '\0' ' ' <"/proc/$candidate_pid/cmdline" | \
-           grep -Fq fast-discovery-server; then
-        DISCOVERY_SERVER_PID="$candidate_pid"
-        break
-    fi
-    sleep 0.2
-done
-[[ "$DISCOVERY_SERVER_PID" =~ ^[1-9][0-9]*$ ]] || {
-    cat "$DISCOVERY_SERVER_LOG" >&2
-    echo "ERROR: Fast DDS Discovery Server startup timeout" >&2
-    exit 1
-}
-echo "  Discovery Server ready: $DISCOVERY_SERVER_ADDRESS:$DISCOVERY_SERVER_PORT"
+# NOTE: no Fast DDS Discovery Server. The vision pipeline uses plain SIMPLE
+# discovery seeded with unicast peers (config/fastdds_3uav/simple_unicast_peers.xml,
+# applied by scripts/results_3uav/run_once.sh). A Discovery Server cannot be
+# used because camera_relay must stay SIMPLE to discover the Gazebo cameras,
+# and a Discovery-Server client cannot match a SIMPLE-only participant.
 
 echo "=== [4/9] Gazebo three-UAV small-city world ==="
 export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:$HOME/FYP/small_city_gazebo_world/models:${GAZEBO_MODEL_PATH:-}"
@@ -329,9 +309,10 @@ for uav in 1 2 3; do
         source /opt/ros/humble/setup.bash
         source "$HOME/FYP/ardu_ws/install/setup.bash"
         source "$1"
+        unset ROS_DISCOVERY_SERVER ROS_SUPER_CLIENT
         export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
         export ROS_DOMAIN_ID=0
-        export ROS_DISCOVERY_SERVER=10.42.0.10:11811
+        export ROS_LOCALHOST_ONLY=0
         exec ros2 run uav_controller drone_bridge --ros-args \
             -p uav_id:="$2" -p mavlink_host:="$3" -p mavlink_port:="$4"
     ' bridge-shell "$PROJECT_DIR/ros2/install/setup.bash" "$uav" \

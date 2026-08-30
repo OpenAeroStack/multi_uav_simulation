@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Fast DDS SIMPLE discovery + unicast initial peers for the 3-UAV experiment.
+
+  The vision result hop crosses the ns-3 Wi-Fi channel:
+    edge    detector(uavNns)      publishes /detections/uavN         to metrics(gcsns)
+    ground  camera_relay(uavNns)  publishes /relay/uavN/compressed   to detector(gcsns)
+  On that channel RTPS multicast SPDP (participant discovery) is unreliable
+  under 3-UAV load, so endpoint matching was slow or intermittent. A Discovery
+  Server cannot be used, because camera_relay must stay SIMPLE to discover the
+  Gazebo cameras over the management veth, and a Discovery-Server client cannot
+  match a SIMPLE-only participant.
+
+  This profile keeps plain SIMPLE discovery but also seeds unicast peers, so the
+  cross-ns-3 endpoints find each other by unicast even when a multicast
+  announcement does not survive the channel. It is a strict superset of stock
+  SIMPLE: discoveryProtocol SIMPLE (not SERVER); the multicast SPDP locator
+  239.255.0.1 kept in the list; 4 unicast seeds added; maxInitialPeersRange 32
+  so the seeds reach high participant indices; builtin transports kept; no
+  interfaceWhiteList; no QoS overrides.
+
+  Applied via FASTRTPS_DEFAULT_PROFILES_FILE to camera_relay, detector and
+  metrics_logger only (scripts/results_3uav/run_once.sh). Gazebo,
+  world_pos_publisher, micro_ros_agent and drone_bridge stay stock SIMPLE.
+-->
+<dds>
+  <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+    <transport_descriptors>
+      <transport_descriptor>
+        <transport_id>simple_unicast_udpv4</transport_id>
+        <type>UDPv4</type>
+        <maxInitialPeersRange>32</maxInitialPeersRange>
+      </transport_descriptor>
+    </transport_descriptors>
+
+    <participant profile_name="simple_unicast_peers" is_default_profile="true">
+      <rtps>
+        <userTransports>
+          <transport_id>simple_unicast_udpv4</transport_id>
+        </userTransports>
+        <useBuiltinTransports>true</useBuiltinTransports>
+        <builtin>
+          <discovery_config>
+            <discoveryProtocol>SIMPLE</discoveryProtocol>
+          </discovery_config>
+          <initialPeersList>
+            <locator><udpv4><address>239.255.0.1</address></udpv4></locator>
+            <locator><udpv4><address>10.42.0.10</address></udpv4></locator>
+            <locator><udpv4><address>10.42.0.11</address></udpv4></locator>
+            <locator><udpv4><address>10.42.0.12</address></udpv4></locator>
+            <locator><udpv4><address>10.42.0.13</address></udpv4></locator>
+          </initialPeersList>
+        </builtin>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>

@@ -10,8 +10,7 @@ ROOT="$PROJECT/results_3uav/$MODE/$RUN_ID"
 DETECTOR="$PROJECT/ros2/uav_vision/uav_vision/detector.py"
 RELAY="$PROJECT/ros2/uav_vision/uav_vision/camera_relay.py"
 METRICS="$PROJECT/ros2/uav_vision/uav_vision/metrics_logger.py"
-DISCOVERY_SERVER_ADDRESS="10.42.0.10"
-DISCOVERY_SERVER_PORT=11811
+FASTDDS_PROFILE="$PROJECT/config/fastdds_3uav/simple_unicast_peers.xml"
 READINESS_TIMEOUT=60
 MODEL_TIMEOUT=180
 SETTLE_SECONDS=5
@@ -44,7 +43,6 @@ READINESS_LOG="$ROOT/readiness.log"
 
 declare -A DETECTOR_PIDS=() METRICS_PIDS=() RELAY_PIDS=()
 declare -a WRAPPER_PIDS=()
-DISCOVERY_SERVER_PID=""
 PIDSTAT_PID=""
 SHUTDOWN_COMPLETE=0
 
@@ -134,7 +132,9 @@ launch_python() {
         export PYTHONUNBUFFERED=1
         export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
         export ROS_DOMAIN_ID=0
-        export ROS_DISCOVERY_SERVER=10.42.0.10:11811
+        unset ROS_DISCOVERY_SERVER ROS_SUPER_CLIENT
+        export ROS_LOCALHOST_ONLY=0
+        export FASTRTPS_DEFAULT_PROFILES_FILE=/home/multi_uav/FYP/multi_uav_simulation/config/fastdds_3uav/simple_unicast_peers.xml
         printf "%s\n" "$$" > "$1"
         shift
         exec python3 "$@"
@@ -188,8 +188,9 @@ ros_in_namespace() {
         source /home/multi_uav/FYP/multi_uav_simulation/ros2/install/setup.bash
         export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
         export ROS_DOMAIN_ID=0
-        export ROS_DISCOVERY_SERVER=10.42.0.10:11811
-        export ROS_SUPER_CLIENT=TRUE
+        unset ROS_DISCOVERY_SERVER ROS_SUPER_CLIENT
+        export ROS_LOCALHOST_ONLY=0
+        export FASTRTPS_DEFAULT_PROFILES_FILE=/home/multi_uav/FYP/multi_uav_simulation/config/fastdds_3uav/simple_unicast_peers.xml
         exec "$@"
     ' ros-shell "$@"
 }
@@ -311,31 +312,14 @@ wait_for_relay_endpoint_pairs() {
     return 1
 }
 
-echo "Verifying topology-owned Fast DDS Discovery Server..."
-deadline=$((SECONDS + 10))
-while (( SECONDS < deadline )); do
-    listener="$(sudo -n ip netns exec gcsns ss -H -lunp \
-        "sport = :$DISCOVERY_SERVER_PORT")"
-    candidate_pid="$(sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' <<<"$listener" | head -1)"
-    if [[ "$candidate_pid" =~ ^[1-9][0-9]*$ ]] &&
-       pid_alive "$candidate_pid" &&
-       sudo -n tr '\0' ' ' <"/proc/$candidate_pid/cmdline" | \
-           grep -Fq fast-discovery-server; then
-        DISCOVERY_SERVER_PID="$candidate_pid"
-        break
-    fi
-    sleep 0.2
-done
-if [[ ! "$DISCOVERY_SERVER_PID" =~ ^[1-9][0-9]*$ ]] ||
-   ! pid_alive "$DISCOVERY_SERVER_PID" ||
-   ! sudo -n ip netns exec gcsns ss -H -lunp \
-       "sport = :$DISCOVERY_SERVER_PORT" | \
-       grep -Fq "pid=$DISCOVERY_SERVER_PID,"; then
-    echo "ERROR: Fast DDS Discovery Server did not bind "\
-         "$DISCOVERY_SERVER_ADDRESS:$DISCOVERY_SERVER_PORT" >&2
+# No Discovery Server: the vision pipeline runs plain SIMPLE discovery seeded
+# with unicast peers via config/fastdds_3uav/simple_unicast_peers.xml
+# (FASTRTPS_DEFAULT_PROFILES_FILE, set in launch_python / ros_in_namespace).
+echo "Vision pipeline discovery: SIMPLE + unicast initial peers"
+[[ -f "$FASTDDS_PROFILE" ]] || {
+    echo "ERROR: missing Fast DDS profile: $FASTDDS_PROFILE" >&2
     exit 1
-fi
-echo "Fast DDS Discovery Server ready: $DISCOVERY_SERVER_ADDRESS:$DISCOVERY_SERVER_PORT"
+}
 
 echo "Starting all detectors..."
 for uav in 1 2 3; do
@@ -370,9 +354,9 @@ for uav in 1 2 3; do
         "CSV:" 20 "UAV$uav metrics logger"
 done
 
-echo "All metrics loggers created; Discovery Server settling: ${DETECTION_DDS_SERVER_SETTLE_SECONDS}s"
+echo "All metrics loggers created; detector/logger discovery settling: ${DETECTION_DDS_SERVER_SETTLE_SECONDS}s"
 wait_fixed_startup_period "$DETECTION_DDS_SERVER_SETTLE_SECONDS" \
-    "Detector/logger Discovery Server settling" 1
+    "Detector/logger discovery settling" 1
 
 check_detection_endpoints_once
 for uav in 1 2 3; do
