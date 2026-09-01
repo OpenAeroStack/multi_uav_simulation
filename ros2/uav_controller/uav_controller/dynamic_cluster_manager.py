@@ -143,6 +143,13 @@ class DynamicClusterManager(Node):
 
         self.current_challenger = 0
         self.challenger_wins = 0
+
+        # Backup-CH hysteresis (mirrors the primary's challenger streak). Without
+        # this the backup is just backup_candidates[0] every tick, so ns-3 fading
+        # jitter flips it between near-equal candidates on every election.
+        self.backup_challenger = 0
+        self.backup_challenger_wins = 0
+
         self.last_waiting_log = 0.0
 
         sensor_qos = QoSProfile(
@@ -794,11 +801,42 @@ class DynamicClusterManager(Node):
             if candidate != self.primary_ch
         ]
 
-        self.backup_ch = (
-            backup_candidates[0]
-            if backup_candidates
-            else 0
-        )
+        proposed_backup = backup_candidates[0] if backup_candidates else 0
+
+        if old_backup == self.primary_ch or old_backup not in backup_candidates:
+            # Current backup is gone (promoted, failed, or no longer a
+            # candidate) — take the best available immediately.
+            self.backup_ch = proposed_backup
+            self.backup_challenger = 0
+            self.backup_challenger_wins = 0
+        elif proposed_backup and proposed_backup != old_backup:
+            # A different candidate now leads: only switch if it stays clearly
+            # ahead of the incumbent for consecutive_wins ticks.
+            clearly_better = (
+                score_details[proposed_backup]["score"]
+                > score_details[old_backup]["score"] + self.switch_margin
+            )
+            if clearly_better:
+                if self.backup_challenger == proposed_backup:
+                    self.backup_challenger_wins += 1
+                else:
+                    self.backup_challenger = proposed_backup
+                    self.backup_challenger_wins = 1
+            else:
+                self.backup_challenger = 0
+                self.backup_challenger_wins = 0
+
+            if self.backup_challenger_wins >= self.consecutive_wins:
+                self.backup_ch = proposed_backup
+                self.backup_challenger = 0
+                self.backup_challenger_wins = 0
+            else:
+                self.backup_ch = old_backup
+        else:
+            # Incumbent still leads (or ties) — keep it.
+            self.backup_ch = old_backup
+            self.backup_challenger = 0
+            self.backup_challenger_wins = 0
 
         changed = (
             self.primary_ch != old_primary

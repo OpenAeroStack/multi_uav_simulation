@@ -113,6 +113,16 @@ SWEEP_DIST   = 50.0   # m per leg
 HOLD_TIME    = 10.0   # s
 WP_RADIUS    =  4.0   # m arrival threshold
 
+# Link-loss handling for _fly_to(). The mission node lives in gcsns and only
+# hears a UAV through its drone_bridge, so when the ns-3 wireless link drops
+# (distance + building NLoS) that UAV's /uavN/gps simply stops updating. Rather
+# than silently burning the whole per-waypoint timeout on a frozen position:
+#   - telemetry older than STALE_TELEM_SEC  -> link considered lost
+#   - if we got within LINK_LOST_ARRIVAL_M before losing it, count it as reached
+#   - otherwise report the link loss explicitly and stop waiting
+STALE_TELEM_SEC     = 8.0    # s without a GPS update = link lost (rides out brief fades)
+LINK_LOST_ARRIVAL_M = 25.0   # m: "close enough" when the link drops en route
+
 # Extra UAVs copy the same turn pattern as their leader, but on a nearby
 # parallel lane so two aircraft at the same altitude do not converge on
 # exactly the same GPS waypoint.
@@ -132,6 +142,9 @@ class DroneState:
         self.mode    = '---'
         self.armed   = False
         self.gps_ok  = False
+        # time.monotonic() of the last telemetry update, for link-loss detection.
+        self.last_gps_t = 0.0
+        self.last_alt_t = 0.0
 
 
 # ── Mission node ──────────────────────────────────────────────────────────────
@@ -233,10 +246,13 @@ class CityMission(Node):
             s.lat    = msg.latitude
             s.lon    = msg.longitude
             s.gps_ok = (msg.latitude != 0.0 or msg.longitude != 0.0)
+            s.last_gps_t = time.monotonic()
         return cb
 
     def _make_alt_cb(self, uid):
-        def cb(msg): self.states[uid].rel_alt = msg.data
+        def cb(msg):
+            self.states[uid].rel_alt = msg.data
+            self.states[uid].last_alt_t = time.monotonic()
         return cb
 
     def _make_mode_cb(self, uid):
@@ -282,21 +298,39 @@ class CityMission(Node):
             f'  [UAV{uid}] -> {label} ({lat:.6f}, {lon:.6f}, {alt_m}m)')
         deadline  = time.time() + timeout
         last_send = 0
+        best_dist = float('inf')   # closest fresh approach seen so far
         while time.time() < deadline:
             if time.time() - last_send > 2.0:
                 self._goto(uid, lat, lon, alt_m)
                 last_send = time.time()
             s = self.states[uid]
-            if s.lat is not None:
+            telem_age = time.monotonic() - s.last_gps_t
+
+            if s.lat is not None and telem_age < STALE_TELEM_SEC:
                 dist    = haversine_m(s.lat, s.lon, lat, lon)
                 alt_err = abs(s.rel_alt - alt_m)
+                best_dist = min(best_dist, dist)
                 if dist < WP_RADIUS and alt_err < 3.0:
                     self.get_logger().info(
                         f'  [UAV{uid}] ✓ Reached {label} '
                         f'(dist={dist:.1f}m alt={s.rel_alt:.1f}m)')
                     return True
+            elif s.last_gps_t > 0.0:
+                # Telemetry has gone stale: the ns-3 link to this UAV dropped.
+                # Waiting out the full timeout on a frozen position is useless.
+                if best_dist <= LINK_LOST_ARRIVAL_M:
+                    self.get_logger().warn(
+                        f'  [UAV{uid}] Link lost near {label} '
+                        f'(best {best_dist:.0f}m, telemetry stale '
+                        f'{telem_age:.0f}s) — assuming reached')
+                    return True
+                self.get_logger().warn(
+                    f'  [UAV{uid}] LINK LOST en route to {label} '
+                    f'(best {best_dist:.0f}m, telemetry stale {telem_age:.0f}s)')
+                return False
             time.sleep(0.5)
-        self.get_logger().warn(f'  [UAV{uid}] Timeout reaching {label}')
+        self.get_logger().warn(
+            f'  [UAV{uid}] Timeout reaching {label} (best {best_dist:.0f}m)')
         return False
 
     def _publish_cluster_status(self):

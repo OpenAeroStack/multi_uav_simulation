@@ -575,7 +575,9 @@ static void CheckIntegration(NodeContainer nodes,
 //  to cover the GCS). Cheap, and invaluable when a link goes dead and you need
 //  to know whether it was geometry or the channel.
 // ─────────────────────────────────────────────────────────────────────────────
-static void LogNodePositions(NodeContainer nodes, double periodSec)
+static void LogNodePositions(NodeContainer nodes,
+                             Ptr<DynamicObstacleLossModel> obstacleLoss,
+                             double periodSec)
 {
   const double now = Simulator::Now().GetSeconds();
   std::ostringstream oss;
@@ -588,15 +590,37 @@ static void LogNodePositions(NodeContainer nodes, double periodSec)
       oss << (i == 0 ? "GCS" : "UAV" + std::to_string(i))
           << "=(" << p.x << ',' << p.y << ',' << p.z << ") ";
     }
+  // Per-link distance, annotated with the obstacle state Gazebo is feeding in
+  // (NLoS + smoothed shadowing dB) so a dead link reads as geometry vs channel
+  // at a glance.
+  std::ostringstream blocked;
   for (uint32_t i = 0; i < nodes.GetN(); ++i)
     for (uint32_t j = i + 1; j < nodes.GetN(); ++j)
       {
         Ptr<MobilityModel> a = nodes.Get(i)->GetObject<MobilityModel>();
         Ptr<MobilityModel> b = nodes.Get(j)->GetObject<MobilityModel>();
-        if (a && b) oss << " d" << i << j << '=' << a->GetDistanceFrom(b) << "m";
+        if (!a || !b) continue;
+        oss << " d" << i << j << '=' << a->GetDistanceFrom(b) << "m";
+
+        const auto info = obstacleLoss
+          ? obstacleLoss->GetLinkLossInfo(nodes.Get(i)->GetId(),
+                                          nodes.Get(j)->GetId())
+          : DynamicObstacleLossModel::LinkLossInfo{};
+        if (info.blocked || info.obstacleLossDb > 0.05)
+          {
+            oss << "(NLoS," << std::setprecision(1) << info.obstacleLossDb << "dB)";
+            blocked << ' ' << i << '-' << j << '('
+                    << info.obstacleLossDb << "dB"
+                    << (info.blocked ? ",BLOCKED" : "") << ')';
+          }
       }
   NS_LOG_UNCOND(oss.str());
-  Simulator::Schedule(Seconds(periodSec), &LogNodePositions, nodes, periodSec);
+  const std::string blockedStr = blocked.str();
+  NS_LOG_UNCOND("        obstacle:" << (blockedStr.empty()
+                                        ? std::string(" none (all links LoS)")
+                                        : blockedStr));
+  Simulator::Schedule(Seconds(periodSec), &LogNodePositions, nodes,
+                      obstacleLoss, periodSec);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1159,7 +1183,7 @@ int main(int argc, char* argv[])
 
   if (posLogPeriod > 0.0)
     Simulator::Schedule(Seconds(posLogPeriod), &LogNodePositions,
-                        nodes, posLogPeriod);
+                        nodes, obstacleLoss, posLogPeriod);
 
   // Retrying co-simulation sanity report. Gazebo is deliberately launched
   // after NS-3, so a temporary absence at t=10 s is expected.
