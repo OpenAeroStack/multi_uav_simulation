@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUN_USER="${SUDO_USER:-$USER}"
 
-SMALL_CITY_DIR="$HOME/simulation/small_city_gazebo_world"
+SMALL_CITY_DIR="$HOME/FYP/small_city_gazebo_world"
 
 if [[ ! -d "$SMALL_CITY_DIR" ]]; then
     echo "ERROR: Small city Gazebo directory not found: $SMALL_CITY_DIR" >&2
@@ -879,21 +879,21 @@ echo "=== Building ns-3 target: three_uav_tapbridge_integrated ==="
 # Build dynamic ns-3 TAP arguments
 ###############################################################################
 
-NS3_TAP_ARGS="--tap0=tap-gcs"
+NS3_GCS_TAP="tap-gcs"
+NS3_UAV_TAP_PREFIX="tap-uav"
 
-for ((uid=1; uid<=UAV_COUNT; uid++)); do
-    NS3_TAP_ARGS+=" --tap${uid}=tap-uav${uid}"
-done
-
-echo "Dynamic ns-3 TAP arguments:"
-echo "  $NS3_TAP_ARGS"
+echo "Dynamic ns-3 TAP configuration:"
+echo "  GCS TAP        : $NS3_GCS_TAP"
+echo "  UAV TAP prefix : $NS3_UAV_TAP_PREFIX"
+echo "  UAV count      : $UAV_COUNT"
 
 echo "=== Starting real-time ns-3 wireless simulation ==="
 (
     cd "$NS3_ROOT"
     exec ./ns3 run "three_uav_tapbridge_integrated \
         --numUavs=$UAV_COUNT \
-        $NS3_TAP_ARGS \
+        --gcsTap=$NS3_GCS_TAP \
+        --uavTapPrefix=$NS3_UAV_TAP_PREFIX \
         --simTime=0 \
         --txPowerDbm=35 --rxSensitivity=-82 --noiseFloor=-94 \
         --mLos=3.0 --mNlos=1.0 --emaAlpha=0.3 \
@@ -1152,7 +1152,7 @@ wait_for_gazebo_fdm_ports() {
 
 echo "=== Starting Gazebo in the root namespace ==="
 
-SMALL_CITY_DIR="$HOME/simulation/small_city_gazebo_world"
+SMALL_CITY_DIR="$HOME/FYP/small_city_gazebo_world"
 ###############################################################################
 # Generate Gazebo world for the selected fleet size
 ###############################################################################
@@ -1919,6 +1919,115 @@ wait_for_gazebo_fdm_ports 60
 # END GAZEBO FDM READINESS GATE
 
 ###############################################################################
+# AP_DDS GPS readiness helpers
+#
+# Defined before the SITL launch loop so each UAV's AP_DDS session can be
+# confirmed *before* the next SITL instance is started. AP_DDS_Client::create()
+# issues the participant request with a single 500 ms, no-retry timeout
+# (libraries/AP_DDS/AP_DDS_Client.cpp); if that reply is lost to ns-3 Wi-Fi
+# contention the AP_DDS task exits permanently and that UAV never publishes.
+# Bringing SITL up one at a time keeps the channel quiet during each handshake.
+###############################################################################
+
+# Seconds to let a freshly-connected AP_DDS client settle before starting the
+# next SITL instance (override with DDS_SETTLE_SEC=...).
+DDS_SETTLE_SEC="${DDS_SETTLE_SEC:-3}"
+
+run_ros_in_gcsns() {
+    sudo ip netns exec gcsns \
+        sudo -H -u "$RUN_USER" \
+        bash -lc '
+            set -e
+            set +u
+            source /opt/ros/humble/setup.bash
+            source "$1"
+            source "$2"
+            set -u
+            export ROS_DOMAIN_ID="$3"
+            export ROS2CLI_NO_DAEMON=1
+            shift 3
+            exec "$@"
+        ' ros-shell \
+        "$HOME/ardu_ws/install/setup.bash" \
+        "$PROJECT_DIR/ros2/install/setup.bash" \
+        "$ROS_DOMAIN_ID" "$@"
+}
+
+gps_message_is_valid() {
+    awk -F ': *' '
+        /^[[:space:]]*latitude:/  { lat=$2; gsub(/[[:space:]]/, "", lat) }
+        /^[[:space:]]*longitude:/ { lon=$2; gsub(/[[:space:]]/, "", lon) }
+        END {
+            number="^-?[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$"
+            if (lat !~ number || lon !~ number) exit 1
+            if (lat < -90 || lat > 90 || lon < -180 || lon > 180) exit 1
+            if ((lat + 0) == 0 && (lon + 0) == 0) exit 1
+            exit 0
+        }
+    '
+}
+
+show_dds_diagnostics() {
+    local uav_number="$1"
+    local topic="$2"
+    local sitl_log="/tmp/multi_uav_sitl/uav$uav_number/arducopter.log"
+    local agent_log="${AGENT_LOGS[$((uav_number - 1))]}"
+
+    echo "ERROR: DDS GPS readiness failed for UAV$uav_number ($topic)." >&2
+    echo "----- SITL log: $sitl_log -----" >&2
+    if [[ -r "$sitl_log" ]]; then
+        tail -n 80 "$sitl_log" >&2
+    else
+        echo "SITL log is absent or unreadable." >&2
+    fi
+    echo "----- micro_ros_agent log: $agent_log -----" >&2
+    if [[ -r "$agent_log" ]]; then
+        tail -n 80 "$agent_log" >&2
+    else
+        echo "micro_ros_agent log is absent or unreadable." >&2
+    fi
+    echo "----- gcsns UDP sockets -----" >&2
+    sudo ip netns exec gcsns ss -lunp >&2 || true
+    echo "----- gcsns routes -----" >&2
+    sudo ip netns exec gcsns ip route show >&2 || true
+    echo "----- gcsns interfaces -----" >&2
+    sudo ip netns exec gcsns ip -details -statistics address show >&2 || true
+    echo "--------------------------------" >&2
+}
+
+wait_for_dds_gps() {
+    local uav_number="$1"
+    local topic="/ap/v$uav_number/navsat"
+    local deadline=$((SECONDS + DDS_TOPIC_TIMEOUT_SEC))
+    local info message
+    local publisher_seen=false
+
+    echo "Waiting for an active publisher and valid GPS on $topic..."
+    while (( SECONDS < deadline )); do
+        if info="$(run_ros_in_gcsns ros2 topic info "$topic" 2>/dev/null)" &&
+           awk '/Publisher count:/ { found=1; ok=(($3 + 0) > 0) } END { exit !(found && ok) }' \
+               <<<"$info"; then
+            publisher_seen=true
+            if message="$(run_ros_in_gcsns timeout 3 ros2 topic echo \
+                "$topic" sensor_msgs/msg/NavSatFix --once 2>/dev/null)" &&
+               gps_message_is_valid <<<"$message"; then
+                echo "DDS GPS ready: $topic"
+                return 0
+            fi
+        fi
+        sleep 0.5
+    done
+
+    if [[ "$publisher_seen" == false ]]; then
+        echo "No active publisher appeared for $topic within ${DDS_TOPIC_TIMEOUT_SEC}s." >&2
+    else
+        echo "Publisher exists for $topic, but no valid GPS message arrived within ${DDS_TOPIC_TIMEOUT_SEC}s." >&2
+    fi
+    show_dds_diagnostics "$uav_number" "$topic"
+    return 1
+}
+
+###############################################################################
 # Dynamic SITL startup
 ###############################################################################
 
@@ -2069,11 +2178,22 @@ for row in "${FLEET_ROWS[@]}"; do
 
 
     ###########################################################################
-    # Start UAVs sequentially
+    # Bring SITL up one at a time.
+    #
+    # Confirm this UAV's AP_DDS session is fully established (navsat publishing)
+    # before starting the next SITL. AP_DDS_Client::create() sends the XRCE
+    # participant request with a single, no-retry 500 ms timeout, so a reply
+    # lost to Wi-Fi contention from other UAVs' concurrent handshakes makes the
+    # AP_DDS task exit for good. Serializing keeps the channel quiet per UAV.
     ###########################################################################
 
+    if ! wait_for_dds_gps "$uid"; then
+        echo "Aborting: UAV$uid AP_DDS GPS did not come up." >&2
+        exit 1
+    fi
+
     if (( uid < UAV_COUNT )); then
-        sleep 8
+        sleep "$DDS_SETTLE_SEC"
     fi
 
 done
@@ -2102,102 +2222,25 @@ done
 echo "============================================================"
 echo
 
-run_ros_in_gcsns() {
-    sudo ip netns exec gcsns \
-        sudo -H -u "$RUN_USER" \
-        bash -lc '
-            set -e
-            set +u
-            source /opt/ros/humble/setup.bash
-            source "$1"
-            source "$2"
-            set -u
-            export ROS_DOMAIN_ID="$3"
-            export ROS2CLI_NO_DAEMON=1
-            shift 3
-            exec "$@"
-        ' ros-shell \
-        "$HOME/ardu_ws/install/setup.bash" \
-        "$PROJECT_DIR/ros2/install/setup.bash" \
-        "$ROS_DOMAIN_ID" "$@"
-}
+echo "============================================================"
+echo "ALL $UAV_COUNT SITL INSTANCES ARE RUNNING"
+echo "============================================================"
 
-gps_message_is_valid() {
-    awk -F ': *' '
-        /^[[:space:]]*latitude:/  { lat=$2; gsub(/[[:space:]]/, "", lat) }
-        /^[[:space:]]*longitude:/ { lon=$2; gsub(/[[:space:]]/, "", lon) }
-        END {
-            number="^-?[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$"
-            if (lat !~ number || lon !~ number) exit 1
-            if (lat < -90 || lat > 90 || lon < -180 || lon > 180) exit 1
-            if ((lat + 0) == 0 && (lon + 0) == 0) exit 1
-            exit 0
-        }
-    '
-}
+# ------------------------------------------------------------
+# Start MAVLink drone bridges BEFORE checking AP_DDS
+# ------------------------------------------------------------
 
-show_dds_diagnostics() {
-    local uav_number="$1"
-    local topic="$2"
-    local sitl_log="/tmp/multi_uav_sitl/uav$uav_number/arducopter.log"
-    local agent_log="${AGENT_LOGS[$((uav_number - 1))]}"
+# <YOUR EXISTING DYNAMIC DRONE BRIDGE STARTUP BLOCK GOES HERE>
 
-    echo "ERROR: DDS GPS readiness failed for UAV$uav_number ($topic)." >&2
-    echo "----- SITL log: $sitl_log -----" >&2
-    if [[ -r "$sitl_log" ]]; then
-        tail -n 80 "$sitl_log" >&2
-    else
-        echo "SITL log is absent or unreadable." >&2
-    fi
-    echo "----- micro_ros_agent log: $agent_log -----" >&2
-    if [[ -r "$agent_log" ]]; then
-        tail -n 80 "$agent_log" >&2
-    else
-        echo "micro_ros_agent log is absent or unreadable." >&2
-    fi
-    echo "----- gcsns UDP sockets -----" >&2
-    sudo ip netns exec gcsns ss -lunp >&2 || true
-    echo "----- gcsns routes -----" >&2
-    sudo ip netns exec gcsns ip route show >&2 || true
-    echo "----- gcsns interfaces -----" >&2
-    sudo ip netns exec gcsns ip -details -statistics address show >&2 || true
-    echo "--------------------------------" >&2
-}
+sleep 2
 
-wait_for_dds_gps() {
-    local uav_number="$1"
-    local topic="/ap/v$uav_number/navsat"
-    local deadline=$((SECONDS + DDS_TOPIC_TIMEOUT_SEC))
-    local info message
-    local publisher_seen=false
-
-    echo "Waiting for an active publisher and valid GPS on $topic..."
-    while (( SECONDS < deadline )); do
-        if info="$(run_ros_in_gcsns ros2 topic info "$topic" 2>/dev/null)" &&
-           awk '/Publisher count:/ { found=1; ok=(($3 + 0) > 0) } END { exit !(found && ok) }' \
-               <<<"$info"; then
-            publisher_seen=true
-            if message="$(run_ros_in_gcsns timeout 3 ros2 topic echo \
-                "$topic" sensor_msgs/msg/NavSatFix --once 2>/dev/null)" &&
-               gps_message_is_valid <<<"$message"; then
-                echo "DDS GPS ready: $topic"
-                return 0
-            fi
-        fi
-        sleep 0.5
-    done
-
-    if [[ "$publisher_seen" == false ]]; then
-        echo "No active publisher appeared for $topic within ${DDS_TOPIC_TIMEOUT_SEC}s." >&2
-    else
-        echo "Publisher exists for $topic, but no valid GPS message arrived within ${DDS_TOPIC_TIMEOUT_SEC}s." >&2
-    fi
-    show_dds_diagnostics "$uav_number" "$topic"
-    return 1
-}
+# ------------------------------------------------------------
+# Now verify AP_DDS
+# ------------------------------------------------------------
 
 echo "=== Verifying namespaced AP_DDS GPS telemetry ==="
-for uav_number in 1 2 3; do
+
+for ((uav_number=1; uav_number<=UAV_COUNT; uav_number++)); do
     if ! wait_for_dds_gps "$uav_number"; then
         echo "Aborting before city_mission because UAV$uav_number DDS GPS is not ready." >&2
         exit 1

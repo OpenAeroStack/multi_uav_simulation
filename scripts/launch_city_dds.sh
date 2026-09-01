@@ -35,7 +35,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUN_USER="${SUDO_USER:-$USER}"
 
-SMALL_CITY_DIR="$HOME/simulation/small_city_gazebo_world"
+SMALL_CITY_DIR="$HOME/FYP/small_city_gazebo_world"
 
 if [[ ! -d "$SMALL_CITY_DIR" ]]; then
     echo "ERROR: Small city Gazebo directory not found: $SMALL_CITY_DIR" >&2
@@ -894,7 +894,7 @@ configure_gazebo_gpu
 
 echo "=== Starting Gazebo in the root namespace ==="
 
-SMALL_CITY_DIR="$HOME/simulation/small_city_gazebo_world"
+SMALL_CITY_DIR="$HOME/FYP/small_city_gazebo_world"
 WORLD_PATH="$PROJECT_DIR/worlds/city_3uav.world"
 
 if [[ ! -d "$SMALL_CITY_DIR" ]]; then

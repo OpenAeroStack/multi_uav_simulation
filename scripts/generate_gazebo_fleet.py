@@ -107,6 +107,19 @@ def spawn_for(cfg: dict, uid: int) -> list[float]:
     return fallback_spawn(cfg, uid)
 
 
+def sim_ip_prefix(cfg: dict, uid: int) -> str:
+    """
+    Return the first three octets (with trailing dot) of the Gazebo/SITL
+    simulation-network address for ``uid`` e.g. "172.31.4.".
+
+    This is the address family the ArduPilot Gazebo plugin must listen on so
+    that a SITL instance running inside network namespace ``uavN`` can reach it.
+    """
+    template = cfg["network"]["sim_ip_template"]
+    addr = template.format(id=uid)
+    return addr.rsplit(".", 1)[0] + "."
+
+
 def patch_text_file(
     path: Path,
     uid: int,
@@ -114,6 +127,8 @@ def patch_text_file(
     source_sitl_port: int,
     target_gazebo_port: int,
     target_sitl_port: int,
+    source_sim_prefix: str = "",
+    target_sim_prefix: str = "",
 ) -> tuple[int, int]:
     try:
         original = path.read_text(encoding="utf-8")
@@ -124,6 +139,16 @@ def patch_text_file(
 
     # Rename any explicit template model references.
     updated = updated.replace("iris_1", f"iris_{uid}")
+
+    # Per-UAV camera sensor name and ROS namespace in the template
+    # ("iris1_camera", "<namespace>/uav1</namespace>").
+    updated = updated.replace("iris1_camera", f"iris{uid}_camera")
+    updated = updated.replace("/uav1<", f"/uav{uid}<")
+
+    # Remap the Gazebo/SITL simulation-network address so the ArduPilot
+    # plugin listens on the namespace-reachable interface (172.31.<uid>.x).
+    if source_sim_prefix and target_sim_prefix:
+        updated = updated.replace(source_sim_prefix, target_sim_prefix)
 
     gazebo_count = updated.count(str(source_gazebo_port))
     sitl_count = updated.count(str(source_sitl_port))
@@ -151,9 +176,30 @@ def ensure_model(
 ) -> None:
     target = project_models_dir / f"iris_{uid}"
 
-    # Preserve the already-tested UAV1..UAV3 model directories.
-    if target.exists() and not force:
+    if uid == 1:
         return
+
+    target_sim_prefix = sim_ip_prefix(cfg, uid)
+    source_sim_prefix = sim_ip_prefix(cfg, 1)
+
+    # Preserve an existing model directory only when it already carries the
+    # namespace-reachable FDM listen address (172.31.<uid>.1). A stale model
+    # that points the ArduPilot plugin at 127.0.0.1 is unreachable from the
+    # SITL instance inside network namespace uav<uid>, so it must be rebuilt.
+    if target.exists() and not force:
+        sdf = target / "model.sdf"
+        try:
+            sdf_text = sdf.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            sdf_text = ""
+
+        if f"<listen_addr>{target_sim_prefix}1</listen_addr>" in sdf_text:
+            return
+
+        print(
+            f"[gazebo-model] iris_{uid}: existing model does not listen on "
+            f"{target_sim_prefix}1 (namespace-unreachable); regenerating."
+        )
 
     template = project_models_dir / "iris_1"
 
@@ -161,9 +207,6 @@ def ensure_model(
         raise FileNotFoundError(
             f"Template Gazebo model does not exist: {template}"
         )
-
-    if uid == 1:
-        return
 
     if target.exists():
         shutil.rmtree(target)
@@ -187,6 +230,8 @@ def ensure_model(
             source_sitl_port,
             target_gazebo_port,
             target_sitl_port,
+            source_sim_prefix,
+            target_sim_prefix,
         )
 
         total_gazebo_replacements += g_count

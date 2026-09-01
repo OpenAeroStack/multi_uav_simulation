@@ -27,7 +27,7 @@ pip3 install dash plotly
 Run after the integrated launcher is active:
 
 source /opt/ros/humble/setup.bash
-source ~/simulation/multi_uav_simulation/ros2/install/setup.bash
+source ~/FYP/multi_uav_simulation/ros2/install/setup.bash
 export ROS_DOMAIN_ID=0
 export ROS2CLI_NO_DAEMON=1
 

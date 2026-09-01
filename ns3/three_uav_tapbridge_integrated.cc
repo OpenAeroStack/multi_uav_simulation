@@ -253,27 +253,47 @@ public:
   : rclcpp::Node("ns3_bridge_node"),
     m_nNodes(nNodes)
   {
+    // Position data subscription
     m_posSub = this->create_subscription<std_msgs::msg::Float32MultiArray>(
-      "/uav_world_positions", 10,
+      "/uav_world_positions",
+      10,
       std::bind(&Ns3RosNode::OnPositions, this, std::placeholders::_1));
 
-    m_obsSub = this->create_subscription<std_msgs::msg::Float32MultiArray>(
-      "/link_obstacle_loss", 10,
-      std::bind(&Ns3RosNode::OnObstacleLoss, this, std::placeholders::_1));
+    // Obstacle loss uses BEST_EFFORT QoS to match Gazebo plugin
+    auto obstacle_qos =
+      rclcpp::QoS(rclcpp::KeepLast(10)).best_effort();
 
-    m_rssiPub = this->create_publisher<std_msgs::msg::Float32MultiArray>(
-      "/ns3_link_rssi", 10);
-    m_snrPub  = this->create_publisher<std_msgs::msg::Float32MultiArray>(
-      "/ns3_link_snr", 10);
+    m_obsSub = this->create_subscription<std_msgs::msg::Float32MultiArray>(
+      "/link_obstacle_loss",
+      obstacle_qos,
+      std::bind(
+        &Ns3RosNode::OnObstacleLoss,
+        this,
+        std::placeholders::_1));
+
+    m_rssiPub =
+      this->create_publisher<std_msgs::msg::Float32MultiArray>(
+        "/ns3_link_rssi",
+        10);
+
+    m_snrPub =
+      this->create_publisher<std_msgs::msg::Float32MultiArray>(
+        "/ns3_link_snr",
+        10);
+  }
+  void PublishRssi(const std::vector<float>& data)
+  {
+    std_msgs::msg::Float32MultiArray msg;
+    msg.data = data;
+    m_rssiPub->publish(msg);
   }
 
-  // Called from the NS-3 main thread. Safe: rclcpp publishers are thread-safe.
-  void PublishRssi(const std::vector<float> & d)
-  { std_msgs::msg::Float32MultiArray m; m.data = d; m_rssiPub->publish(m); }
-
-  void PublishSnr(const std::vector<float> & d)
-  { std_msgs::msg::Float32MultiArray m; m.data = d; m_snrPub->publish(m); }
-
+  void PublishSnr(const std::vector<float>& data)
+  {
+    std_msgs::msg::Float32MultiArray msg;
+    msg.data = data;
+    m_snrPub->publish(msg);
+  }
 private:
   // [id, x, y, z, ...] with id = NS-3 node id: 0 = GCS, 1..N = UAV1..UAVN.
   // The GCS arrives on this topic exactly like the UAVs -- world_pos_publisher
