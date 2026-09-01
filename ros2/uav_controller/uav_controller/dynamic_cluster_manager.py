@@ -17,6 +17,8 @@ from rclpy.qos import (
 )
 from std_msgs.msg import Float32MultiArray, Int32, String
 
+from uav_controller.cluster_relay_routes import RelayRouteManager
+
 
 LinkKey = Tuple[int, int]
 Vector3 = Tuple[float, float, float]
@@ -60,6 +62,21 @@ class DynamicClusterManager(Node):
         self.declare_parameter("weight_neighbors", 0.30)
         self.declare_parameter("weight_mobility", 0.20)
         self.declare_parameter("weight_obstacle", 0.10)
+
+        # Two-hop relay through the cluster head. A member whose direct GCS
+        # link is dead keeps talking to the GCS via the head instead of going
+        # silent. See cluster_relay_routes.py for why this is Linux routing
+        # and not an ns-3 routing protocol.
+        self.declare_parameter("relay_enabled", True)
+        self.declare_parameter("relay_enter_snr_db", 5.0)
+        self.declare_parameter("relay_exit_snr_db", 10.0)
+        self.declare_parameter("relay_min_hop_snr_db", 5.0)
+        self.declare_parameter("relay_consecutive", 3)
+        self.declare_parameter("relay_gcs_netns", "gcsns")
+        self.declare_parameter("relay_uav_netns_prefix", "uav")
+        self.declare_parameter("relay_subnet_prefix", "10.42.0.")
+        self.declare_parameter("relay_gcs_host", 10)
+        self.declare_parameter("relay_iface", "wifi0")
 
         self.num_uavs = int(self.get_parameter("num_uavs").value)
 
@@ -222,6 +239,37 @@ class DynamicClusterManager(Node):
             Int32,
             "/cluster/backup_ch",
             state_qos,
+        )
+
+        self.relay_publisher = self.create_publisher(
+            String,
+            "/cluster/relay",
+            state_qos,
+        )
+
+        self.relay = RelayRouteManager(
+            self.get_logger(),
+            self.num_uavs,
+            enabled=bool(self.get_parameter("relay_enabled").value),
+            gcs_netns=str(self.get_parameter("relay_gcs_netns").value),
+            uav_netns_prefix=str(
+                self.get_parameter("relay_uav_netns_prefix").value
+            ),
+            subnet_prefix=str(
+                self.get_parameter("relay_subnet_prefix").value
+            ),
+            gcs_host=int(self.get_parameter("relay_gcs_host").value),
+            iface=str(self.get_parameter("relay_iface").value),
+            enter_snr_db=float(
+                self.get_parameter("relay_enter_snr_db").value
+            ),
+            exit_snr_db=float(
+                self.get_parameter("relay_exit_snr_db").value
+            ),
+            min_hop_snr_db=float(
+                self.get_parameter("relay_min_hop_snr_db").value
+            ),
+            consecutive=int(self.get_parameter("relay_consecutive").value),
         )
 
         self.create_timer(
@@ -860,6 +908,51 @@ class DynamicClusterManager(Node):
             old_backup,
         )
 
+        self.update_relay_routes(score_details)
+
+    def update_relay_routes(
+        self,
+        score_details: Dict[int, Dict[str, float]],
+    ) -> None:
+        """
+        Re-evaluate which members must reach the GCS through the cluster head.
+
+        The election already computed every member's direct GCS SNR; the hop
+        to the head comes straight off the same ns-3 link table.
+        """
+        direct_snr = {
+            uav_id: details["gcs_snr_db"]
+            for uav_id, details in score_details.items()
+        }
+
+        hop_snr = {
+            uav_id: self.get_link(self.snr, self.primary_ch, uav_id, -100.0)
+            for uav_id in score_details
+            if uav_id != self.primary_ch
+        }
+
+        changes = self.relay.update(self.primary_ch, direct_snr, hop_snr)
+
+        if not changes:
+            return
+
+        for change in changes:
+            self.get_logger().info(f"Relay: {change}")
+
+        message = String()
+        message.data = json.dumps(
+            {
+                "epoch": self.cluster_epoch,
+                "primary_ch": self.primary_ch,
+                "relayed": {
+                    str(member): head
+                    for member, head in sorted(self.relay.relayed.items())
+                },
+                "changes": changes,
+            }
+        )
+        self.relay_publisher.publish(message)
+
 
 def main(args: Optional[List[str]] = None) -> None:
     rclpy.init(args=args)
@@ -870,6 +963,9 @@ def main(args: Optional[List[str]] = None) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        # Leave the routing tables the way we found them, so a killed run does
+        # not strand /32 relay routes in the namespaces.
+        node.relay.shutdown()
         node.destroy_node()
 
         if rclpy.ok():

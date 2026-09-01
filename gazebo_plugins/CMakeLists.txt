@@ -8,6 +8,11 @@ find_package(geometry_msgs REQUIRED)
 find_package(gazebo_dev REQUIRED)
 find_package(gazebo_ros REQUIRED)
 
+# gzclient draws the per-link ray markers via the ignition-transport /marker
+# service, so the plugin needs ignition msgs/transport directly.
+find_package(ignition-msgs5 REQUIRED)
+find_package(ignition-transport8 REQUIRED)
+
 add_library(obstacle_raycast_plugin SHARED
   src/obstacle_raycast_plugin.cc)
 
@@ -16,7 +21,9 @@ target_include_directories(obstacle_raycast_plugin PUBLIC
   ${GAZEBO_INCLUDE_DIRS})
 
 target_link_libraries(obstacle_raycast_plugin
-  ${GAZEBO_LIBRARIES})
+  ${GAZEBO_LIBRARIES}
+  ignition-msgs5::ignition-msgs5
+  ignition-transport8::ignition-transport8)
 
 ament_target_dependencies(obstacle_raycast_plugin
   rclcpp

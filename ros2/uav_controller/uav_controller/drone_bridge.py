@@ -41,6 +41,16 @@ AP_DDS_QOS = QoSProfile(
     durability=DurabilityPolicy.VOLATILE,
 )
 
+# AP_DDS talks to the micro_ros_agent over best-effort UDP across the ns-3
+# link, and its liveness policy is brutal: 3 missed 500 ms pings tear the XRCE
+# session down, and the re-`create()` burst that follows often stalls partway
+# (see /tmp/micro_ros_agent_uav*.log). When that happens /ap/vN/navsat stops
+# forever and every mission node that keys off /uavN/gps freezes on a stale
+# position. MAVLink runs over TCP on the same link and keeps flowing, and
+# GLOBAL_POSITION_INT already carries lat/lon — so fall back to it whenever the
+# DDS fix goes stale. DDS stays the primary source when it is healthy.
+DDS_GPS_STALE_SEC = 2.0
+
 
 class DroneBridge(Node):
 
@@ -71,6 +81,9 @@ class DroneBridge(Node):
         self.gps_ok  = False
         self.armed   = False
         self.mode    = 'UNKNOWN'
+        # time.monotonic() of the last DDS navsat fix, for the MAVLink fallback
+        self._last_dds_gps_t = 0.0
+        self._mav_gps_fallback = False
 
         # ── MAVLink connection ────────────────────────────────────────────────
         self.get_logger().info(
@@ -143,6 +156,12 @@ class DroneBridge(Node):
         self.lon     = msg.longitude
         self.alt_msl = msg.altitude
         self.gps_ok  = (msg.latitude != 0.0 or msg.longitude != 0.0)
+        self._last_dds_gps_t = time.monotonic()
+        if self._mav_gps_fallback:
+            self._mav_gps_fallback = False
+            self.get_logger().info(
+                f'[UAV{self.uav_id}] DDS navsat recovered — '
+                f'/uav{self.uav_id}/gps back on AP_DDS')
         self.pub_gps.publish(msg)
 
     def _cb_battery(self, msg):
@@ -175,6 +194,34 @@ class DroneBridge(Node):
             0, 0, 0,
             0, 0)
 
+    # ── MAVLink GPS fallback ──────────────────────────────────────────────────
+
+    def _publish_gps_fallback(self, msg):
+        """Republish GLOBAL_POSITION_INT as /uavN/gps while DDS navsat is dead."""
+        if time.monotonic() - self._last_dds_gps_t < DDS_GPS_STALE_SEC:
+            return
+        if msg.lat == 0 and msg.lon == 0:
+            return
+
+        fix = NavSatFix()
+        fix.header.stamp    = self.get_clock().now().to_msg()
+        fix.header.frame_id = 'base_link'
+        fix.latitude  = msg.lat / 1e7
+        fix.longitude = msg.lon / 1e7
+        fix.altitude  = msg.alt / 1000.0          # mm MSL → m MSL
+        self.lat     = fix.latitude
+        self.lon     = fix.longitude
+        self.alt_msl = fix.altitude
+        self.gps_ok  = True
+        self.pub_gps.publish(fix)
+
+        if not self._mav_gps_fallback:
+            self._mav_gps_fallback = True
+            self.get_logger().warn(
+                f'[UAV{self.uav_id}] DDS navsat stale — '
+                f'/uav{self.uav_id}/gps falling back to MAVLink '
+                f'GLOBAL_POSITION_INT')
+
     # ── MAVLink heartbeat loop ────────────────────────────────────────────────
 
     def _mav_loop(self):
@@ -189,6 +236,7 @@ class DroneBridge(Node):
                 alt_msg = Float32()
                 alt_msg.data = float(self.rel_alt)
                 self.pub_rel_alt.publish(alt_msg)
+                self._publish_gps_fallback(msg)
                 continue
             # HEARTBEAT
             self.armed = bool(

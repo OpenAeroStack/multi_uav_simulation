@@ -4,6 +4,10 @@
 #include <gazebo/physics/RayShape.hh>
 #include <gazebo_ros/node.hpp>
 
+#include <ignition/msgs/marker.pb.h>
+#include <ignition/msgs/Utility.hh>
+#include <ignition/transport/Node.hh>
+
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
 
@@ -27,7 +31,17 @@ class ObstacleRaycastPlugin : public gazebo::WorldPlugin
 {
 public:
   ObstacleRaycastPlugin() = default;
-  ~ObstacleRaycastPlugin() override = default;
+  ~ObstacleRaycastPlugin() override
+  {
+    if (drew_any_marker_)
+    {
+      // Leave no orphaned lines floating in gzclient after a world reload.
+      ignition::msgs::Marker clear;
+      clear.set_ns(kMarkerNamespace);
+      clear.set_action(ignition::msgs::Marker::DELETE_ALL);
+      ign_node_.Request("/marker", clear);
+    }
+  }
 
   void Load(gazebo::physics::WorldPtr world, sdf::ElementPtr sdf) override
   {
@@ -55,6 +69,39 @@ public:
 
     update_rate_hz_ = GetSdf<double>(sdf, "update_rate_hz", 10.0);
     model_refresh_rate_hz_ = GetSdf<double>(sdf, "model_refresh_rate_hz", 1.0);
+
+    // Per-link ray markers drawn in gzclient: green = clear line of sight,
+    // red = at least one obstacle between the two radios. Requesting a marker
+    // is a service round-trip per link, so this is throttled well below the
+    // raycast rate.
+    draw_markers_ = GetSdf<bool>(sdf, "draw_markers", true);
+    marker_rate_hz_ = GetSdf<double>(sdf, "marker_rate_hz", 4.0);
+    if (marker_rate_hz_ <= 0.0)
+    {
+      marker_rate_hz_ = 4.0;
+    }
+
+    // Line style encodes WHICH link; colour encodes its STATE. GCS<->UAV links
+    // draw solid, UAV<->UAV links dashed, so the ground link is readable at a
+    // glance in a cluttered city view.
+    dash_length_m_ = GetSdf<double>(sdf, "dash_length_m", 6.0);
+    dash_gap_m_ = GetSdf<double>(sdf, "dash_gap_m", 4.0);
+    max_dashes_ = GetSdf<uint32_t>(sdf, "max_dashes", 128u);
+
+    if (dash_length_m_ <= 0.0)
+    {
+      dash_length_m_ = 6.0;
+    }
+
+    if (dash_gap_m_ < 0.0)
+    {
+      dash_gap_m_ = 4.0;
+    }
+
+    if (max_dashes_ == 0)
+    {
+      max_dashes_ = 128;
+    }
 
     default_obstacle_loss_db_ =
       GetSdf<double>(sdf, "default_obstacle_loss_db", 8.0);
@@ -130,12 +177,14 @@ public:
     RCLCPP_INFO(
       ros_node_->get_logger(),
       "Obstacle raycast plugin loaded: n_uavs=%u (%s), prefix='%s', "
-      "GCS=%s, publish=%.2f Hz",
+      "GCS=%s, publish=%.2f Hz, markers=%s @ %.2f Hz",
       configured_n_uavs_,
       configured_n_uavs_ == 0 ? "auto-discovery" : "explicit",
       uav_prefix_.c_str(),
       gcs_enabled_ ? "enabled" : "disabled",
-      update_rate_hz_);
+      update_rate_hz_,
+      draw_markers_ ? "on" : "off",
+      marker_rate_hz_);
   }
 
 private:
@@ -250,7 +299,17 @@ private:
       return;
     }
 
-    PublishAllLinks();
+    const double marker_period = 1.0 / marker_rate_hz_;
+    const bool draw_now =
+      draw_markers_ &&
+      (last_marker_s_ < 0.0 || now - last_marker_s_ >= marker_period);
+
+    if (draw_now)
+    {
+      last_marker_s_ = now;
+    }
+
+    PublishAllLinks(draw_now);
   }
 
   void RefreshNodes(bool force_log)
@@ -427,7 +486,7 @@ private:
     return p;
   }
 
-  void PublishAllLinks()
+  void PublishAllLinks(bool draw_markers)
   {
     std_msgs::msg::Float32MultiArray msg;
 
@@ -444,10 +503,131 @@ private:
         msg.data.push_back(static_cast<float>(nodes_[a].id));
         msg.data.push_back(static_cast<float>(nodes_[b].id));
         msg.data.push_back(static_cast<float>(loss_db));
+
+        if (draw_markers)
+        {
+          PublishRayMarker(nodes_[a], nodes_[b], loss_db > 0.0);
+        }
       }
     }
 
     publisher_->publish(msg);
+  }
+
+  // Fills a LINE_LIST marker with dash segments along start->end. Each dash is
+  // one point pair; the gaps are simply the pairs we never emit.
+  void AppendDashedSegments(
+    ignition::msgs::Marker & marker,
+    const ignition::math::Vector3d & start,
+    const ignition::math::Vector3d & end) const
+  {
+    const ignition::math::Vector3d delta = end - start;
+    const double length = delta.Length();
+    const double period = dash_length_m_ + dash_gap_m_;
+
+    // Only fall back to solid when the link cannot fit even one whole dash.
+    // Using the full dash+gap period here made every link between parked
+    // drones render solid, which is exactly when you want to tell the
+    // inter-UAV links apart from the GCS ones.
+    if (length <= 1e-6 || length <= dash_length_m_)
+    {
+      ignition::msgs::Set(marker.add_point(), start);
+      ignition::msgs::Set(marker.add_point(), end);
+      return;
+    }
+
+    const ignition::math::Vector3d direction = delta / length;
+
+    // Long links across the city would otherwise generate hundreds of dashes
+    // per marker, several times a second. Stretch the pattern instead.
+    double dash = dash_length_m_;
+    double stride = period;
+
+    const double needed = std::ceil(length / period);
+    if (needed > static_cast<double>(max_dashes_))
+    {
+      const double scale = needed / static_cast<double>(max_dashes_);
+      dash *= scale;
+      stride *= scale;
+    }
+
+    for (double offset = 0.0; offset < length; offset += stride)
+    {
+      const double dash_end = std::min(offset + dash, length);
+
+      ignition::msgs::Set(
+        marker.add_point(), start + direction * offset);
+      ignition::msgs::Set(
+        marker.add_point(), start + direction * dash_end);
+    }
+  }
+
+  // Draws one link as a line in gzclient. The marker id is derived from the
+  // node id pair so a link keeps the same marker across updates instead of
+  // accumulating a new line every frame.
+  void PublishRayMarker(
+    const NodeEndpoint & source,
+    const NodeEndpoint & target,
+    bool blocked)
+  {
+    const ignition::math::Vector3d start = EndpointPosition(source);
+    const ignition::math::Vector3d end = EndpointPosition(target);
+
+    ignition::msgs::Marker marker;
+    marker.set_ns(kMarkerNamespace);
+    marker.set_id(static_cast<uint64_t>(source.id) * 1000u + target.id);
+    marker.set_action(ignition::msgs::Marker::ADD_MODIFY);
+    marker.set_type(ignition::msgs::Marker::LINE_LIST);
+    marker.set_visibility(ignition::msgs::Marker::GUI);
+
+    // Outlive one marker period so a dropped request blinks the line out
+    // rather than leaving a stale one frozen in place.
+    marker.mutable_lifetime()->set_sec(0);
+    marker.mutable_lifetime()->set_nsec(
+      static_cast<int32_t>((2.0 / marker_rate_hz_) * 1e9));
+
+    // Marker poses are absolute here, so keep the marker frame at the origin
+    // and give both endpoints in world coordinates.
+    ignition::msgs::Set(
+      marker.mutable_pose(),
+      ignition::math::Pose3d(0, 0, 0, 0, 0, 0));
+
+    // LINE_LIST treats every consecutive PAIR of points as its own segment,
+    // which is what makes a dashed line possible at all: one segment per dash.
+    // A GCS link stays a single solid segment.
+    const bool inter_uav = (source.id != 0 && target.id != 0);
+
+    if (inter_uav)
+    {
+      AppendDashedSegments(marker, start, end);
+    }
+    else
+    {
+      ignition::msgs::Set(marker.add_point(), start);
+      ignition::msgs::Set(marker.add_point(), end);
+    }
+
+    auto * material = marker.mutable_material();
+    const float r = blocked ? 1.0f : 0.1f;
+    const float g = blocked ? 0.1f : 1.0f;
+
+    material->mutable_ambient()->set_r(r);
+    material->mutable_ambient()->set_g(g);
+    material->mutable_ambient()->set_b(0.1f);
+    material->mutable_ambient()->set_a(1.0f);
+    material->mutable_diffuse()->set_r(r);
+    material->mutable_diffuse()->set_g(g);
+    material->mutable_diffuse()->set_b(0.1f);
+    material->mutable_diffuse()->set_a(1.0f);
+    material->mutable_emissive()->set_r(r);
+    material->mutable_emissive()->set_g(g);
+    material->mutable_emissive()->set_b(0.1f);
+    material->mutable_emissive()->set_a(1.0f);
+
+    // Fire and forget: gzclient may not be running (headless runs), and the
+    // raycast loop must never block on the GUI.
+    ign_node_.Request("/marker", marker);
+    drew_any_marker_ = true;
   }
 
   double CalculateObstacleLoss(
@@ -618,6 +798,8 @@ private:
   }
 
 private:
+  static constexpr const char * kMarkerNamespace = "obstacle_raycast";
+
   gazebo::physics::WorldPtr world_;
   gazebo::physics::RayShapePtr ray_;
   gazebo::event::ConnectionPtr update_connection_;
@@ -651,6 +833,16 @@ private:
 
   double last_publish_s_{-1.0};
   double last_model_refresh_s_{-1.0};
+
+  // gzclient's MarkerManager listens on the ignition-transport /marker service.
+  ignition::transport::Node ign_node_;
+  bool draw_markers_{true};
+  double marker_rate_hz_{4.0};
+  double dash_length_m_{6.0};
+  double dash_gap_m_{4.0};
+  uint32_t max_dashes_{128};
+  double last_marker_s_{-1.0};
+  bool drew_any_marker_{false};
 };
 
 GZ_REGISTER_WORLD_PLUGIN(ObstacleRaycastPlugin)

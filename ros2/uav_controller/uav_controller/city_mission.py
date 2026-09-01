@@ -119,9 +119,19 @@ WP_RADIUS    =  4.0   # m arrival threshold
 # than silently burning the whole per-waypoint timeout on a frozen position:
 #   - telemetry older than STALE_TELEM_SEC  -> link considered lost
 #   - if we got within LINK_LOST_ARRIVAL_M before losing it, count it as reached
-#   - otherwise report the link loss explicitly and stop waiting
+#   - otherwise keep commanding the waypoint and wait LINK_LOST_GRACE_SEC for the
+#     link to come back before giving up. Bailing out the instant telemetry goes
+#     stale made a single dropped AP_DDS session skip every remaining waypoint.
 STALE_TELEM_SEC     = 8.0    # s without a GPS update = link lost (rides out brief fades)
 LINK_LOST_ARRIVAL_M = 25.0   # m: "close enough" when the link drops en route
+LINK_LOST_GRACE_SEC = 60.0   # s to keep flying blind before abandoning a waypoint
+
+# RTL is asynchronous: the service returns as soon as the mode switch is
+# accepted, long before the aircraft is home. Declaring the mission complete
+# there let the launcher tear the whole simulation down mid-flight, so nothing
+# ever reached the start point. Wait for the descent instead.
+RTL_LAND_TIMEOUT   = 240.0   # s to allow for the whole return + descent
+LANDED_ALT_M       =   1.0   # m relative altitude that counts as down
 
 # Extra UAVs copy the same turn pattern as their leader, but on a nearby
 # parallel lane so two aircraft at the same altitude do not converge on
@@ -299,6 +309,8 @@ class CityMission(Node):
         deadline  = time.time() + timeout
         last_send = 0
         best_dist = float('inf')   # closest fresh approach seen so far
+        lost_since   = None        # time.time() when telemetry first went stale
+        lost_logged  = False
         while time.time() < deadline:
             if time.time() - last_send > 2.0:
                 self._goto(uid, lat, lon, alt_m)
@@ -307,6 +319,11 @@ class CityMission(Node):
             telem_age = time.monotonic() - s.last_gps_t
 
             if s.lat is not None and telem_age < STALE_TELEM_SEC:
+                if lost_logged:
+                    self.get_logger().info(
+                        f'  [UAV{uid}] Link recovered en route to {label}')
+                lost_since  = None
+                lost_logged = False
                 dist    = haversine_m(s.lat, s.lon, lat, lon)
                 alt_err = abs(s.rel_alt - alt_m)
                 best_dist = min(best_dist, dist)
@@ -316,21 +333,64 @@ class CityMission(Node):
                         f'(dist={dist:.1f}m alt={s.rel_alt:.1f}m)')
                     return True
             elif s.last_gps_t > 0.0:
-                # Telemetry has gone stale: the ns-3 link to this UAV dropped.
-                # Waiting out the full timeout on a frozen position is useless.
+                # Telemetry has gone stale: the link to this UAV dropped, or
+                # AP_DDS tore its XRCE session down. The aircraft is still
+                # flying the commanded waypoint, so keep sending it and give the
+                # link LINK_LOST_GRACE_SEC to come back before writing it off.
                 if best_dist <= LINK_LOST_ARRIVAL_M:
                     self.get_logger().warn(
                         f'  [UAV{uid}] Link lost near {label} '
                         f'(best {best_dist:.0f}m, telemetry stale '
                         f'{telem_age:.0f}s) — assuming reached')
                     return True
-                self.get_logger().warn(
-                    f'  [UAV{uid}] LINK LOST en route to {label} '
-                    f'(best {best_dist:.0f}m, telemetry stale {telem_age:.0f}s)')
-                return False
+                if lost_since is None:
+                    lost_since = time.time()
+                if not lost_logged:
+                    lost_logged = True
+                    self.get_logger().warn(
+                        f'  [UAV{uid}] LINK LOST en route to {label} '
+                        f'(best {best_dist:.0f}m, telemetry stale '
+                        f'{telem_age:.0f}s) — holding course up to '
+                        f'{LINK_LOST_GRACE_SEC:.0f}s')
+                if time.time() - lost_since > LINK_LOST_GRACE_SEC:
+                    self.get_logger().warn(
+                        f'  [UAV{uid}] Giving up on {label} — no telemetry for '
+                        f'{telem_age:.0f}s (best {best_dist:.0f}m)')
+                    return False
             time.sleep(0.5)
         self.get_logger().warn(
             f'  [UAV{uid}] Timeout reaching {label} (best {best_dist:.0f}m)')
+        return False
+
+    def _wait_for_land(self, uid, timeout=RTL_LAND_TIMEOUT):
+        """
+        Block until UAV{uid} is actually back on the ground after RTL.
+
+        Landing is detected on rel_alt/armed, which ride MAVLink rather than
+        AP_DDS, so this still works for a UAV whose DDS session has collapsed.
+        A UAV whose link is down entirely just burns the timeout — bounded, and
+        far better than reporting a completed mission while it is still flying.
+        """
+        s        = self.states[uid]
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            alt_age = time.monotonic() - s.last_alt_t
+            if alt_age < STALE_TELEM_SEC:
+                if not s.armed:
+                    self.get_logger().info(
+                        f'  [UAV{uid}] ✓ Landed and disarmed '
+                        f'(alt={s.rel_alt:.1f}m)')
+                    return True
+                if s.rel_alt <= LANDED_ALT_M:
+                    self.get_logger().info(
+                        f'  [UAV{uid}] ✓ Touched down (alt={s.rel_alt:.1f}m, '
+                        f'still armed)')
+                    return True
+            time.sleep(1.0)
+
+        self.get_logger().warn(
+            f'  [UAV{uid}] Still not down {timeout:.0f}s after RTL '
+            f'(alt={s.rel_alt:.1f}m, telemetry {time.monotonic() - s.last_alt_t:.0f}s old)')
         return False
 
     def _publish_cluster_status(self):
@@ -444,6 +504,7 @@ class CityMission(Node):
             time.sleep(5.0)
             self.get_logger().info('[UAV1] RTL (last — relay stays active)')
             self._call_service(self.rtl_clients[1], 1, '/rtl')
+            self._wait_for_land(1)
             self.get_logger().info('[UAV1] ✅ Mission complete')
 
         except Exception as e:
@@ -504,6 +565,7 @@ class CityMission(Node):
 
             self.get_logger().info('[UAV2] RTL')
             self._call_service(self.rtl_clients[2], 2, '/rtl')
+            self._wait_for_land(2)
             self.get_logger().info('[UAV2] ✅ Mission complete')
 
         except Exception as e:
@@ -562,6 +624,7 @@ class CityMission(Node):
 
             self.get_logger().info('[UAV3] RTL')
             self._call_service(self.rtl_clients[3], 3, '/rtl')
+            self._wait_for_land(3)
             self.get_logger().info('[UAV3] ✅ Mission complete')
 
         except Exception as e:
@@ -693,6 +756,7 @@ class CityMission(Node):
             self._call_service(
                 self.rtl_clients[uid], uid, '/rtl'
             )
+            self._wait_for_land(uid)
 
             self.get_logger().info(
                 '[UAV4] ✅ Mission complete'
@@ -825,6 +889,7 @@ class CityMission(Node):
             self._call_service(
                 self.rtl_clients[uid], uid, '/rtl'
             )
+            self._wait_for_land(uid)
 
             self.get_logger().info(
                 '[UAV5] ✅ Mission complete'

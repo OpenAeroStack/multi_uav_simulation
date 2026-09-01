@@ -448,6 +448,7 @@ cleanup() {
     [[ -n "${GAZEBO_PID:-}" ]] && roots+=("$GAZEBO_PID")
     [[ -n "${WORLD_POS_PID:-}" ]] && roots+=("$WORLD_POS_PID")
     [[ -n "${NS3_PID:-}" ]] && roots+=("$NS3_PID")
+    [[ -n "${SUDO_KEEPALIVE_PID:-}" ]] && roots+=("$SUDO_KEEPALIVE_PID")
     roots+=("${SOCAT_PIDS[@]}")
 
     echo
@@ -835,6 +836,20 @@ python3 "$PROJECT_DIR/scripts/verify_dds_params.py" \
 
 ## cleanupt process
 sudo -v
+
+# The sudo timestamp expires after ~15 min, but dynamic_cluster_manager keeps
+# installing relay routes with `sudo -n ip netns exec` for the whole mission.
+# Refresh it in the background so those calls never hit an expired timestamp;
+# the loop dies with this launcher.
+sudo_keepalive() {
+    while kill -0 "$1" 2>/dev/null; do
+        sudo -n true 2>/dev/null || break
+        sleep 60
+    done
+}
+sudo_keepalive $$ &
+SUDO_KEEPALIVE_PID=$!
+echo "sudo keep-alive running: PID=$SUDO_KEEPALIVE_PID"
 
 stop_previous_launcher
 cleanup_previous_instances
