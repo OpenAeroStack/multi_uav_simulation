@@ -1,0 +1,8 @@
+{
+  "latitude_deg": 6.077372074127197,
+  "longitude_deg": 80.19075775146484,
+  "altitude_m": 0.0,
+  "source": "simulation metadata gps_local_origin (/ap/v1/gps_global_origin/filtered)",
+  "crs": "WGS84 EPSG:4979 to ECEF EPSG:4978, then common tangent ENU",
+  "reason": "Both latitude/longitude tracks are transformed anew with one recorded origin; dataset-specific local coordinates are not compared."
+}

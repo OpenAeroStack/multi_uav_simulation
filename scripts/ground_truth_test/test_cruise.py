@@ -9,7 +9,7 @@ Replicates key parameters from real flight log 2026-08-31 18-03-14.tlog:
   - Groundspeed: 0.35 m/s (real average "moving" speed from the log —
     this flight was a slow hover/loiter test, not a fast cruise)
 
-GPS Origin (this world): 6.0769447N, 80.1909952E (Mech Workshop building corner)
+GPS/world origin:        6.0773722N, 80.1907552E (true launch pad)
 Launch pad (true home):  6.0773722N, 80.1907552E
 Target (max-distance pt): 6.0771224N, 80.1907863E
 
@@ -30,13 +30,15 @@ from geographic_msgs.msg import GeoPoint
 
 # ── Real flight reference points ──────────────────────────────────────────
 HOME_LAT, HOME_LON = 6.0773722, 80.1907552   # true launch pad
-TARGET_LAT, TARGET_LON = 6.0771224, 80.1907863  # real max-distance point (28.0m)
+LANDING_LAT, LANDING_LON = 6.0771224, 80.1907863  # real max-distance point (28.0m)
 
 TAKEOFF_ALT = 3.09    # m — real average altitude from log
 HOLD_TIME   = 20.0    # s — hold at target before returning
-WP_RADIUS   = 2.0     # m arrival threshold
+WP_RADIUS   = 0.75    # m arrival threshold for the validation endpoint
+HOME_RADIUS = 3.0     # m maximum permitted launch-position error
 
 WAYPOINT_SPEED = 0.35  # m/s — real "moving" groundspeed from log
+CONFIG_REVISION = 'enu-ned-wp-spd-v2'
 
 
 def haversine_m(lat1, lon1, lat2, lon2):
@@ -127,10 +129,10 @@ class MechWorkshopValidationMission(Node):
     def _fly_to(self, lat, lon, alt_m, label, speed_mps, timeout=300):
         """
         Sends repeated goto commands (ArduPilot GUIDED mode uses its own
-        internal WPNAV speed, not a per-command speed parameter via this
+        internal waypoint speed, not a per-command speed parameter via this
         simple goto interface). speed_mps is used only to compute a
         realistic timeout and to log expected vs actual progress —
-        actual cruise speed is governed by WPNAV_SPEED on the vehicle.
+        actual cruise speed is governed by WP_SPD on this ArduPilot build.
         """
         dist_start = haversine_m(self.state.lat, self.state.lon, lat, lon) \
             if self.state.lat is not None else None
@@ -161,6 +163,7 @@ class MechWorkshopValidationMission(Node):
     def _run(self):
         self.get_logger().info('')
         self.get_logger().info('=== Mech Workshop Validation Mission ===')
+        self.get_logger().info(f'Configuration revision: {CONFIG_REVISION}')
         self.get_logger().info(
             f'Replicating real flight 2026-08-31 18-03-14.tlog: '
             f'takeoff={TAKEOFF_ALT}m, target=28.0m away, speed~{WAYPOINT_SPEED}m/s')
@@ -171,6 +174,17 @@ class MechWorkshopValidationMission(Node):
         self.get_logger().info('GPS ready. Waiting 10s for system stabilization...')
         time.sleep(10.0)
 
+        home_error = haversine_m(
+            self.state.lat, self.state.lon, HOME_LAT, HOME_LON)
+        if home_error > HOME_RADIUS:
+            self.get_logger().error(
+                f'Initial GPS is {home_error:.1f}m from the configured launch '
+                f'pad (maximum {HOME_RADIUS:.1f}m); aborting mission. Check '
+                'the Gazebo UAV pose and SITL HOME_GPS.')
+            return
+        self.get_logger().info(
+            f'Launch position verified ({home_error:.2f}m from HOME_GPS)')
+
         # Phase 1 — takeoff to real average altitude
         self.get_logger().info(f'Phase 1 — Takeoff to {TAKEOFF_ALT}m')
         if not self._call_service(self.takeoff_client, '/takeoff', 90):
@@ -180,15 +194,37 @@ class MechWorkshopValidationMission(Node):
 
         # Phase 2 — fly to the real max-distance point at real groundspeed
         self.get_logger().info('Phase 2 — Flying to real max-distance point (28.0m)')
-        self._fly_to(TARGET_LAT, TARGET_LON, TAKEOFF_ALT,
-                     'Max-Distance Point', WAYPOINT_SPEED)
+        if not self._fly_to(LANDING_LAT, LANDING_LON, TAKEOFF_ALT,
+                            'Landing Point', WAYPOINT_SPEED):
+            self.get_logger().error(
+                'Target was not reached; landing in place and aborting mission.')
+            self._call_service(self.land_client, '/uav1/land')
+            return
 
         # Phase 3 — hold
         self.get_logger().info(f'Phase 3 — Holding {HOLD_TIME}s at max distance')
         time.sleep(HOLD_TIME)
 
-        # Phase 4 — land vertically at the max-distance point
-        self.get_logger().info('Phase 4 — Land in place')
+        # Recheck after the hold so LAND is only requested over the specified
+        # real-flight landing coordinate, not at a drifted hold position.
+        landing_error = haversine_m(
+            self.state.lat, self.state.lon, LANDING_LAT, LANDING_LON)
+        if landing_error >= WP_RADIUS:
+            self.get_logger().warn(
+                f'Drifted {landing_error:.1f}m from landing point; repositioning')
+            if not self._fly_to(LANDING_LAT, LANDING_LON, TAKEOFF_ALT,
+                                'Landing Point', WAYPOINT_SPEED):
+                self.get_logger().error(
+                    'Could not regain landing point; landing in place for safety.')
+                self._call_service(self.land_client, '/uav1/land')
+                return
+
+        # Phase 4 — land vertically at the specified max-distance point
+        landing_error = haversine_m(
+            self.state.lat, self.state.lon, LANDING_LAT, LANDING_LON)
+        self.get_logger().info(
+            f'Phase 4 — Land at ({LANDING_LAT:.7f}, {LANDING_LON:.7f}); '
+            f'current error={landing_error:.2f}m')
         self._call_service(self.land_client, '/uav1/land')
 
         self.get_logger().info('')
@@ -204,7 +240,9 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # SIGINT may already have shut down the default ROS context.
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

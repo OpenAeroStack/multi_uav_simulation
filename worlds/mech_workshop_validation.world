@@ -17,13 +17,15 @@
     </light>
 
     <!-- Mech Workshop, real-flight validation world -->
-    <!-- GPS Origin: traced building corner (see faculty_gazebo/gis) -->
+    <!-- GPS/world origin: real-flight launch pad.  The workshop assets are
+         translated from their original building-corner frame so that the
+         UAV can spawn at (0, 0) without changing the scene geometry. -->
     <!-- NOTE: elevation is approximated from faculty origin (31m ASL) -->
     <!-- not independently measured for this specific location -->
     <spherical_coordinates>
       <surface_model>EARTH_WGS84</surface_model>
-      <latitude_deg>6.0769447</latitude_deg>
-      <longitude_deg>80.1909952</longitude_deg>
+      <latitude_deg>6.0773722</latitude_deg>
+      <longitude_deg>80.1907552</longitude_deg>
       <elevation>31.0</elevation>
     </spherical_coordinates>
 
@@ -59,18 +61,18 @@
     <!-- Ground with satellite texture -->
     <include>
       <uri>model://mech_workshop_ground</uri>
-      <pose>0 0 0 0 0 0</pose>
+      <pose>26.59 -47.28 0 0 0 0</pose>
     </include>
 
     <!-- Mech Workshop building (visual only, not in obstacle model) -->
     <include>
       <uri>model://mech_workshop</uri>
-      <pose>2 0 0 0 0 0</pose>
+      <pose>28.59 -47.28 0 0 0 0</pose>
     </include>
 
-    <!-- UAV1 — spawned near real flight's average position (~39m from building) -->
+    <!-- UAV1 — world origin is the true launch pad / SITL HOME_GPS -->
     <model name="iris_1">
-      <pose>-26.59 47.28 0.1 0 0 -1.5708</pose>
+      <pose>0 0 0.1 0 0 -1.5708</pose>
       <include>
         <uri>model://iris_1</uri>
       </include>
@@ -79,7 +81,7 @@
     <!-- Ground station — placed at approximate real flight launch/hover center -->
     <model name="gcs">
       <static>true</static>
-      <pose>-28.59 47.28 0 0 0 0</pose>
+      <pose>-2 0 0 0 0 0</pose>
       <link name="cabinet">
         <pose>0 0 0.45 0 0 0</pose>
         <collision name="cabinet_col">
@@ -112,5 +114,12 @@
       <gcs_antenna_height>2.9</gcs_antenna_height>
     </plugin>
 
+  
+    <plugin name="gazebo_ros_state" filename="libgazebo_ros_state.so">
+      <ros>
+        <namespace>/gazebo</namespace>
+      </ros>
+      <update_rate>20.0</update_rate>
+    </plugin>
   </world>
 </sdf>

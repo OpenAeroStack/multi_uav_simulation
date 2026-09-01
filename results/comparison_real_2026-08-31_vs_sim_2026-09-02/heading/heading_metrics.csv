@@ -1,0 +1,7 @@
+metric,value,unit
+mean_abs_heading_error_deg,6.13994806,deg
+median_abs_heading_error_deg,4.94524703,deg
+p95_abs_heading_error_deg,14.8393244,deg
+max_abs_heading_error_deg,17.3981639,deg
+signed_mean_circular_heading_error_deg,-0.700316244,deg
+comparison_duration_s,88.801884,s

@@ -1,0 +1,13 @@
+metric,real,simulation,unit
+message_count,178,861,count
+duration_s,88.456144,88.740265,s
+mean_rate_hz,2.00099159,9.69120387,Hz
+mean_interarrival_ms,499.752226,103.186355,ms
+median_interarrival_ms,499.993,102.564,ms
+p95_interarrival_ms,593.7006,127.97995,ms
+max_interarrival_ms,624.804,149.272,ms
+gaps_gt_750ms,0,0,count
+gaps_gt_1000ms,0,0,count
+gaps_gt_1500ms,0,0,count
+gaps_gt_2000ms,0,0,count
+estimated_mavlink_sequence_loss_percent,not compared,unavailable,diagnostic only

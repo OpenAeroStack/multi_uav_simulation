@@ -1,0 +1,11 @@
+metric,value,unit
+real_mean_speed_mps,0.345809458,m/s
+sim_mean_speed_mps,0.313761353,m/s
+real_max_speed_mps,0.674759216,m/s
+sim_max_speed_mps,0.339713552,m/s
+mean_speed_error_mps,-0.0360530868,m/s
+mae_speed_mps,0.235865729,m/s
+rmse_speed_mps,0.243837372,m/s
+p95_abs_speed_error_mps,0.30945961,m/s
+max_abs_speed_error_mps,0.322070239,m/s
+comparison_duration_s,88.801884,s

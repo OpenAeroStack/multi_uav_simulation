@@ -525,7 +525,9 @@
           Only change model and gazebo from XYZ to XY-Z coordinates
       -->
       <modelXYZToAirplaneXForwardZDown>0 0 0 3.141593 0 0</modelXYZToAirplaneXForwardZDown>
-      <gazeboXYZToNED>0 0 0 3.141593 0 0</gazeboXYZToNED>
+      <!-- This validation world is laid out in Gazebo ENU (X=east,
+           Y=north).  Convert ENU to ArduPilot NED: N=Y, E=X, D=-Z. -->
+      <gazeboXYZToNED>0 0 0 3.141593 0 1.570796</gazeboXYZToNED>
       <imuName>iris_1_demo::iris::iris/imu_link::imu_sensor</imuName>
       <connectionTimeoutMaxCount>5</connectionTimeoutMaxCount>
       <control channel="0">

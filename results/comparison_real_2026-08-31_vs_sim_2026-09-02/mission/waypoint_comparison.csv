@@ -1,0 +1,2 @@
+waypoint_id,target_latitude_deg,target_longitude_deg,real_reached_time_s,sim_reached_time_s,arrival_time_difference_s,real_closest_distance_m,sim_closest_distance_m,real_segment_duration_s,sim_segment_duration_s,comparability_note
+common_final_target_real_seq6_sim_guided_target,6.0771224,80.1907863,80.38594,84.420356,4.034416,0.512779026,0.649643365,80.38594,84.420356,Real AUTO waypoint 6 and the simulation GUIDED target terminate at the same geographic endpoint; intermediate real AUTO waypoints have no simulation equivalents.

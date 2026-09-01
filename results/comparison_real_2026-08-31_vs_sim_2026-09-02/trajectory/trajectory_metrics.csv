@@ -1,0 +1,12 @@
+metric,value,unit
+real_total_distance_m,31.184026,m
+sim_total_distance_m,28.8479785,m
+distance_difference_m,-2.33604751,m
+mean_horizontal_error_m,3.3989355,m
+median_horizontal_error_m,2.36214135,m
+rmse_horizontal_error_m,4.24479431,m
+p95_horizontal_error_m,8.03208179,m
+max_horizontal_error_m,8.54379027,m
+comparison_duration_s,88.801884,s
+interpolation_step_s,1.239035,s
+comparison_samples,72,

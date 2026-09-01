@@ -1,0 +1,4 @@
+elapsed_s,log_timestamp_unix_s,source_message,seq,sysid,compid,rssi_raw,remote_rssi_raw,noise_raw,remote_noise_raw,tx_buffer_percent,rx_errors,corrected_errors
+1.189279,1788179597.058785,RADIO_STATUS,17,51,68,169,174,36,27,100,5,30
+3.008378,1788179598.877884,RADIO,19,51,68,169,174,31,24,100,5,30
+3.008378,1788179598.877884,RADIO_STATUS,19,51,68,169,174,31,24,100,5,30

@@ -1,0 +1,107 @@
+{
+  "DIRECTLY_COMPARABLE": [
+    {
+      "signal": "arrival_timestamp",
+      "real": "log_timestamp_unix_s",
+      "simulation": "wall_time_unix_s"
+    },
+    {
+      "signal": "latitude",
+      "real": "gps.csv:lat_deg",
+      "simulation": "gps.csv:latitude_deg"
+    },
+    {
+      "signal": "longitude",
+      "real": "gps.csv:lon_deg",
+      "simulation": "gps.csv:longitude_deg"
+    },
+    {
+      "signal": "relative_altitude",
+      "real": "gps.csv:relative_alt_m",
+      "simulation": "gps.csv:relative_altitude_m"
+    },
+    {
+      "signal": "ground_speed",
+      "real": "gps.csv:ground_speed_mps",
+      "simulation": "gps.csv:ground_speed_mps"
+    },
+    {
+      "signal": "heading",
+      "real": "gps.csv:heading_deg",
+      "simulation": "gps.csv:heading_deg"
+    },
+    {
+      "signal": "telemetry_interarrival",
+      "real": "GLOBAL_POSITION_INT .tlog arrivals",
+      "simulation": "/uav1/rel_alt bridge arrivals"
+    }
+  ],
+  "COMPARABLE_AFTER_CONVERSION": [
+    {
+      "signal": "elapsed_time",
+      "real": "elapsed_s",
+      "simulation": "elapsed_time_s"
+    },
+    {
+      "signal": "roll",
+      "real": "vehicle_state.csv ATTITUDE:roll_deg",
+      "simulation": "vehicle_state.csv:roll_deg"
+    },
+    {
+      "signal": "pitch",
+      "real": "vehicle_state.csv ATTITUDE:pitch_deg",
+      "simulation": "vehicle_state.csv:pitch_deg"
+    },
+    {
+      "signal": "yaw",
+      "real": "vehicle_state.csv ATTITUDE:yaw_deg (heading convention)",
+      "simulation": "vehicle_state.csv:heading_deg"
+    },
+    {
+      "signal": "waypoint_progress",
+      "real": "MISSION_CURRENT/MISSION_ITEM_REACHED",
+      "simulation": "GUIDED target/reached events"
+    }
+  ],
+  "SIM_ONLY": [
+    {
+      "signal": "snr_db",
+      "real": null,
+      "simulation": "network.csv:snr_db"
+    },
+    {
+      "signal": "signal_dbm",
+      "real": null,
+      "simulation": "network.csv:signal_dbm"
+    }
+  ],
+  "REAL_ONLY": [
+    {
+      "signal": "mavlink_sequence",
+      "real": "mavlink_sequence.csv",
+      "simulation": null
+    }
+  ],
+  "INSUFFICIENT_DATA": [
+    {
+      "signal": "radio_status",
+      "real": "radio.csv (3 samples)",
+      "simulation": null
+    },
+    {
+      "signal": "packet_loss",
+      "real": null,
+      "simulation": null
+    },
+    {
+      "signal": "rtt",
+      "real": null,
+      "simulation": null
+    },
+    {
+      "signal": "throughput",
+      "real": null,
+      "simulation": null
+    }
+  ]
+}

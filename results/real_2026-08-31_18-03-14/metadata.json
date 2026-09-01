@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "dataset_kind": "real_mission_planner_tlog",
+  "processing_status": "complete",
+  "processed_at_utc": "2026-09-01T20:18:10.428603+00:00",
+  "input": {
+    "path": "/home/randilsk/FYP/logs_using/0-30m (copy)/2026-08-31 18-03-14.tlog",
+    "size_bytes": 2706433,
+    "mtime_utc": "2026-08-31T12:51:50+00:00",
+    "sha256": "74c063afa7ed54d708ae059fd95e3bb3342c319dfa2110ab9629cbbe209017da",
+    "opened_read_only": true
+  },
+  "output_directory": "/home/randilsk/FYP/logs_using/processed_real_logs/real_2026-08-31_18-03-14",
+  "log_timeline": {
+    "primary_clock": "Mission Planner .tlog packet-arrival timestamp (_timestamp)",
+    "start_unix_s": 1788179595.869506,
+    "start_utc": "2026-08-31T12:33:15.869506+00:00",
+    "end_unix_s": 1788180710.0153959,
+    "end_utc": "2026-08-31T12:51:50.015396+00:00",
+    "duration_s": 1114.1458899974823,
+    "elapsed_definition": "log_timestamp_unix_s - first valid packet timestamp",
+    "nonmonotonic_arrival_timestamp_count": 0,
+    "source_clocks_preserved": [
+      "time_boot_ms",
+      "time_usec"
+    ]
+  },
+  "coordinate_frame": {
+    "geodetic_crs": "WGS84 three-dimensional (EPSG:4979)",
+    "local_frame": "ENU tangent frame: +east, +north, +up",
+    "conversion": "pyproj EPSG:4979 to ECEF EPSG:4978, then ECEF-to-ENU rotation",
+    "pyproj_version": "3.3.0",
+    "origin_source": "first_valid_global_position_int",
+    "origin_lat_deg": 6.0773732,
+    "origin_lon_deg": 80.1907199,
+    "origin_alt_m": 29.48
+  },
+  "frame_and_unit_notes": {
+    "gps_velocity": "GLOBAL_POSITION_INT vx=North, vy=East, vz=Down; raw cm/s and SI m/s retained",
+    "local_position_ned": "Autopilot LOCAL_POSITION_NED: x=North, y=East, z=Down",
+    "vertical_speed": "vz_down_mps is positive down; vertical_speed_up_mps is its negation",
+    "heading": "GLOBAL_POSITION_INT hdg and GPS_RAW_INT cog are centidegrees; 65535 means unknown",
+    "gps_quality": "GPS_RAW_INT eph/epv raw values and 1e-2 scaled values retained without relabeling them as metric accuracy",
+    "radio": "RADIO/RADIO_STATUS values are raw device-reported counters/indicators, not assumed to be dBm or SNR",
+    "vehicle_state": "Rows are asynchronous and source_message identifies ATTITUDE, VFR_HUD, or HEARTBEAT; no synthetic joins"
+  },
+  "message_counts": {
+    "AHRS": 2198,
+    "AHRS2": 4396,
+    "ATTITUDE": 4395,
+    "AUTOPILOT_VERSION": 3,
+    "AUTOPILOT_VERSION_REQUEST": 2,
+    "BATTERY_STATUS": 2198,
+    "COMMAND_ACK": 140,
+    "COMMAND_LONG": 141,
+    "DISTANCE_SENSOR": 2198,
+    "EKF_STATUS_REPORT": 2199,
+    "FILE_TRANSFER_PROTOCOL": 116,
+    "GLOBAL_POSITION_INT": 2198,
+    "GPS_GLOBAL_ORIGIN": 1,
+    "GPS_RAW_INT": 2198,
+    "HEARTBEAT": 2228,
+    "HOME_POSITION": 1,
+    "LOCAL_POSITION_NED": 2199,
+    "MEMINFO": 2199,
+    "MISSION_CURRENT": 2198,
+    "MISSION_ITEM_INT": 1,
+    "MISSION_ITEM_REACHED": 6,
+    "MISSION_REQUEST_INT": 1,
+    "NAV_CONTROLLER_OUTPUT": 2199,
+    "PARAM_SET": 1,
+    "PARAM_VALUE": 1095,
+    "POSITION_TARGET_GLOBAL_INT": 268,
+    "POWER_STATUS": 2199,
+    "RADIO": 1,
+    "RADIO_STATUS": 2,
+    "RANGEFINDER": 2198,
+    "RAW_IMU": 2197,
+    "RC_CHANNELS": 2198,
+    "REQUEST_DATA_STREAM": 284,
+    "SCALED_IMU2": 2197,
+    "SCALED_PRESSURE": 2198,
+    "SERVO_OUTPUT_RAW": 2199,
+    "SET_MODE": 2,
+    "STATUSTEXT": 43,
+    "SYSTEM_TIME": 2198,
+    "SYS_STATUS": 2198,
+    "TERRAIN_REPORT": 2198,
+    "TIMESYNC": 222,
+    "VFR_HUD": 4395,
+    "VIBRATION": 2199,
+    "WIND": 2198
+  },
+  "output_row_counts": {
+    "events.csv": 76,
+    "gps.csv": 2198,
+    "gps_quality.csv": 2198,
+    "local_position_ned.csv": 2199,
+    "mavlink_sequence.csv": 66105,
+    "mission.csv": 2472,
+    "radio.csv": 3,
+    "statustext.csv": 43,
+    "telemetry_timing.csv": 2198,
+    "vehicle_state.csv": 9902
+  },
+  "source_endpoints": [
+    {
+      "sysid": 1,
+      "compid": 1,
+      "packet_count": 64438
+    },
+    {
+      "sysid": 51,
+      "compid": 68,
+      "packet_count": 3
+    },
+    {
+      "sysid": 255,
+      "compid": 190,
+      "packet_count": 1664
+    }
+  ],
+  "malformed_packet_count": 0,
+  "telemetry_timing_summary": {
+    "source_message": "GLOBAL_POSITION_INT",
+    "sample_count": 2198,
+    "interval_count": 2197,
+    "duration_first_to_last_sample_s": 1106.345230102539,
+    "effective_rate_hz": 1.985817754008282,
+    "mean_interval_ms": 503.57088306897543,
+    "median_interval_ms": 499.27306175231934,
+    "p95_interval_ms": 594.3658828735352,
+    "max_interval_ms": 2040.1859283447266,
+    "gap_counts_strictly_greater_than_ms": {
+      "750": 8,
+      "1000": 6,
+      "1500": 5,
+      "2000": 1
+    }
+  },
+  "mavlink_sequence_summary": [
+    {
+      "sysid": 1,
+      "compid": 1,
+      "observed_packet_count": 64438,
+      "continuous_transitions": 64426,
+      "forward_gap_transitions": 10,
+      "duplicate_or_same_sequence_transitions": 0,
+      "out_of_order_or_stream_reset_transitions": 1,
+      "estimated_missing_packets": 28,
+      "diagnostic_estimated_missing_percent": 0.04343374802221326
+    },
+    {
+      "sysid": 51,
+      "compid": 68,
+      "observed_packet_count": 3,
+      "continuous_transitions": 0,
+      "forward_gap_transitions": 1,
+      "duplicate_or_same_sequence_transitions": 1,
+      "out_of_order_or_stream_reset_transitions": 0,
+      "estimated_missing_packets": 1,
+      "diagnostic_estimated_missing_percent": 25.0
+    },
+    {
+      "sysid": 255,
+      "compid": 190,
+      "observed_packet_count": 1664,
+      "continuous_transitions": 1663,
+      "forward_gap_transitions": 0,
+      "duplicate_or_same_sequence_transitions": 0,
+      "out_of_order_or_stream_reset_transitions": 0,
+      "estimated_missing_packets": 0,
+      "diagnostic_estimated_missing_percent": 0.0
+    }
+  ],
+  "mavlink_sequence_caveat": "Sequence gaps are diagnostic estimates per (sysid, compid), not proven RF packet loss. A bidirectional .tlog, multiple MAVLink channels, retransmission, recording loss, stream resets, and out-of-order packets can affect sequence continuity. No time gap was counted as packet loss.",
+  "radio_record_count": 3,
+  "waypoints_reached": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "flight_modes_observed": [
+    "AUTO",
+    "GUIDED",
+    "LOITER",
+    "STABILIZE"
+  ],
+  "warnings": []
+}

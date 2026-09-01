@@ -1,0 +1,42 @@
+REAL-FLIGHT VS SIMULATION COMPARISON REPORT
+===========================================
+
+Datasets
+--------
+Real: /home/randilsk/FYP/multi_uav_sim/results/real_2026-08-31_18-03-14
+Simulation: /home/randilsk/FYP/multi_uav_sim/results/sim_run_2026-09-02_01-36-45
+
+Availability
+------------
+Directly comparable signals: arrival_timestamp, latitude, longitude, relative_altitude, ground_speed, heading, telemetry_interarrival.
+Comparable after conversion/alignment: elapsed_time, roll, pitch, yaw, waypoint_progress.
+Not directly comparable or insufficient: mavlink_sequence, snr_db, signal_dbm, radio_status, packet_loss, rtt, throughput.
+
+Time alignment
+--------------
+Mission time zero uses first two consecutive GPS samples at or above 0.5 m relative altitude. Real alignment occurred at source elapsed 238.977 s and simulation alignment at 29.923 s. The shared comparison interval is 0 to 88.802 s and no data are extrapolated.
+
+Coordinate alignment
+--------------------
+Both WGS84 GPS tracks were recomputed in a common ENU frame about (6.077372074, 80.190757751, 0.000 m). Dataset-specific local-coordinate columns were not compared.
+
+Results
+-------
+The trajectories have a horizontal RMSE of 4.245 m and P95 separation of 8.032 m over the shared interval. Recorded horizontal distances are 31.184 m real and 28.848 m simulated.
+
+Relative-altitude RMSE is 0.732 m. Measured-groundspeed RMSE is 0.244 m/s. Circular GPS-heading mean absolute error is 6.140 degrees.
+
+The common final target was reached at mission time 80.386 s in the real flight and 84.420 s in simulation. The real mission used multiple AUTO waypoints while simulation used one GUIDED target, so intermediate waypoint timing is not treated as equivalent.
+
+Application telemetry continuity
+--------------------------------
+Within the shared mission interval, mean equivalent GLOBAL_POSITION_INT arrival rates are 2.00099159 Hz real and 9.69120387 Hz simulated. Gaps are timing/continuity observations, not packet loss. Simulation MAVLink sequence numbers were unavailable, so sequence-loss estimates are not compared.
+
+Network limitations
+-------------------
+Insufficient real radio samples for RF time-series validation.
+Simulation SNR and signal level are characterized separately. No real SNR was invented. Packet loss, RTT, and throughput are unavailable as defensible comparable measurements.
+
+Interpretation
+--------------
+These results quantify agreement and disagreement for the recorded runs; they do not by themselves establish general simulation validation. Differences include vehicle behavior, sampling, control mode, and mission structure as well as model fidelity.

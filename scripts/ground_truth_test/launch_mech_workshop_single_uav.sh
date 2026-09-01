@@ -271,7 +271,7 @@ sudo ip netns exec uav1ns sudo -H -u "$RUN_USER" bash -c '
     "$SITL_LOG_DIR" \
     strace -f -e trace=none -o /dev/null \
     "$ARDUPILOT_HOME/build/sitl/bin/arducopter" \
-    --model gazebo-iris --speedup 1 --sysid 1 --instance 0 \
+    --wipe --model gazebo-iris --speedup 1 --sysid 1 --instance 0 \
     --defaults "$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm,$DDS_PARM" \
     --sim-address "172.31.1.1" \
     --home "$HOME_GPS" \
