@@ -34,13 +34,18 @@ declare -A HOST_LINK=( [1]="10.0.0.1"        [2]="10.0.1.1" )
 
 #   MISSION_MODE[i]  what aircraft i does under --mission
 #     survey : fly to the subjects, hold HOLD_SECONDS on station, return home
+#     road   : patrol the waypoint list in uav2_road_patrol.py, then return
 #     hover  : take off where it stands and hold (no transit)
 #
-#   UAV2 is parked beside the group in the 2-UAV world, so hovering keeps the
-#   subjects in frame continuously. UAV1 patrols and sees them only in bursts.
-#   Both end up at 25 m, so the two boards view the same scene from the same
-#   height and their detection rates are comparable.
-declare -A MISSION_MODE=( [1]="survey" [2]="hover" )
+#   Both aircraft fly at ALTITUDE_M, so the two boards view the ground from the
+#   same height and their detection rates stay comparable -- that equivalence is
+#   the whole point of the ground-vs-edge comparison, so change one altitude and
+#   you must change the other.
+#
+#   UAV1 surveys the subject group; UAV2 patrols road_x_1, which puts a moving
+#   camera over the scripted pedestrians. `hover` remains for the case where you
+#   want UAV2 parked beside the group with the subjects in frame continuously.
+declare -A MISSION_MODE=( [1]="survey" [2]="road" )
 HOLD_SECONDS=30.0        # survey: seconds on station
 # The camera is pitched 45 deg FORWARD-down, so at altitude A it sees the ground
 # roughly 0.7*A to 1.5*A metres AHEAD -- never directly below. Hold this far
@@ -48,8 +53,8 @@ HOLD_SECONDS=30.0        # survey: seconds on station
 #   ALTITUDE_M  25  ->  band 17-36 m ahead  ->  OFFSET_M 25
 #   ALTITUDE_M  15  ->  band 10-22 m ahead  ->  OFFSET_M 15
 # Set OFFSET_M 0 to hold directly overhead (they will be in the blind spot).
-ALTITUDE_M=15.0
-OFFSET_M=15.0
+ALTITUDE_M=30.0
+OFFSET_M=30.0
 
 
 PI_HOST_DEFAULT="${PI_HOST[1]}"
@@ -66,6 +71,9 @@ DDS_PROFILE="$PROJECT_DIR/config/fastdds_hitl_eth.xml"
 PIPELINE_1UAV="$PROJECT_DIR/scripts/netns/launch_single_uav_netns.sh"
 PIPELINE_2UAV="$PROJECT_DIR/scripts/netns/launch_2uav_netns.sh"
 MISSION="$PROJECT_DIR/ros2/uav_controller/uav_controller/uav1_patrol_mission.py"
+# Separate file, not a flag on MISSION: a waypoint LIST is a different sequence
+# from "hold one station at a standoff", and lists do not fit ROS 2 parameters.
+ROAD_MISSION="$PROJECT_DIR/ros2/uav_controller/uav_controller/uav2_road_patrol.py"
 VIEWER="$PROJECT_DIR/scripts/detection_viewer.py"
 
 PIPELINE_LOG="/tmp/hitl_pipeline.log"
@@ -74,12 +82,15 @@ DETECTOR_LOG="/tmp/hitl_detector.log"
 MISSION_LOG="/tmp/hitl_mission.log"
 BAG_DIR="$HOME/hitl_bags/cam_$(date +%Y%m%d_%H%M%S)"
 
-# ── Options ──────────────────────────────────────────────────────────────────
-NUAVS=1                # --uavs N : how many aircraft to bring up
-VIEW=0                 # --view   : open a camera+boxes window per aircraft
-GUI=0                  # --gui    : open the Gazebo 3D viewer
+# ── Options defines the behavior of the simulation. 
+
+NUAVS=1                 # --uavs N : how many aircraft to bring up
+VIEW=0                  # --view   : open a camera+boxes window per aircraft
+GUI=0                   # --gui    : open the Gazebo 3D viewer
+
 MODEL="$PI_MODEL_OPENVINO"
 CONF="0.4"
+
 # Applies to the PyTorch model ONLY. The detector drops imgsz for directory
 # models (NCNN, OpenVINO), whose input shape is frozen at export time.
 IMGSZ="640"
@@ -109,17 +120,18 @@ Usage: run_hitl.sh [options]
                     (heavy: the city heightmap can make it hang "not
                      responding" — Force Quit is safe, gzserver keeps running)
   --mission         run each aircraft's MISSION_MODE, in parallel
-                    (see MISSION_MODE at the top: survey / hover)
+                    (see MISSION_MODE at the top: survey / road / hover)
   --record          record /uav1/camera/image_raw to a rosbag, so the detector
                     can later be tuned with `ros2 bag play` instead of re-flying
   --no-pi           host only; skip the remote detector (e.g. Pi unplugged)
   -h, --help        this text
 
 Examples:
-  ./scripts/run_hitl.sh --uavs 2 --view --mission   # the full two-board run
-  ./scripts/run_hitl.sh --mission --record
-  ./scripts/run_hitl.sh --pt --conf 0.25          # baseline comparison run
-  ./scripts/run_hitl.sh --no-pi                   # host pipeline only
+  ./scripts/netns/run_hitl.sh --uavs 2 --view --gui --mission   # the full two-board run with Gazebo and viewers
+  ./scripts/netns/run_hitl.sh --uavs 2 --view --mission         # the full two-board run
+  ./scripts/netns/run_hitl.sh --mission --record
+  ./scripts/netns/run_hitl.sh --pt --conf 0.25                  # baseline comparison run
+  ./scripts/netns/run_hitl.sh --no-pi                           # host pipeline only
 USAGE
 }
 
@@ -405,7 +417,7 @@ done
 if (( GUI )); then
     CITY="$HOME/FYP/small_city_gazebo_world"
     GAZEBO_MODEL_PATH="$PROJECT_DIR/models:$CITY/models:${GAZEBO_MODEL_PATH:-}" \
-    GAZEBO_RESOURCE_PATH="$PROJECT_DIR:$PROJECT_DIR/worlds:$CITY:${GAZEBO_RESOURCE_PATH:-}" \
+    GAZEBO_RESOURCE_PATH="/usr/share/gazebo-11:$PROJECT_DIR:$PROJECT_DIR/worlds:$CITY:${GAZEBO_RESOURCE_PATH:-}" \
     GAZEBO_PLUGIN_PATH="$PROJECT_DIR/install/multi_uav_gazebo_plugins/lib:$HOME/ardupilot_gazebo/build:${GAZEBO_PLUGIN_PATH:-}" \
     GAZEBO_MODEL_DATABASE_URI= \
         gzclient > /tmp/hitl_gzclient.log 2>&1 &
@@ -443,6 +455,8 @@ if (( RUN_MISSION )); then
             survey) cmd="python3 '$MISSION' --ros-args -p uav_id:=$i \
                           -p hold_seconds:=$HOLD_SECONDS \
                           -p altitude_m:=$ALTITUDE_M -p offset_m:=$OFFSET_M" ;;
+            road)   cmd="python3 '$ROAD_MISSION' --ros-args -p uav_id:=$i \
+                          -p altitude_m:=$ALTITUDE_M" ;;
             hover)  cmd="ros2 service call /uav$i/takeoff std_srvs/srv/Trigger {}" ;;
             *)      echo "  uav$i: unknown MISSION_MODE '$mode' — skipping" >&2; continue ;;
         esac

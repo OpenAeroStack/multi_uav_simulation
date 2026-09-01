@@ -38,7 +38,20 @@ AGENT_LOG2="/tmp/agent_2uav_uav2.log"
 BRIDGE_LOG2="/tmp/bridge_2uav_uav2.log"
 
 
-HOME_GPS="6.0790684,80.1915283,0.00,0"
+# One --home PER AIRCRAFT. Both SITLs shared HOME_GPS until now, so UAV2's
+# autopilot believed it started where UAV1 does: its EKF origin, its reported
+# position and its RTL point were all offset by the distance between the two
+# spawns. Harmless while they sat 10 m apart, corrupting once they do not.
+#
+# Each value must match that model's <pose> in the world file, converted with
+# the mapping proven in uav1_patrol_mission.py -- NOT plain ENU:
+#     north =  gazebo_x        east = -gazebo_y
+#
+#   iris_1_demo  <pose>-70 -22 ...>  ->  6.0790684, 80.1915283   (known good)
+#   iris_2_demo  <pose>-70 -32 ...>  ->  10 m EAST of UAV1       (derived)
+# Move a drone in the world file and you must move its home here too.
+HOME_GPS="6.0790684,80.1915283,0.00,0"    # UAV1
+HOME_GPS2="6.0790684,80.1916186,0.00,0"   # UAV2
 WORLD_PATH="$PROJECT_DIR/worlds/small_city_2uav_netns.world"
 DDS_PARM="$PROJECT_DIR/params/uav1_dds_netns.parm"
 DDS_PARM2="$PROJECT_DIR/params/uav2_dds_netns.parm"
@@ -60,6 +73,7 @@ RF_PI_IP="10.42.0.12"   # the Pi is UAV2 on the wireless subnet
 TAP_READY_TIMEOUT=30
 AGENT_READY_TIMEOUT=20
 DDS_GPS_TIMEOUT=90
+SITL_SETTLE_SEC=15      # AP_DDS handshake headroom; see STEP 6 for why
 SITL_TCP_TIMEOUT=90
 GAZEBO_STARTUP_SEC=30
 
@@ -317,7 +331,7 @@ restore_tty
 echo "=== [4/8] Starting Gazebo ==="
 CITY="$HOME/FYP/small_city_gazebo_world"   # external city-world assets repo (models + terrain)
 export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:$CITY/models:${GAZEBO_MODEL_PATH:-}"
-export GAZEBO_RESOURCE_PATH="$PROJECT_DIR:$PROJECT_DIR/worlds:$CITY:${GAZEBO_RESOURCE_PATH:-}"
+export GAZEBO_RESOURCE_PATH="/usr/share/gazebo-11:$PROJECT_DIR:$PROJECT_DIR/worlds:$CITY:${GAZEBO_RESOURCE_PATH:-}"
 # Project + ArduPilot Gazebo plugins (obstacle raycaster + gazebo-iris FDM) — not set by setup.sh
 export GAZEBO_PLUGIN_PATH="$PROJECT_DIR/install/multi_uav_gazebo_plugins/lib:$HOME/ardupilot_gazebo/build:${GAZEBO_PLUGIN_PATH:-}"
 
@@ -374,8 +388,16 @@ if [[ -f "$PROJECT_DIR/scripts/world_pos_publisher.py" ]]; then
     ( set +u
       source /opt/ros/humble/setup.bash
       export FASTRTPS_DEFAULT_PROFILES_FILE="$PROJECT_DIR/config/fastdds_hitl_eth.xml"
+      # KEEP --ros-args FIRST. Without it rclpy ignores every -p flag silently:
+      # they stay ordinary argv strings and the node comes up on ITS DEFAULTS
+      # (n_uavs=3, no mirror), which looks identical in ps but publishes the
+      # wrong node ids. Check /tmp/pospub_2uav.log for the "Mirroring:" line to
+      # confirm the parameters actually landed.
+      # Do NOT put a comment on the line after a trailing "\" -- bash joins the
+      # lines literally and the "#" then comments out the arguments.
       exec python3 "$PROJECT_DIR/scripts/world_pos_publisher.py" \
-           --ros-args -p n_uavs:=1 -p mirror:=2:1
+                --ros-args -p n_uavs:=1 -p mirror:=2:1
+
     ) > "$POSPUB_LOG" 2>&1 < /dev/null &
     POSPUB_PID=$!
 restore_tty
@@ -498,7 +520,7 @@ sudo ip netns exec uav2ns sudo -H -u "$RUN_USER" bash -c '
     --wipe --model gazebo-iris --speedup 1 --sysid 2 --instance 1 \
     --defaults "$ARDUPILOT_HOME/Tools/autotest/default_params/copter.parm,$ARDUPILOT_HOME/Tools/autotest/default_params/gazebo-iris.parm,$DDS_PARM2" \
     --sim-address "172.31.2.1" \
-    --home "$HOME_GPS" \
+    --home "$HOME_GPS2" \
     --serial0=tcp:0.0.0.0:5770 \
     > "$SITL_LOG_DIR2/arducopter.log" 2>&1 < /dev/null &
 SITL_PID2=$!
@@ -530,6 +552,13 @@ while ! sudo ip netns exec uav1ns ss -H -lun "sport = :9003" | grep -q .; do
     sleep 0.2
 done
 echo "  SITL alive, FDM port open"
+
+# Give AP_DDS time to finish its XRCE handshake before the bridges connect and
+# start pulling MAVLink streams out of the same process. launch_multi_dds.sh --
+# the flat launcher that does not show this problem -- waits 15 s here for the
+# same reason; the netns pipeline had 0.2 s and moved straight on.
+echo "  Letting AP_DDS settle (${SITL_SETTLE_SEC}s)..."
+sleep "$SITL_SETTLE_SEC"
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -538,25 +567,37 @@ echo ""
 restore_tty
 echo "=== [7/8] Verifying DDS GPS + MAVLink reachability from gcsns ==="
 
-echo "  Waiting for /ap/v1/navsat publisher + valid GPS..."
-deadline=$((SECONDS + DDS_GPS_TIMEOUT))
-while true; do
-    info=$(sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
-        source /opt/ros/humble/setup.bash
-    source "$HOME/ardu_ws/install/setup.bash"
-        source "$1"
-        ros2 topic info /ap/v1/navsat 2>/dev/null
-    ' t-shell "$PROJECT_DIR/ros2/install/setup.bash" || true)
-    if echo "$info" | grep -q "Publisher count: [1-9]"; then
-        echo "  /ap/v1/navsat has a live publisher."
-        break
-    fi
-    (( SECONDS >= deadline )) && {
-        echo "ERROR: No publisher on /ap/v1/navsat within ${DDS_GPS_TIMEOUT}s." >&2
-        exit 1
-    }
-    sleep 1
-done
+# A PUBLISHER COUNT IS NOT A WORKING FEED. AP_DDS registers its publishers and
+# can then stop sending -- the topic still reports "Publisher count: 1" while
+# nothing arrives, which is exactly the failure that lets a mission take off and
+# then fly blind. So wait for an actual MESSAGE, on BOTH aircraft. The old check
+# looked at /ap/v1/navsat only, which is why UAV2 could come up dead unnoticed.
+wait_for_navsat() {
+    local uav=$1 topic="/ap/v$1/navsat"
+    echo "  Waiting for a message on $topic ..."
+    local deadline=$((SECONDS + DDS_GPS_TIMEOUT))
+    while true; do
+        if sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
+                source /opt/ros/humble/setup.bash
+                source "$HOME/ardu_ws/install/setup.bash"
+                source "$1"
+                timeout 5 ros2 topic echo --once "$2" >/dev/null 2>&1
+            ' t-shell "$PROJECT_DIR/ros2/install/setup.bash" "$topic"; then
+            echo "  $topic is delivering messages."
+            return 0
+        fi
+        (( SECONDS >= deadline )) && {
+            echo "ERROR: no data on $topic within ${DDS_GPS_TIMEOUT}s." >&2
+            echo "       AP_DDS is up but silent. Check $AGENT_LOG for an" >&2
+            echo "       'establish_session' later than the last 'create_topic'." >&2
+            exit 1
+        }
+        sleep 1
+    done
+}
+
+wait_for_navsat 1
+wait_for_navsat 2
 
 echo "  Waiting for SITL TCP 5760 reachable from gcsns..."
 deadline=$((SECONDS + SITL_TCP_TIMEOUT))
@@ -604,7 +645,7 @@ sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
     source "$1"
     exec ros2 run uav_controller drone_bridge --ros-args \
         -p uav_id:=2 -p mavlink_host:=10.42.0.13 -p mavlink_port:=5770 \
-        -p takeoff_altitude:=25.0
+        -p takeoff_altitude:=30.0
 ' bridge-shell "$PROJECT_DIR/ros2/install/setup.bash" > "$BRIDGE_LOG2" 2>&1 < /dev/null &
 BRIDGE_PID2=$!
 restore_tty
@@ -615,6 +656,9 @@ sudo kill -0 "$BRIDGE_PID2" 2>/dev/null || {
     exit 1
 }
 echo "  drone_bridge UAV2 running: PID=$BRIDGE_PID2"
+echo ""
+
+
 echo ""
 
 restore_tty

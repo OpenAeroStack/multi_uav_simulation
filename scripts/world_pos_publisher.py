@@ -85,6 +85,7 @@ class WorldPosPublisher(Node):
         # it is the physically correct position for a companion computer bolted
         # next to the autopilot. Remove it once the Pi shares node 1.
         self.declare_parameter('mirror', '')
+        self.declare_parameter('node_map', '')
 
         topic = self.get_parameter('model_states_topic').value
         self.prefix = self.get_parameter('uav_prefix').value
@@ -107,18 +108,46 @@ class WorldPosPublisher(Node):
                         f"mirror entry '{pair}' is not dst:src (e.g. 2:1)")
                 self.mirror[int(dst)] = int(src)
 
+        # "3:iris_2,5:iris_4" -> {3: 'iris_2', 5: 'iris_4'}. An EXPLICIT node ->
+        # model assignment, for layouts the n_uavs loop below cannot express.
+        #
+        # That loop walks node id and model number together (node k <- iris_k),
+        # which assumes aircraft occupy nodes 1, 2, 3 ... consecutively. The HITL
+        # topology interleaves them with companion computers:
+        #     node 1 = SITL1   node 2 = Pi 1   node 3 = SITL2   node 4 = Pi 2
+        # so the second aircraft belongs on node 3, and no value of n_uavs can
+        # say that -- n_uavs=2 would put it on node 2, the Pi's slot.
+        #
+        # Entries here WIN over the automatic rule, and mirrors fill the rest:
+        #     -p n_uavs:=1 -p node_map:=3:iris_2 -p mirror:=2:1,4:3
+        self.node_map = {}
+        spec = str(self.get_parameter('node_map').value).strip()
+        if spec:
+            for pair in spec.split(','):
+                nid, _, model = pair.partition(':')
+                if not model:
+                    raise ValueError(
+                        f"node_map entry '{pair}' is not id:model (e.g. 3:iris_2)")
+                self.node_map[int(nid)] = model.strip()
+
         self._latest = None          # last ModelStates msg
         self._latest_t = 0.0         # monotonic time it arrived
         self._stale = False
         self._warned = False
         self._gcs_warned = False
         self._mirror_warned = False
+        self._map_warned = False
+        self._latest_topic = topic
         self.sub = self.create_subscription(ModelStates, topic, self._on_states, 10)
         self.pub = self.create_publisher(Float32MultiArray, '/uav_world_positions', 10)
         self.timer = self.create_timer(1.0 / rate, self._tick)
         self.get_logger().info(
             f"Relaying {topic} -> /uav_world_positions "
             f"({self.n_uavs} UAVs, prefix '{self.prefix}', {rate:.0f} Hz)")
+        if self.node_map:
+            self.get_logger().info(
+                "Node map: " + ", ".join(f"node {n} <- {m}"
+                                         for n, m in self.node_map.items()))
         if self.mirror:
             self.get_logger().info(
                 "Mirroring: " + ", ".join(f"node {d} <- node {s}"
@@ -207,7 +236,14 @@ class WorldPosPublisher(Node):
         base = 1 if self.gcs_enabled else 0
         poses = {}                            # nid -> (x, y, z), for mirroring
         for k in range(self.n_uavs):
+            # base + k, NOT base + 1: the id must advance with the loop. Pinned
+            # to a constant it publishes every aircraft onto the SAME node and
+            # leaves node 1 with no position at all -- ns-3 then keeps node 1 at
+            # its initial formation coordinate, kilometres from where the drone
+            # really is, and every link metric for it is fiction.
             nid = base + k
+            if nid in self.node_map:
+                continue                       # explicit assignment wins; see below
             want = f"{self.prefix}{k + 1}"     # always iris_1..iris_N
             idx = next((j for j, nm in enumerate(names) if nm.startswith(want)), None)
             if idx is None:
@@ -216,6 +252,25 @@ class WorldPosPublisher(Node):
             poses[nid] = (float(p.x), float(p.y), float(p.z))
             out.extend([float(nid), float(p.x), float(p.y), float(p.z)])
             found += 1
+
+        # ── explicitly mapped nodes ──────────────────────────────────────
+        # For layouts the consecutive rule cannot express (see node_map above).
+        # Emitted before the mirrors so a mirror can take its source from one.
+        for nid, model in self.node_map.items():
+            idx = next((j for j, nm in enumerate(names)
+                        if nm.startswith(model)), None)
+            if idx is None:
+                if not self._map_warned:
+                    self.get_logger().warn(
+                        f"node_map {nid}:{model} — no model named '{model}*' in "
+                        f"{self._latest_topic}; node {nid} stays frozen at its "
+                        "ns-3 default.")
+                continue
+            p = self._latest.pose[idx].position
+            poses[nid] = (float(p.x), float(p.y), float(p.z))
+            out.extend([float(nid), float(p.x), float(p.y), float(p.z)])
+            found += 1
+        self._map_warned = True
 
         # ── mirrored nodes ───────────────────────────────────────────────
         # Emitted after the real ones so a mirror can never shadow a node the

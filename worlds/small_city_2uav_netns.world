@@ -5,8 +5,9 @@
 
     <spherical_coordinates>
       <surface_model>EARTH_WGS84</surface_model>
-      <latitude_deg>6.0792673</latitude_deg>
-      <longitude_deg>80.1921607</longitude_deg>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>6.0792673</latitude_deg>      <!-- X-->
+      <longitude_deg>80.1921607</longitude_deg>   <!-- Y-->
       <elevation>31</elevation>
       <heading_deg>0</heading_deg>
     </spherical_coordinates>
@@ -108,6 +109,29 @@
       </pose>
       <uri>model://ocean</uri>
     </include>
+
+    <actor name="actor">
+      <skin>
+        <filename>file://media/models/walk.dae</filename>
+      </skin>
+      <animation name="walking">
+        <filename>file://media/models/walk.dae</filename>
+        <interpolate_x>true</interpolate_x>
+      </animation>
+            <script>
+        <loop>true</loop>
+        <delay_start>0.0</delay_start>
+        <auto_start>true</auto_start>
+        <trajectory id="0" type="walking">
+          <waypoint><time>0</time>   <pose>-30 -45 0.015 0 0 0</pose></waypoint>
+          <waypoint><time>50</time>  <pose> 30 -45 0.015 0 0 0</pose></waypoint>
+          <waypoint><time>52</time>  <pose> 30 -45 0.015 0 0 3.14159</pose></waypoint>
+          <waypoint><time>102</time> <pose>-30 -45 0.015 0 0 3.14159</pose></waypoint>
+          <waypoint><time>104</time> <pose>-30 -45 0.015 0 0 0</pose></waypoint>
+        </trajectory>
+      </script>
+    </actor>
+
 
 
 
@@ -4500,7 +4524,7 @@
 
     <!-- UAV 1 - SITL instance 0 - ports 9002/9003 -->
     <model name="iris_1_demo">
-      <pose>-70 -22 0 0 0 0</pose>
+      <pose>-70 -22 0 0 0 0</pose>      <!-- <pose>  x  y  z   roll  pitch  yaw  </pose>-->
       <include>
         <uri>model://iris_1_netns</uri>
       </include>
@@ -4508,7 +4532,7 @@
 
     <!-- UAV 2 - SITL instance 1 - ports 9012/9013 -->
     <model name="iris_2_demo">
-      <pose>38 -186 0 0 0 0</pose>
+      <pose>-70 -32 0 0 0 0</pose>      <!-- <pose>  x  y  z   roll  pitch  yaw  </pose>-->
       <include>
         <uri>model://iris_2_netns</uri>
       </include>
@@ -4533,7 +4557,7 @@
          blocks its own links. -->
     <model name="gcs">
       <static>true</static>
-      <pose>-70 -7 0 0 0 0</pose>
+      <pose>-70 -7 0 0 0 0</pose>      <!-- <pose>  x  y  z   roll  pitch  yaw  </pose>-->
       <link name="cabinet">
         <pose>0 0 0.45 0 0 0</pose>
         <collision name="cabinet_col">
@@ -4556,16 +4580,36 @@
       </link>
     </model>
 
+    <!-- TEMPORARILY DISABLED, ISOLATION TEST (2026-09-01)
+
+         Missions lose /uavN/gps about ONE SECOND after the vehicle starts
+         moving, and never get it back: stationary is fine, moving is fatal.
+         /uavN/rel_alt keeps flowing throughout (separate MAVLink thread) and
+         the XRCE session never resets, so the loss is in the TRANSPORT, and
+         the DDS path crosses ns-3.
+
+         This plugin is the prime suspect: it re-rays every link as positions
+         change, and the channel is DynamicObstacleLoss(mLos=3, mNlos=1). A
+         link it judges blocked drops to m=1 Rayleigh fading, easily enough to
+         kill the XRCE traffic.
+
+         With this commented out:
+           missions complete   : the obstacle model was killing the link, and
+                                 the fix belongs in the raycaster or mNlos
+           missions still fail : ns-3 channel is innocent, look upstream at
+                                 AP_DDS or the agent
+
+         RESTORE THIS BLOCK once the answer is known. Obstacle loss is a
+         headline result of the paper, not an optional extra.
+
     <plugin name="obstacle_raycast" filename="libobstacle_raycast_plugin.so">
-        <n_uavs>1</n_uavs>
+        <n_uavs>4</n_uavs>
         <uav_prefix>iris_</uav_prefix>
-        <!-- ADDED: ground station becomes node 0, so the pair loop covers the
-             three GCS<->UAV links as well as the three UAV<->UAV ones.
-             gcs_antenna_height must match world_pos_publisher.py. -->
         <gcs_enabled>true</gcs_enabled>
         <gcs_model>gcs</gcs_model>
         <gcs_antenna_height>2.9</gcs_antenna_height>
     </plugin>
+    -->
 
     <!-- Publishes ground-truth model poses on /gazebo/model_states so that
          world_pos_publisher.py can relay them to /uav_world_positions. This
@@ -4626,5 +4670,15 @@
         <static>true</static>
       </include>
     </model>
+
+<!-- <actor name="actor">
+      <skin>
+        <filename>walk.dae</filename>
+      </skin>
+      <animation name="animation">
+        <filename>walk.dae</filename>
+      </animation>
+-->   
+
   </world>
 </sdf>

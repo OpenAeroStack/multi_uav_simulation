@@ -30,6 +30,8 @@ Parameters (all optional; defaults in DEFAULTS below):
                         180 = wait to the south, look north.
     hold_seconds        how long to hold station
     waypoint_timeout_s  give up on a leg after this long
+    gps_timeout_s       give up waiting for the first GPS fix after this long
+    gps_stale_s         abort if the position feed stops updating for this long
 
 Services and topics used (all under /uav<id>/):
     arm, takeoff, rtl   std_srvs/Trigger
@@ -80,12 +82,14 @@ DEFAULTS = {
     #     east  = -(-187.9 - -22.0) = +165.9
     "target_east_m":      165.9,
     "target_north_m":     110.5,
-    "altitude_m":         15.0,
-    "offset_m":           15.0,         # hold this far short; 0 = directly overhead
+    "altitude_m":         30.0,
+    "offset_m":           30.0,         # hold this far short; 0 = directly overhead
     "offset_bearing_deg": 180.0,        # wait to the south, look north
     "hold_seconds":       30.0,
     "waypoint_timeout_s": 300.0,        # 237 m at 1 m/s needs ~240 s
     "climb_timeout_s":    60.0,
+    "gps_timeout_s":      30.0,         # first fix; 0 would mean "wait forever"
+    "gps_stale_s":        5.0,          # a FROZEN feed is not a healthy one
 }
 
 ARRIVAL_RADIUS_M = 2.5      # horizontal distance that counts as "arrived"
@@ -143,6 +147,8 @@ class SurveyMission(Node):
         self.hold_s    = self._param("hold_seconds")
         self.wp_timeout    = self._param("waypoint_timeout_s")
         self.climb_timeout = self._param("climb_timeout_s")
+        self.gps_timeout   = self._param("gps_timeout_s")
+        self.gps_stale     = self._param("gps_stale_s")
 
         self.ns = f"/uav{self.uav_id}"
 
@@ -151,6 +157,7 @@ class SurveyMission(Node):
         self.lat: float | None = None
         self.lon: float | None = None
         self.rel_alt: float = 0.0
+        self.last_gps_t: float = 0.0
 
         # BEST_EFFORT matches drone_bridge's publishers. A RELIABLE subscriber
         # would silently match nothing and look exactly like a dead topic.
@@ -177,6 +184,7 @@ class SurveyMission(Node):
     # ── telemetry callbacks ──────────────────────────────────────────────
     def _on_gps(self, msg: NavSatFix) -> None:
         self.lat, self.lon = msg.latitude, msg.longitude
+        self.last_gps_t = time.time()
 
     def _on_alt(self, msg: Float32) -> None:
         self.rel_alt = msg.data
@@ -194,9 +202,47 @@ class SurveyMission(Node):
             raise MissionAborted(f"{name} failed: {result.message}")
 
     def wait_for_gps(self) -> None:
-        """Block until the first GPS fix arrives, so positions are usable."""
+        """Block until the first GPS fix arrives, so positions are usable.
+
+        Bounded, because /uavN/gps can stop forever rather than merely stall:
+        AP_DDS sometimes re-establishes its XRCE session without re-creating
+        its publishers, and navsat then never returns for the life of the run.
+        Waiting unbounded there hung this script -- and with it run_hitl.sh,
+        which blocks on `wait` -- until someone noticed and killed it. Failing
+        raises MissionAborted like every other wait here, so `finally:` still
+        flies the RTL.
+        """
+        deadline = time.time() + self.gps_timeout
         while rclpy.ok() and self.lat is None:
+            if time.time() >= deadline:
+                raise MissionAborted(
+                    f"no GPS on {self.ns}/gps after {self.gps_timeout:.0f} s. "
+                    "AP_DDS has probably lost its publishers -- check for an "
+                    "'establish_session' after 'create_topic' in the "
+                    "micro_ros_agent log, and relaunch if so.")
             rclpy.spin_once(self, timeout_sec=0.3)
+
+
+    def check_gps_fresh(self) -> None:
+        """Raise if the position feed has stopped updating.
+
+        A frozen fix is NOT the same failure as a missing one, and it is the
+        more dangerous of the two: self.lat still holds a plausible number, so
+        every distance computed from it looks reasonable while being measured
+        from wherever the aircraft was when the feed died. That is exactly how
+        a flight to the waypoint got reported as "never left the pad" -- ns-3's
+        ground truth had the aircraft ON the waypoint at the time.
+
+        AP_DDS drops its publishers on some session re-establishes and never
+        re-creates them, so this can happen at any point in a run.
+        """
+        age = time.time() - self.last_gps_t
+        if self.last_gps_t > 0.0 and age > self.gps_stale:
+            raise MissionAborted(
+                f"position feed stale: no {self.ns}/gps for {age:.0f} s. "
+                "AP_DDS has probably lost its publishers -- look for an "
+                "'establish_session' after 'create_topic' in the "
+                "micro_ros_agent log.")
 
     def climb_to(self, altitude: float) -> None:
         """Command the current position at a new altitude and wait for it."""
@@ -207,6 +253,7 @@ class SurveyMission(Node):
         deadline = time.time() + self.climb_timeout
         while rclpy.ok() and time.time() < deadline:
             rclpy.spin_once(self, timeout_sec=0.3)
+            self.check_gps_fresh()
             if self.rel_alt >= altitude * 0.9:      # 90% is close enough
                 self.get_logger().info(f"  reached {self.rel_alt:.1f} m")
                 return
@@ -231,6 +278,7 @@ class SurveyMission(Node):
         deadline = time.time() + self.wp_timeout
         while rclpy.ok() and time.time() < deadline:
             rclpy.spin_once(self, timeout_sec=0.3)
+            self.check_gps_fresh()
             if self.lat is None:
                 continue
             remaining = distance_m(self.lat, self.lon, lat, lon)

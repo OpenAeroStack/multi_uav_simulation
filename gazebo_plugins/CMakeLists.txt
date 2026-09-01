@@ -24,6 +24,7 @@ target_link_libraries(obstacle_raycast_plugin
 ament_target_dependencies(obstacle_raycast_plugin
   rclcpp std_msgs geometry_msgs gazebo_dev gazebo_ros)
 
+
 install(TARGETS obstacle_raycast_plugin
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)

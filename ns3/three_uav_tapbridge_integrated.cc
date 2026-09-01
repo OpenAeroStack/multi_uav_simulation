@@ -7,10 +7,11 @@
 //
 //  Topology: 4 nodes. All four positions come from Gazebo over ROS -- the GCS
 //  is a real model in the world, not a hard-coded coordinate in this file.
-//      node 0 = GCS   (ground station)      tap-gcs   10.42.0.10
-//      node 1 = UAV1                        tap-uav1  10.42.0.11
-//      node 2 = UAV2                        tap-uav2  10.42.0.12
-//      node 3 = UAV3                        tap-uav3  10.42.0.13
+//
+//  node 1  tap-uav1  10.42.0.11   uav1ns      simulated UAV1
+//  node 2  tap-uav2  10.42.0.12   Pi 1        ← companion computer on UAV1
+//  node 3  tap-uav3  10.42.0.13   uav2ns      simulated second aircraft
+//  node 4  tap-uav4  10.42.0.14   Pi 2        ← companion computer on UAV2
 //
 //  6 links are modelled: 3 GCS<->UAV + 3 UAV<->UAV. The GCS links are the ones
 //  that matter most -- the station sits at ground level, so it is by far the

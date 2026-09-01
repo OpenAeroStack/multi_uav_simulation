@@ -25,6 +25,8 @@ import threading
 import time
 
 import rclpy
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 
@@ -88,13 +90,42 @@ class DroneBridge(Node):
                 stream_id, rate_hz, 1)
         self.get_logger().info(f'[UAV{self.uav_id}] Telemetry streams requested')
 
+        # ── callback groups ───────────────────────────────────────────────────
+        #
+        # WHY THIS EXISTS
+        #   The service handlers below legitimately take tens of seconds: _srv_arm
+        #   retries arming for up to 40 s, _srv_takeoff then waits up to 30 s for
+        #   altitude, and both block in _wait_for()'s time.sleep() loop.
+        #
+        #   On the default single-threaded executor those sleeps hold the ONLY
+        #   callback thread, so _cb_navsat cannot run -- and since /uavN/gps is
+        #   republished from inside that callback, the position feed goes silent
+        #   for exactly as long as the service takes. A mission then sees a frozen
+        #   position and concludes the aircraft never moved. Measured: a 14.4 s
+        #   takeoff produced "no /uav2/gps for 14 s" the instant it returned.
+        #
+        #   Worse, _srv_arm waits on self.gps_ok, which is set BY the callback it
+        #   is starving: if GPS was not already flowing when the service was
+        #   called, that wait can never succeed. That is the "GPS not ready -- is
+        #   micro_ros_agent running?" failure.
+        #
+        #   So telemetry goes in a reentrant group (free to run at any time, on
+        #   any thread) and the slow services in their own group. main() drives
+        #   both with a MultiThreadedExecutor.
+        self.cb_telemetry = ReentrantCallbackGroup()
+        # Mutually exclusive: the handlers share self.mav, and pymavlink's
+        # connection is not safe to write from two threads at once.
+        self.cb_commands  = MutuallyExclusiveCallbackGroup()
+
         # ── DDS subscribers (telemetry) ───────────────────────────────────────
         self.create_subscription(
             NavSatFix,    f'/ap/v{self.uav_id}/navsat',
-            self._cb_navsat,  AP_DDS_QOS)
+            self._cb_navsat,  AP_DDS_QOS,
+            callback_group=self.cb_telemetry)
         self.create_subscription(
             BatteryState, f'/ap/v{self.uav_id}/battery',
-            self._cb_battery, AP_DDS_QOS)
+            self._cb_battery, AP_DDS_QOS,
+            callback_group=self.cb_telemetry)
 
         # ── publishers ────────────────────────────────────────────────────────
         self.pub_gps     = self.create_publisher(NavSatFix, f'{ns}/gps',     10)
@@ -104,25 +135,35 @@ class DroneBridge(Node):
         self.pub_battery = self.create_publisher(Float32,   f'{ns}/battery', 10)
 
         # ── goto subscriber ───────────────────────────────────────────────────
-        # Mission nodes publish here, bridge forwards via MAVLink
+        # Mission nodes publish here, bridge forwards via MAVLink. It writes to
+        # self.mav, so it shares the command group rather than the telemetry one.
         self.create_subscription(
             GeoPoint, f'{ns}/goto',
-            self._cb_goto, 10)
+            self._cb_goto, 10,
+            callback_group=self.cb_commands)
 
         # ── services ──────────────────────────────────────────────────────────
-        self.create_service(Trigger, f'{ns}/arm',     self._srv_arm)
-        self.create_service(Trigger, f'{ns}/disarm',  self._srv_disarm)
-        self.create_service(Trigger, f'{ns}/takeoff', self._srv_takeoff)
-        self.create_service(Trigger, f'{ns}/land',    self._srv_land)
-        self.create_service(Trigger, f'{ns}/rtl',     self._srv_rtl)
+        self.create_service(Trigger, f'{ns}/arm',     self._srv_arm,
+                            callback_group=self.cb_commands)
+        self.create_service(Trigger, f'{ns}/disarm',  self._srv_disarm,
+                            callback_group=self.cb_commands)
+        self.create_service(Trigger, f'{ns}/takeoff', self._srv_takeoff,
+                            callback_group=self.cb_commands)
+        self.create_service(Trigger, f'{ns}/land',    self._srv_land,
+                            callback_group=self.cb_commands)
+        self.create_service(Trigger, f'{ns}/rtl',     self._srv_rtl,
+                            callback_group=self.cb_commands)
 
         # ── MAVLink heartbeat thread ──────────────────────────────────────────
         self._stop = False
         threading.Thread(target=self._mav_loop, daemon=True).start()
 
         # ── GPS ready notifier ────────────────────────────────────────────────
+        # Telemetry group: this must still tick while a service is arming, or it
+        # would only report "GPS flowing" once the aircraft is already committed.
         self._ready_logged = False
-        self.create_timer(1.0, self._check_ready)
+        self.create_timer(1.0, self._check_ready,
+                          callback_group=self.cb_telemetry)
 
         self.get_logger().info(
             f'[UAV{self.uav_id}] Bridge ready'
@@ -323,11 +364,19 @@ class DroneBridge(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = DroneBridge()
+
+    # MultiThreadedExecutor, NOT rclpy.spin(): the arm/takeoff handlers block for
+    # tens of seconds, and on a single thread that silences the position feed for
+    # the whole time (see the callback-group comment in __init__). Three threads
+    # is enough -- one long-running command, telemetry, and headroom.
+    executor = MultiThreadedExecutor(num_threads=3)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
+        executor.shutdown()
         node.destroy_node()
         rclpy.shutdown()
 
