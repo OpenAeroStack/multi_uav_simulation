@@ -44,6 +44,21 @@ ip netns list 2>/dev/null | grep -qw "$NAMESPACE" || {
     exit 1
 }
 
+# Preflight: if the dashboard is not actually listening inside the namespace,
+# say so once instead of letting socat flood the terminal with one
+# "Connection refused" per browser retry.
+if ! sudo ip netns exec "$NAMESPACE" \
+        ss -lnt "sport = :${PORT}" 2>/dev/null | grep -q LISTEN; then
+    echo "ERROR: nothing is listening on 127.0.0.1:${PORT} inside '${NAMESPACE}'." >&2
+    echo "       The bridge only forwards a port; it cannot create one." >&2
+    echo >&2
+    echo "       Start the dashboard first, in its own terminal:" >&2
+    echo "           scripts/run_dashboard.sh" >&2
+    echo >&2
+    echo "       then re-run this bridge." >&2
+    exit 1
+fi
+
 INNER_PID=""
 OUTER_PID=""
 
