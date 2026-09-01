@@ -1,0 +1,18 @@
+{
+  "method": "first two consecutive GPS samples at or above 0.5 m relative altitude",
+  "rationale": "The real event log lacks an explicit TAKEOFF event; applying the same measured-altitude rule to both datasets avoids row-index and logger-start alignment.",
+  "real_alignment_event": "sustained relative_alt_m >= 0.5 m",
+  "sim_alignment_event": "sustained relative_altitude_m >= 0.5 m (corroborates recorded TAKEOFF event)",
+  "real_alignment_elapsed_s": 238.977115,
+  "sim_alignment_elapsed_s": 41.607406,
+  "real_original_timestamp": 1788179834.846621,
+  "sim_original_timestamp": 1788295993.2715926,
+  "real_mission_end_event": "DISARMED",
+  "sim_mission_end_event": "LANDING",
+  "real_mission_end_after_alignment_s": 88.801884,
+  "sim_mission_end_after_alignment_s": 109.441877,
+  "comparison_start_s": 0.0,
+  "comparison_end_s": 88.801884,
+  "shared_duration_s": 88.801884,
+  "no_extrapolation": true
+}

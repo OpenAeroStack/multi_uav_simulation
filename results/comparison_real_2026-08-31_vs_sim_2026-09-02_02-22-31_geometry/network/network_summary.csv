@@ -1,0 +1,15 @@
+metric,value,unit
+snr_db_sample_count,182793,count
+snr_db_mean,35.8927478,dB
+snr_db_minimum,4.1012,dB
+snr_db_p05,26.63702,dB
+signal_dbm_sample_count,182793,count
+signal_dbm_mean,-58.0676075,dBm
+signal_dbm_minimum,-81.7208,dBm
+signal_dbm_p05,-67.3211,dBm
+real_radio_sample_count,3,count
+simulation_rf_scope,All delivered 802.11 PHY receive rows; not isolated application telemetry.,
+real_rf_comparison_status,Insufficient real radio samples for RF time-series validation.,
+packet_loss_status,Unavailable; no defensible application/network packet-loss measurement in these datasets.,
+rtt_status,Unavailable,
+throughput_status,Unavailable,

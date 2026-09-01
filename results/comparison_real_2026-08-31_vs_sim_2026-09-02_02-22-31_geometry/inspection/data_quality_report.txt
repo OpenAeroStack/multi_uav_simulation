@@ -1,0 +1,67 @@
+REAL VS SIMULATION DATA QUALITY REPORT
+==========================================
+
+Real directory: /home/randilsk/FYP/multi_uav_sim/results/real_2026-08-31_18-03-14
+Simulation directory: /home/randilsk/FYP/multi_uav_sim/results/sim_run_2026-09-02_02-22-31
+
+REAL FILES
+----------
+events.csv: 76 rows, 7 columns, time=elapsed_s, duration=1114.14589, rate=0.06731613936124649, duplicate timestamps=10
+gps.csv: 2198 rows, 27 columns, time=elapsed_s, duration=1106.34523, rate=1.985817754192333, duplicate timestamps=0
+gps_quality.csv: 2198 rows, 34 columns, time=elapsed_s, duration=1106.420011, rate=1.9856835362317033, duplicate timestamps=0
+local_position_ned.csv: 2199 rows, 12 columns, time=elapsed_s, duration=1106.390009, rate=1.986641222462449, duplicate timestamps=0
+mavlink_sequence.csv: 66105 rows, 10 columns, time=elapsed_s, duration=1114.14589, rate=59.33154768447784, duplicate timestamps=30603
+metadata.json: JSON metadata keys=['schema_version', 'dataset_kind', 'processing_status', 'processed_at_utc', 'input', 'output_directory', 'log_timeline', 'coordinate_frame', 'frame_and_unit_notes', 'message_counts', 'output_row_counts', 'source_endpoints', 'malformed_packet_count', 'telemetry_timing_summary', 'mavlink_sequence_summary', 'mavlink_sequence_caveat', 'radio_record_count', 'waypoints_reached', 'flight_modes_observed', 'warnings']
+mission.csv: 2472 rows, 26 columns, time=elapsed_s, duration=1106.359466, rate=2.233451311203406, duplicate timestamps=0
+radio.csv: 3 rows, 13 columns, time=elapsed_s, duration=1.819099, rate=1.09944538477565, duplicate timestamps=1
+statustext.csv: 43 rows, 9 columns, time=elapsed_s, duration=417.59127600000005, rate=0.10057681377424177, duplicate timestamps=2
+telemetry_timing.csv: 2198 rows, 12 columns, time=elapsed_s, duration=1106.34523, rate=1.985817754192333, duplicate timestamps=0
+vehicle_state.csv: 9902 rows, 29 columns, time=elapsed_s, duration=1106.375004, rate=8.949045273260712, duplicate timestamps=2838
+
+SIMULATION FILES
+----------------
+events.csv: 10 rows, 6 columns, time=elapsed_time_s, duration=163.519683, rate=0.055039245642373225, duplicate timestamps=0
+gps.csv: 122 rows, 18 columns, time=elapsed_time_s, duration=160.061825, rate=0.7559578931453518, duplicate timestamps=0
+metadata.json: JSON metadata keys=['available_topics', 'coordinate_frames', 'duration_s', 'end_datetime', 'end_wall_time_unix_s', 'gcs_position_enu_m', 'gps_local_origin', 'measurement_notes', 'network_source_file', 'notes', 'ros_domain_id', 'run_id', 'sample_counts', 'selected_topics', 'simulation', 'sitl_system_id', 'sitl_system_id_source', 'software', 'start_datetime', 'start_wall_time_unix_s', 'telemetry_summary', 'vehicle_id']
+mission.csv: 166 rows, 22 columns, time=elapsed_time_s, duration=160.061797, rate=1.030851852800328, duplicate timestamps=0
+network.csv: 342189 rows, 16 columns, time=elapsed_time_s, duration=163.384852, rate=2094.3679650301974, duplicate timestamps=0
+telemetry_timing.csv: 317 rows, 11 columns, time=elapsed_time_s, duration=163.297374, rate=1.9351199119711504, duplicate timestamps=0
+vehicle_state.csv: 723 rows, 25 columns, time=elapsed_time_s, duration=162.625311, rate=4.439653308334027, duplicate timestamps=0
+
+CLOCKS AND FRAMES
+-----------------
+Real primary clock: Mission Planner .tlog packet-arrival timestamp (_timestamp)
+Simulation primary comparison clock: logger wall-time callback arrival / elapsed_time_s.
+Real local frame metadata: {'geodetic_crs': 'WGS84 three-dimensional (EPSG:4979)', 'local_frame': 'ENU tangent frame: +east, +north, +up', 'conversion': 'pyproj EPSG:4979 to ECEF EPSG:4978, then ECEF-to-ENU rotation', 'pyproj_version': '3.3.0', 'origin_source': 'first_valid_global_position_int', 'origin_lat_deg': 6.0773732, 'origin_lon_deg': 80.1907199, 'origin_alt_m': 29.48}
+Simulation frame metadata: {'gps_derived_xy': 'WGS-84 local tangent approximation about recorded origin', 'heading_deg': 'clockwise from North, range [0, 360)', 'local_pose_and_velocity': 'ROS REP-103 ENU: X East, Y North, Z Up', 'quaternion_and_euler': 'ROS ENU; yaw is counter-clockwise from East'}
+
+ALIGNMENT
+---------
+{
+  "method": "first two consecutive GPS samples at or above 0.5 m relative altitude",
+  "rationale": "The real event log lacks an explicit TAKEOFF event; applying the same measured-altitude rule to both datasets avoids row-index and logger-start alignment.",
+  "real_alignment_event": "sustained relative_alt_m >= 0.5 m",
+  "sim_alignment_event": "sustained relative_altitude_m >= 0.5 m (corroborates recorded TAKEOFF event)",
+  "real_alignment_elapsed_s": 238.977115,
+  "sim_alignment_elapsed_s": 41.607406,
+  "real_original_timestamp": 1788179834.846621,
+  "sim_original_timestamp": 1788295993.2715926,
+  "real_mission_end_event": "DISARMED",
+  "sim_mission_end_event": "LANDING",
+  "real_mission_end_after_alignment_s": 88.801884,
+  "sim_mission_end_after_alignment_s": 109.441877,
+  "comparison_start_s": 0.0,
+  "comparison_end_s": 88.801884,
+  "shared_duration_s": 88.801884,
+  "no_extrapolation": true
+}
+
+QUALITY/COMPARABILITY FINDINGS
+------------------------------
+- GPS latitude/longitude, relative altitude, measured groundspeed, GPS heading, and application telemetry interarrival are comparable after time alignment.
+- Both trajectories must be transformed from latitude/longitude into one common ENU frame; their recorded local frames have different origins/conventions.
+- Real vehicle_state.csv is asynchronous by source_message; blank fields are structural, not missing synchronized measurements.
+- The real flight is an AUTO mission with multiple mission items; the simulation is one GUIDED target. Only their common final geographic target is directly comparable.
+- Simulation SNR/signal are simulation-only. Three real RADIO/RADIO_STATUS rows are insufficient and are raw indicators, not verified dBm/SNR.
+- Simulation MAVLink sequence numbers are unavailable, so sequence-loss estimates cannot be compared.
+- Neither dataset contains defensible application packet loss, RTT, or throughput measurements.

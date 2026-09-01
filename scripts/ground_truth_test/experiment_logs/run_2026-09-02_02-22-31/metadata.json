@@ -1,0 +1,83 @@
+{
+  "available_topics": [],
+  "coordinate_frames": {
+    "gps_derived_xy": "WGS-84 local tangent approximation about recorded origin",
+    "heading_deg": "clockwise from North, range [0, 360)",
+    "local_pose_and_velocity": "ROS REP-103 ENU: X East, Y North, Z Up",
+    "quaternion_and_euler": "ROS ENU; yaw is counter-clockwise from East"
+  },
+  "duration_s": 163.55392236899934,
+  "end_datetime": "2026-09-01T20:55:15.218243+00:00",
+  "end_wall_time_unix_s": 1788296115.2181048,
+  "gcs_position_enu_m": {
+    "east": -2.0,
+    "north": 0.0,
+    "source": "mech_workshop_validation.world defaults/parameters",
+    "up_antenna": 2.9
+  },
+  "gps_local_origin": {
+    "altitude_msl_m": 0.0,
+    "latitude_deg": 6.077372074127197,
+    "longitude_deg": 80.19075775146484,
+    "source": "/ap/v1/gps_global_origin/filtered"
+  },
+  "measurement_notes": {
+    "mission": "This is a GUIDED mission, not an uploaded MAVLink waypoint mission; current_waypoint is therefore intentionally blank.",
+    "network": "Raw delivered 802.11 PHY receive rows tailed passively. No packet-loss, RTT, throughput, or transmitter identity is fabricated. File-writer buffering may delay wall-time observation of a group of ns-3 rows.",
+    "sequence_numbers": "Unavailable: drone_bridge does not republish the MAVLink sequence, component ID, or time_boot_ms with /uav1/rel_alt. No second MAVLink client is opened because it could interfere with drone_bridge.",
+    "sim_time": "No trustworthy Gazebo /clock is visible inside gcsns. source_clock_s records /ap/v1/clock separately; ns3_time_s records ns-3 internal time and neither is treated as wall time.",
+    "telemetry_timing": "One row per /uav1/rel_alt publication. drone_bridge emits one such message for each received MAVLink GLOBAL_POSITION_INT. Inter-arrival uses monotonic callback arrival time at the GCS side."
+  },
+  "network_source_file": "/tmp/ns3_snr_mw.csv",
+  "notes": "",
+  "ros_domain_id": "0",
+  "run_id": "run_2026-09-02_02-22-31",
+  "sample_counts": {
+    "events": 10,
+    "gps": 122,
+    "mission": 166,
+    "network": 342189,
+    "telemetry_timing": 317,
+    "vehicle_state": 723
+  },
+  "selected_topics": {
+    "armed": "/uav1/armed",
+    "global_origin": "/ap/v1/gps_global_origin/filtered",
+    "goal": "/ap/v1/goal_lla",
+    "goto_command": "/uav1/goto",
+    "gps": "/ap/v1/navsat",
+    "local_position": "/ap/v1/pose/filtered",
+    "local_velocity": "/ap/v1/twist/filtered",
+    "mode": "/uav1/mode",
+    "relative_altitude": "/uav1/rel_alt",
+    "source_clock": "/ap/v1/clock",
+    "status": "/ap/v1/status"
+  },
+  "simulation": true,
+  "sitl_system_id": 1,
+  "sitl_system_id_source": "vehicle_id; launcher starts ArduCopter with --sysid 1",
+  "software": {
+    "ardupilot_git_commit": "ec09e44a0966a7dd936960cbf4343cfaadeaaf7b",
+    "logger_file": "/home/randilsk/FYP/multi_uav_sim/scripts/ground_truth_test/experiment_logger.py",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "python": "3.10.12",
+    "repository_git_commit": "75323dc035ab1e6d9c922b139d4831cb9b0aabcb"
+  },
+  "start_datetime": "2026-09-01T20:52:31.664189+00:00",
+  "start_wall_time_unix_s": 1788295951.6641858,
+  "telemetry_summary": {
+    "gaps_over_1000_ms": 0,
+    "gaps_over_1500_ms": 0,
+    "gaps_over_750_ms": 0,
+    "maximum_gap_ms": 626.6631160033285,
+    "mean_interarrival_ms": 516.7638559778425,
+    "mean_rate_hz": 1.9351198587752574,
+    "median_interarrival_ms": 517.0529499991972,
+    "messages_received": 317,
+    "observed_span_s": 163.29737848899822,
+    "p95_interarrival_ms": 553.9904910037876,
+    "sequence_loss_estimate": null,
+    "sequence_loss_note": "Unavailable; drone_bridge does not republish the MAVLink sequence number"
+  },
+  "vehicle_id": 1
+}

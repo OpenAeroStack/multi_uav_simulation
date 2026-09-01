@@ -1,0 +1,7 @@
+metric,value,unit
+real_mission_duration_s,88.801884,s
+sim_mission_duration_s,109.441877,s
+mission_duration_difference_s,20.639993,s
+mission_duration_difference_percent,23.2427422,%
+final_target_arrival_time_difference_s,8.76033,s
+final_target_arrival_abs_difference_s,8.76033,s

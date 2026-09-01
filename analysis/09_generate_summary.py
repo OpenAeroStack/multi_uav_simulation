@@ -17,12 +17,16 @@ def show(value, digits=3):
 def run(real_dir,sim_dir,output):
     a=load_or_create_alignment(real_dir,sim_dir,output)
     tr=load_metric_file(output/"trajectory"/"trajectory_metrics.csv"); al=load_metric_file(output/"altitude"/"altitude_metrics.csv")
+    geo=load_metric_file(output/"trajectory"/"geometric_path_metrics.csv")
     sp=load_metric_file(output/"speed"/"speed_metrics.csv"); hd=load_metric_file(output/"heading"/"heading_metrics.csv"); mi=load_metric_file(output/"mission"/"mission_metrics.csv")
     tele={r["metric"]:r for r in read_rows(output/"telemetry"/"telemetry_metrics.csv")}
     rows=[
       {"Category":"Trajectory","Metric":"Total horizontal distance","Real":show(tr.get("real_total_distance_m")),"Simulation":show(tr.get("sim_total_distance_m")),"Difference / Comparison":show(tr.get("distance_difference_m")),"Unit":"m"},
       {"Category":"Trajectory","Metric":"Horizontal RMSE","Real":"N/A","Simulation":"N/A","Difference / Comparison":show(tr.get("rmse_horizontal_error_m")),"Unit":"m"},
       {"Category":"Trajectory","Metric":"P95 horizontal error","Real":"N/A","Simulation":"N/A","Difference / Comparison":show(tr.get("p95_horizontal_error_m")),"Unit":"m"},
+      {"Category":"Trajectory geometry","Metric":"Symmetric mean path error","Real":"N/A","Simulation":"N/A","Difference / Comparison":show(geo.get("symmetric_mean_path_error_m")),"Unit":"m"},
+      {"Category":"Trajectory geometry","Metric":"Symmetric path RMSE","Real":"N/A","Simulation":"N/A","Difference / Comparison":show(geo.get("symmetric_rmse_path_error_m")),"Unit":"m"},
+      {"Category":"Trajectory geometry","Metric":"Symmetric maximum path deviation","Real":"N/A","Simulation":"N/A","Difference / Comparison":show(geo.get("symmetric_max_path_deviation_m")),"Unit":"m"},
       {"Category":"Altitude","Metric":"Mean relative altitude","Real":show(al.get("real_mean_altitude_m")),"Simulation":show(al.get("sim_mean_altitude_m")),"Difference / Comparison":show(al.get("mean_altitude_error_m")),"Unit":"m"},
       {"Category":"Altitude","Metric":"Altitude RMSE","Real":"N/A","Simulation":"N/A","Difference / Comparison":show(al.get("rmse_altitude_m")),"Unit":"m"},
       {"Category":"Speed","Metric":"Mean measured groundspeed","Real":show(sp.get("real_mean_speed_mps")),"Simulation":show(sp.get("sim_mean_speed_mps")),"Difference / Comparison":show(sp.get("mean_speed_error_mps")),"Unit":"m/s"},
@@ -72,6 +76,8 @@ Both WGS84 GPS tracks were recomputed in a common ENU frame about ({origin['lati
 Results
 -------
 The trajectories have a horizontal RMSE of {show(tr.get('rmse_horizontal_error_m'))} m and P95 separation of {show(tr.get('p95_horizontal_error_m'))} m over the shared interval. Recorded horizontal distances are {show(tr.get('real_total_distance_m'))} m real and {show(tr.get('sim_total_distance_m'))} m simulated.
+
+The time-aligned horizontal error above includes both spatial path mismatch and mission timing differences. Independently of timestamps, bidirectional point-to-polyline geometry gives a symmetric mean path error of {show(geo.get('symmetric_mean_path_error_m'))} m, symmetric RMSE of {show(geo.get('symmetric_rmse_path_error_m'))} m, and Hausdorff-style maximum deviation of {show(geo.get('symmetric_max_path_deviation_m'))} m. These geometry-only values measure path-shape similarity and do not pair samples by time.
 
 Relative-altitude RMSE is {show(al.get('rmse_altitude_m'))} m. Measured-groundspeed RMSE is {show(sp.get('rmse_speed_mps'))} m/s. Circular GPS-heading mean absolute error is {show(hd.get('mean_abs_heading_error_deg'))} degrees.
 
