@@ -80,16 +80,51 @@ class DroneBridge(Node):
         self.mav.wait_heartbeat()
         self.get_logger().info(f'[UAV{self.uav_id}] MAVLink heartbeat OK')
 
-        # ArduPilot only streams HEARTBEAT until a GCS requests more.
-        # Request GLOBAL_POSITION_INT (for rel_alt) and basic status.
-        for stream_id, rate_hz in [
-            (mavutil.mavlink.MAV_DATA_STREAM_POSITION,        10),
-            (mavutil.mavlink.MAV_DATA_STREAM_EXTENDED_STATUS,  2),
-        ]:
-            self.mav.mav.request_data_stream_send(
-                self.mav.target_system, self.mav.target_component,
-                stream_id, rate_hz, 1)
-        self.get_logger().info(f'[UAV{self.uav_id}] Telemetry streams requested')
+        # Keep the existing basic-status stream, but configure position output
+        # per message so LOCAL_POSITION_NED and other telemetry are unaffected.
+        self.mav.mav.request_data_stream_send(
+            self.mav.target_system, self.mav.target_component,
+            mavutil.mavlink.MAV_DATA_STREAM_EXTENDED_STATUS, 2, 1)
+
+        def request_message_interval(message_id, interval_us, label, rate_hz):
+            command = mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL
+            try:
+                self.mav.mav.command_long_send(
+                    self.mav.target_system,
+                    self.mav.target_component,
+                    command,
+                    0,
+                    message_id,
+                    interval_us,
+                    0, 0, 0, 0, 0)
+                ack = self.mav.recv_match(
+                    type='COMMAND_ACK', blocking=True, timeout=2.0,
+                    condition=f'COMMAND_ACK.command=={command}')
+                if ack is None:
+                    self.get_logger().warning(
+                        f'[UAV{self.uav_id}] No acknowledgement for '
+                        f'{label} {rate_hz:g} Hz request')
+                    return
+                if ack.result != mavutil.mavlink.MAV_RESULT_ACCEPTED:
+                    self.get_logger().warning(
+                        f'[UAV{self.uav_id}] {label} {rate_hz:g} Hz request '
+                        f'rejected (MAV_RESULT={ack.result})')
+                    return
+                if label == 'GLOBAL_POSITION_INT':
+                    self.get_logger().info(
+                        f'[UAV{self.uav_id}] Requested '
+                        'GLOBAL_POSITION_INT at 2 Hz')
+            except Exception as exc:
+                self.get_logger().warning(
+                    f'[UAV{self.uav_id}] Could not request '
+                    f'{label} at {rate_hz:g} Hz: {exc}')
+
+        request_message_interval(
+            mavutil.mavlink.MAVLINK_MSG_ID_LOCAL_POSITION_NED,
+            100_000, 'LOCAL_POSITION_NED', 10)
+        request_message_interval(
+            mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT,
+            500_000, 'GLOBAL_POSITION_INT', 2)
 
         # ── DDS subscribers (telemetry) ───────────────────────────────────────
         self.create_subscription(
