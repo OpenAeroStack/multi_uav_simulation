@@ -35,11 +35,11 @@ root namespace the services below do not exist and this script waits forever.
 """
 
 import math
+import threading
 import time
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from std_srvs.srv import Trigger
 from std_msgs.msg import Float32
 from sensor_msgs.msg import NavSatFix
@@ -71,7 +71,13 @@ DEFAULTS = {
     "waypoint_timeout_s": 300.0,
     "climb_timeout_s":    60.0,
     "gps_timeout_s":      30.0,
-    "gps_stale_s":        5.0,          # a FROZEN feed is not a healthy one
+    # 20 s, not 5. The point of this guard is to catch a feed that is DEAD,
+    # not one that paused. city_mission.py on the dynamic-data branch has no
+    # staleness check at all and works fine, because a gap only makes it wait
+    # longer -- whereas 5 s here turned every survivable pause into an abort.
+    "gps_stale_s":        20.0,         # a FROZEN feed is not a healthy one
+    "service_timeout_s":  120.0,        # arm can legitimately retry for ~90 s
+    "settle_s":           15.0,         # DDS discovery headroom before arming
     "hold_seconds":       0.0,      # pause at each waypoint; 0 = fly straight through
 }
 
@@ -128,6 +134,8 @@ class RoadPatrol(Node):
         self.climb_timeout = float(self.get_parameter("climb_timeout_s").value)
         self.gps_timeout   = float(self.get_parameter("gps_timeout_s").value)
         self.gps_stale     = float(self.get_parameter("gps_stale_s").value)
+        self.service_timeout = float(self.get_parameter("service_timeout_s").value)
+        self.settle = float(self.get_parameter("settle_s").value)
         self.hold_s        = float(self.get_parameter("hold_seconds").value)
 
         self.ns      = f"/uav{self.uav_id}"
@@ -136,17 +144,17 @@ class RoadPatrol(Node):
         self.rel_alt = 0.0
         self.last_gps_t = 0.0
 
-        # BEST_EFFORT matches drone_bridge's publishers. A RELIABLE subscriber
-        # would silently match nothing and look exactly like a dead topic --
-        # which is how the first version of this file failed: it subscribed to
-        # /altitude (no such topic; the bridge publishes /rel_alt), so rel_alt
-        # stayed 0.0 and climb_to timed out at "0.0 m after 60 s" while the
-        # aircraft was in fact sitting at 26 m.
-        qos = QoSProfile(depth=10,
-                         reliability=ReliabilityPolicy.BEST_EFFORT,
-                         durability=DurabilityPolicy.VOLATILE)
-        self.create_subscription(NavSatFix, f"{self.ns}/gps", self._cb_gps, qos)
-        self.create_subscription(Float32, f"{self.ns}/rel_alt", self._cb_alt, qos)
+        # DEFAULT QoS (depth 10 = RELIABLE), matching city_mission.py on the
+        # dynamic-data branch, which works.
+        #
+        # This was BEST_EFFORT, justified by a comment claiming it "matches
+        # drone_bridge's publishers". It does not. AP_DDS_QOS in the bridge is
+        # what the bridge uses to SUBSCRIBE to /ap/vN/navsat; the bridge
+        # PUBLISHES /uavN/gps with create_publisher(..., 10), i.e. RELIABLE.
+        # The mismatch let the subscription match intermittently: one run UAV1
+        # received zero GPS messages while its bridge logged the feed flowing.
+        self.create_subscription(NavSatFix, f"{self.ns}/gps", self._cb_gps, 10)
+        self.create_subscription(Float32, f"{self.ns}/rel_alt", self._cb_alt, 10)
         self.pub_goto = self.create_publisher(GeoPoint, f"{self.ns}/goto", 10)
 
         self.arm_cli     = self.create_client(Trigger, f"{self.ns}/arm")
@@ -168,10 +176,23 @@ class RoadPatrol(Node):
     def call_service(self, client, name):
         """Call a Trigger service. Raise MissionAborted if it reports failure."""
         self.get_logger().info(f"calling {name}")
-        client.wait_for_service()
+        if not client.wait_for_service(timeout_sec=self.service_timeout):
+            raise MissionAborted(
+                f"{name} never appeared. Is drone_bridge running INSIDE gcsns?")
         future = client.call_async(Trigger.Request())
-        rclpy.spin_until_future_complete(self, future)
+
+        # Wait on the future rather than spinning it: main() spins this node
+        # continuously, so the response arrives on that thread. Spinning here
+        # too would mean two executors on one node -- and, worse, it is what
+        # used to stall telemetry, because whatever this thread was doing was
+        # the ONLY thing servicing the GPS callback.
+        deadline = time.time() + self.service_timeout
+        while future.result() is None and time.time() < deadline:
+            time.sleep(0.05)
         result = future.result()
+        if result is None:
+            raise MissionAborted(
+                f"{name} did not answer within {self.service_timeout:.0f} s")
         self.get_logger().info(f"  {name} -> {result.message}")
         if not result.success:
             raise MissionAborted(f"{name} failed: {result.message}")
@@ -193,7 +214,7 @@ class RoadPatrol(Node):
                     "AP_DDS has probably lost its publishers -- check for an "
                     "'establish_session' after 'create_topic' in the "
                     "micro_ros_agent log, and relaunch if so.")
-            rclpy.spin_once(self, timeout_sec=0.3)
+            time.sleep(0.1)
 
 
     def check_gps_fresh(self) -> None:
@@ -224,7 +245,7 @@ class RoadPatrol(Node):
         self.get_logger().info(f"climbing to {altitude:.0f} m")
         deadline = time.time() + self.climb_timeout
         while rclpy.ok() and time.time() < deadline:
-            rclpy.spin_once(self, timeout_sec=0.3)
+            time.sleep(0.1)
             self.check_gps_fresh()
             if self.rel_alt >= altitude * 0.9:      # 90% is close enough
                 self.get_logger().info(f"  reached {self.rel_alt:.1f} m")
@@ -241,8 +262,15 @@ class RoadPatrol(Node):
         self.goto(lat, lon, self.altitude)
         self.get_logger().info(f"{label} -> ({lat:.6f}, {lon:.6f})")
         deadline = time.time() + self.wp_timeout
+        last_send = time.time()
         while rclpy.ok() and time.time() < deadline:
-            rclpy.spin_once(self, timeout_sec=0.3)
+            time.sleep(0.1)
+            # Re-send periodically. One dropped goto used to strand the
+            # aircraft on the pad for the whole timeout while the log claimed
+            # it was flying; city_mission.py resends every 2 s for this reason.
+            if time.time() - last_send > 2.0:
+                self.goto(lat, lon, self.altitude)
+                last_send = time.time()
             self.check_gps_fresh()
             if self.lat is None:
                 continue
@@ -261,13 +289,25 @@ class RoadPatrol(Node):
         self.get_logger().info(f"holding {seconds:.0f} s")
         end = time.time() + seconds
         while rclpy.ok() and time.time() < end:
-            rclpy.spin_once(self, timeout_sec=0.3)
+            time.sleep(0.1)
 
 
-def main():
-    rclpy.init()
-    node = RoadPatrol()
+def run_mission(node) -> None:
     try:
+        # Wait for the GPS feed BEFORE arming, then let discovery settle.
+        #
+        # city_mission.py does exactly this and it is not decoration: the mission
+        # node has only just created its subscriptions, and DDS matching is not
+        # instantaneous. Arming first and discovering later is how a run reaches
+        # "takeoff complete" with self.lat still None -- the aircraft flies, the
+        # mission never sees it, and the abort blames a feed that was fine.
+        node.get_logger().info("waiting for the first GPS fix ...")
+        node.wait_for_gps()
+        node.get_logger().info(
+            f"GPS ready ({node.lat:.6f}, {node.lon:.6f}); "
+            f"settling {node.settle:.0f} s before arming")
+        time.sleep(node.settle)
+
         node.call_service(node.arm_cli, f"{node.ns}/arm")
         node.call_service(node.takeoff_cli, f"{node.ns}/takeoff")
         node.climb_to(node.altitude)
@@ -297,6 +337,37 @@ def main():
             node.call_service(node.rtl_cli, f"{node.ns}/rtl")
         except Exception as exc:                    # noqa: BLE001
             node.get_logger().error(f"RTL failed: {exc}")
+
+
+# ─── running the node ────────────────────────────────────────────────────────
+# The mission logic runs in a WORKER thread while main() spins the node, which
+# is the arrangement city_mission.py uses and this file previously did not.
+#
+# It matters more than it looks. Every reader below (arrival checks, climb
+# checks, the staleness guard) depends on /uavN/gps callbacks firing. When the
+# mission body WAS the main thread, callbacks only ran when it happened to call
+# rclpy.spin_once() -- so a blocking service call, or any wait that forgot to
+# spin, silently froze the position feed. The mission then measured distance
+# from wherever the aircraft was when it stopped listening, decided it had
+# never moved, and aborted a flight that was going perfectly.
+#
+# With the executor spinning continuously in main(), telemetry arrives no
+# matter what the mission thread is doing, and the mission thread only sleeps.
+
+def main() -> None:
+    rclpy.init()
+    node = RoadPatrol()
+
+    worker = threading.Thread(target=run_mission, args=(node,),
+                              name="road-patrol", daemon=True)
+    worker.start()
+
+    try:
+        while rclpy.ok() and worker.is_alive():
+            rclpy.spin_once(node, timeout_sec=0.1)
+    except KeyboardInterrupt:
+        node.get_logger().info("interrupted")
+    finally:
         node.destroy_node()
         rclpy.shutdown()
 

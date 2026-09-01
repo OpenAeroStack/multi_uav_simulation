@@ -40,11 +40,11 @@ Services and topics used (all under /uav<id>/):
     rel_alt             std_msgs/Float32           - climb check
 """
 import math
+import threading
 import time
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import NavSatFix
@@ -89,7 +89,13 @@ DEFAULTS = {
     "waypoint_timeout_s": 300.0,        # 237 m at 1 m/s needs ~240 s
     "climb_timeout_s":    60.0,
     "gps_timeout_s":      30.0,         # first fix; 0 would mean "wait forever"
-    "gps_stale_s":        5.0,          # a FROZEN feed is not a healthy one
+    # 20 s, not 5. The point of this guard is to catch a feed that is DEAD,
+    # not one that paused. city_mission.py on the dynamic-data branch has no
+    # staleness check at all and works fine, because a gap only makes it wait
+    # longer -- whereas 5 s here turned every survivable pause into an abort.
+    "gps_stale_s":        20.0,         # a FROZEN feed is not a healthy one
+    "service_timeout_s":  120.0,        # arm can legitimately retry for ~90 s
+    "settle_s":           15.0,         # DDS discovery headroom before arming
 }
 
 ARRIVAL_RADIUS_M = 2.5      # horizontal distance that counts as "arrived"
@@ -149,6 +155,8 @@ class SurveyMission(Node):
         self.climb_timeout = self._param("climb_timeout_s")
         self.gps_timeout   = self._param("gps_timeout_s")
         self.gps_stale     = self._param("gps_stale_s")
+        self.service_timeout = self._param("service_timeout_s")
+        self.settle = self._param("settle_s")
 
         self.ns = f"/uav{self.uav_id}"
 
@@ -159,13 +167,17 @@ class SurveyMission(Node):
         self.rel_alt: float = 0.0
         self.last_gps_t: float = 0.0
 
-        # BEST_EFFORT matches drone_bridge's publishers. A RELIABLE subscriber
-        # would silently match nothing and look exactly like a dead topic.
-        qos = QoSProfile(depth=10,
-                         reliability=ReliabilityPolicy.BEST_EFFORT,
-                         durability=DurabilityPolicy.VOLATILE)
-        self.create_subscription(NavSatFix, f"{self.ns}/gps", self._on_gps, qos)
-        self.create_subscription(Float32, f"{self.ns}/rel_alt", self._on_alt, qos)
+        # DEFAULT QoS (depth 10 = RELIABLE), matching city_mission.py on the
+        # dynamic-data branch, which works.
+        #
+        # This was BEST_EFFORT, justified by a comment claiming it "matches
+        # drone_bridge's publishers". It does not. AP_DDS_QOS in the bridge is
+        # what the bridge uses to SUBSCRIBE to /ap/vN/navsat; the bridge
+        # PUBLISHES /uavN/gps with create_publisher(..., 10), i.e. RELIABLE.
+        # The mismatch let the subscription match intermittently: one run UAV1
+        # received zero GPS messages while its bridge logged the feed flowing.
+        self.create_subscription(NavSatFix, f"{self.ns}/gps", self._on_gps, 10)
+        self.create_subscription(Float32, f"{self.ns}/rel_alt", self._on_alt, 10)
 
         self.goto_pub    = self.create_publisher(GeoPoint, f"{self.ns}/goto", 10)
         self.arm_cli     = self.create_client(Trigger, f"{self.ns}/arm")
@@ -193,10 +205,23 @@ class SurveyMission(Node):
     def call_service(self, client, name: str) -> None:
         """Call a Trigger service. Raise MissionAborted if it reports failure."""
         self.get_logger().info(f"calling {name}")
-        client.wait_for_service()
+        if not client.wait_for_service(timeout_sec=self.service_timeout):
+            raise MissionAborted(
+                f"{name} never appeared. Is drone_bridge running INSIDE gcsns?")
         future = client.call_async(Trigger.Request())
-        rclpy.spin_until_future_complete(self, future)
+
+        # Wait on the future rather than spinning it: main() spins this node
+        # continuously, so the response arrives on that thread. Spinning here
+        # too would mean two executors on one node -- and, worse, it is what
+        # used to stall telemetry, because whatever this thread was doing was
+        # the ONLY thing servicing the GPS callback.
+        deadline = time.time() + self.service_timeout
+        while future.result() is None and time.time() < deadline:
+            time.sleep(0.05)
         result = future.result()
+        if result is None:
+            raise MissionAborted(
+                f"{name} did not answer within {self.service_timeout:.0f} s")
         self.get_logger().info(f"  {name} -> {result.message}")
         if not result.success:
             raise MissionAborted(f"{name} failed: {result.message}")
@@ -220,7 +245,7 @@ class SurveyMission(Node):
                     "AP_DDS has probably lost its publishers -- check for an "
                     "'establish_session' after 'create_topic' in the "
                     "micro_ros_agent log, and relaunch if so.")
-            rclpy.spin_once(self, timeout_sec=0.3)
+            time.sleep(0.1)
 
 
     def check_gps_fresh(self) -> None:
@@ -252,7 +277,7 @@ class SurveyMission(Node):
 
         deadline = time.time() + self.climb_timeout
         while rclpy.ok() and time.time() < deadline:
-            rclpy.spin_once(self, timeout_sec=0.3)
+            time.sleep(0.1)
             self.check_gps_fresh()
             if self.rel_alt >= altitude * 0.9:      # 90% is close enough
                 self.get_logger().info(f"  reached {self.rel_alt:.1f} m")
@@ -276,8 +301,15 @@ class SurveyMission(Node):
         self.get_logger().info(f"{label} -> ({lat:.6f}, {lon:.6f})")
 
         deadline = time.time() + self.wp_timeout
+        last_send = time.time()
         while rclpy.ok() and time.time() < deadline:
-            rclpy.spin_once(self, timeout_sec=0.3)
+            time.sleep(0.1)
+            # Re-send periodically. One dropped goto used to strand the
+            # aircraft on the pad for the whole timeout while the log claimed
+            # it was flying; city_mission.py resends every 2 s for this reason.
+            if time.time() - last_send > 2.0:
+                self.goto(lat, lon, self.altitude)
+                last_send = time.time()
             self.check_gps_fresh()
             if self.lat is None:
                 continue
@@ -296,17 +328,29 @@ class SurveyMission(Node):
         end = time.time() + seconds
         next_report = end - 10.0
         while rclpy.ok() and time.time() < end:
-            rclpy.spin_once(self, timeout_sec=0.3)
+            time.sleep(0.1)
             if time.time() >= next_report:
                 self.get_logger().info(f"  {end - time.time():.0f} s left")
                 next_report -= 10.0
         self.get_logger().info("hold complete")
 
 
-def main() -> None:
-    rclpy.init()
-    node = SurveyMission()
+def run_mission(node) -> None:
     try:
+        # Wait for the GPS feed BEFORE arming, then let discovery settle.
+        #
+        # city_mission.py does exactly this and it is not decoration: the mission
+        # node has only just created its subscriptions, and DDS matching is not
+        # instantaneous. Arming first and discovering later is how a run reaches
+        # "takeoff complete" with self.lat still None -- the aircraft flies, the
+        # mission never sees it, and the abort blames a feed that was fine.
+        node.get_logger().info("waiting for the first GPS fix ...")
+        node.wait_for_gps()
+        node.get_logger().info(
+            f"GPS ready ({node.lat:.6f}, {node.lon:.6f}); "
+            f"settling {node.settle:.0f} s before arming")
+        time.sleep(node.settle)
+
         node.call_service(node.arm_cli, f"{node.ns}/arm")
         node.call_service(node.takeoff_cli, f"{node.ns}/takeoff")
         node.climb_to(node.altitude)
@@ -346,6 +390,37 @@ def main() -> None:
             node.call_service(node.rtl_cli, f"{node.ns}/rtl")
         except Exception as exc:                    # noqa: BLE001
             node.get_logger().error(f"RTL failed: {exc}")
+
+
+# ─── running the node ────────────────────────────────────────────────────────
+# The mission logic runs in a WORKER thread while main() spins the node, which
+# is the arrangement city_mission.py uses and this file previously did not.
+#
+# It matters more than it looks. Every reader below (arrival checks, climb
+# checks, the staleness guard) depends on /uavN/gps callbacks firing. When the
+# mission body WAS the main thread, callbacks only ran when it happened to call
+# rclpy.spin_once() -- so a blocking service call, or any wait that forgot to
+# spin, silently froze the position feed. The mission then measured distance
+# from wherever the aircraft was when it stopped listening, decided it had
+# never moved, and aborted a flight that was going perfectly.
+#
+# With the executor spinning continuously in main(), telemetry arrives no
+# matter what the mission thread is doing, and the mission thread only sleeps.
+
+def main() -> None:
+    rclpy.init()
+    node = SurveyMission()
+
+    worker = threading.Thread(target=run_mission, args=(node,),
+                              name="survey", daemon=True)
+    worker.start()
+
+    try:
+        while rclpy.ok() and worker.is_alive():
+            rclpy.spin_once(node, timeout_sec=0.1)
+    except KeyboardInterrupt:
+        node.get_logger().info("interrupted")
+    finally:
         node.destroy_node()
         rclpy.shutdown()
 

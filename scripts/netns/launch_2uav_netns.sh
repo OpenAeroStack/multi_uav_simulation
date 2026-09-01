@@ -616,6 +616,13 @@ echo ""
 # STEP 8 — drone_bridge inside gcsns
 # ═══════════════════════════════════════════════════════════════════════════
 restore_tty
+    # -r __node:= IS NOT COSMETIC. Both bridges are the same executable, so
+    # without a rename both register as /drone_bridge -- two nodes with one
+    # name in one ROS 2 domain, which is undefined behaviour. Discovery treats
+    # them as a single identity and the one that starts SECOND displaces the
+    # first, so UAV1's /uav1/gps stopped being visible to its mission every
+    # single run while UAV2 worked. Deterministic, not a race.
+    # launch_city_dds.sh on the dynamic-data branch renames all three.
 echo "=== [8/8] Starting drone_bridge inside gcsns ==="
 : > "$BRIDGE_LOG"
 sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
@@ -623,6 +630,7 @@ sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
     source "$HOME/ardu_ws/install/setup.bash"
     source "$1"
     exec ros2 run uav_controller drone_bridge --ros-args \
+        -r __node:=drone_bridge_uav1 \
         -p uav_id:=1 -p mavlink_host:=10.42.0.11 -p mavlink_port:=5760
 ' bridge-shell "$PROJECT_DIR/ros2/install/setup.bash" > "$BRIDGE_LOG" 2>&1 < /dev/null &
 BRIDGE_PID=$!
@@ -644,6 +652,7 @@ sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
     source "$HOME/ardu_ws/install/setup.bash"
     source "$1"
     exec ros2 run uav_controller drone_bridge --ros-args \
+        -r __node:=drone_bridge_uav2 \
         -p uav_id:=2 -p mavlink_host:=10.42.0.13 -p mavlink_port:=5770 \
         -p takeoff_altitude:=30.0
 ' bridge-shell "$PROJECT_DIR/ros2/install/setup.bash" > "$BRIDGE_LOG2" 2>&1 < /dev/null &
