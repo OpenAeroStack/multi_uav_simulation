@@ -1,5 +1,0 @@
-/cluster/event:
-  reliability: reliable
-  durability: volatile
-  history: keep_last
-  depth: 100

@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="mech_workshop_ground">
+    <static>true</static>
+    <link name="ground_link">
+      <collision name="collision">
+        <geometry>
+          <plane>
+            <normal>0 0 1</normal>
+            <size>150 150</size>
+          </plane>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <cast_shadows>false</cast_shadows>
+        <geometry>
+          <plane>
+            <normal>0 0 1</normal>
+            <size>150 150</size>
+          </plane>
+        </geometry>
+        <material>
+          <script>
+            <uri>model://mech_workshop_ground/materials/scripts/ground.material</uri>
+            <uri>model://mech_workshop_ground/materials/textures/</uri>
+            <name>Ground/Satellite</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

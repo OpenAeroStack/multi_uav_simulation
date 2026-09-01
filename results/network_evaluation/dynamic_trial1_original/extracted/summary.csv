@@ -1,2 +1,0 @@
-trial,duration_s,primary_samples,backup_samples,score_samples,event_messages,primary_changes,backup_changes,initial_primary,final_primary,initial_backup,final_backup,uav1_primary_time_percent,uav2_primary_time_percent,uav3_primary_time_percent
-dynamic_trial1,119.834679,70,70,70,10,0,0,1,1,3,3,100.000,0.000,0.000

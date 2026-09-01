@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="mech_workshop">
+    <static>true</static>
+    <link name="building_link">
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://mech_workshop/meshes/mech_workshop.obj</uri>
+          </mesh>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://mech_workshop/meshes/mech_workshop.obj</uri>
+          </mesh>
+        </geometry>
+      </visual>
+    </link>
+  </model>
+</sdf>

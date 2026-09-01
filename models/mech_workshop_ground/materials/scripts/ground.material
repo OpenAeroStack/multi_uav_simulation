@@ -1,0 +1,13 @@
+material Ground/Satellite
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture ground_satellite.png
+      }
+    }
+  }
+}

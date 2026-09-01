@@ -1,4 +1,0 @@
-time_s,event
-0.899378,"{""epoch"": 13, ""new_backup"": 1, ""new_primary"": 3, ""old_backup"": 2, ""old_primary"": 3, ""reason"": ""backup_reselected""}"
-12.899086,"{""epoch"": 14, ""new_backup"": 2, ""new_primary"": 3, ""old_backup"": 1, ""old_primary"": 3, ""reason"": ""backup_reselected""}"
-28.899348,"{""epoch"": 15, ""new_backup"": 1, ""new_primary"": 3, ""old_backup"": 2, ""old_primary"": 3, ""reason"": ""backup_reselected""}"
