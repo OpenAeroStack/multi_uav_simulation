@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "num_uavs": 4,
+  "num_radio_nodes": 5,
+  "expected_link_pairs": 10,
+  "gcs": {
+    "id": 0,
+    "ns3_id": 0,
+    "namespace": "gcsns",
+    "tap": "tap-gcs",
+    "wireless_ip": "10.42.0.10",
+    "gazebo_model": "gcs",
+    "antenna_height_m": 2.9
+  },
+  "network": {
+    "wireless_subnet": "10.42.0.0/24",
+    "uav_ip_start": "10.42.0.11"
+  },
+  "dds": {
+    "domain_id": 0,
+    "timeout_ms": 1000,
+    "max_retry": 0,
+    "use_ns": 1
+  },
+  "simulation": {
+    "tx_power_dbm": 35.0,
+    "rx_sensitivity_dbm": -82.0,
+    "noise_floor_dbm": -94.0,
+    "pathloss_exponent": 2.0,
+    "reference_distance_m": 1.0,
+    "reference_loss_db": 46.73,
+    "m_los": 3.0,
+    "m_nlos": 1.0,
+    "ema_alpha": 0.3,
+    "block_threshold_db": 3.0,
+    "clear_threshold_db": 1.0
+  },
+  "uavs": [
+    {
+      "id": 1,
+      "sysid": 1,
+      "ns3_id": 1,
+      "instance": 0,
+      "namespace": "uav1",
+      "tap": "tap-uav1",
+      "wireless_ip": "10.42.0.11",
+      "sim_ip": "172.31.1.1",
+      "dds_port": 2019,
+      "mavlink_port": 5760,
+      "gazebo_fdm_port": 9002,
+      "sitl_fdm_port": 9003,
+      "gazebo_model": "iris_1",
+      "spawn": [
+        -70.0,
+        -22.0,
+        0.0
+      ],
+      "takeoff_altitude_m": 60.0,
+      "mission_profile": "city",
+      "dds_param_file": "params/uav1_dds.parm"
+    },
+    {
+      "id": 2,
+      "sysid": 2,
+      "ns3_id": 2,
+      "instance": 1,
+      "namespace": "uav2",
+      "tap": "tap-uav2",
+      "wireless_ip": "10.42.0.12",
+      "sim_ip": "172.31.2.1",
+      "dds_port": 2020,
+      "mavlink_port": 5770,
+      "gazebo_fdm_port": 9012,
+      "sitl_fdm_port": 9013,
+      "gazebo_model": "iris_2",
+      "spawn": [
+        -70.0,
+        -27.0,
+        0.0
+      ],
+      "takeoff_altitude_m": 40.0,
+      "mission_profile": "pond",
+      "dds_param_file": "params/uav2_dds.parm"
+    },
+    {
+      "id": 3,
+      "sysid": 3,
+      "ns3_id": 3,
+      "instance": 2,
+      "namespace": "uav3",
+      "tap": "tap-uav3",
+      "wireless_ip": "10.42.0.13",
+      "sim_ip": "172.31.3.1",
+      "dds_port": 2021,
+      "mavlink_port": 5780,
+      "gazebo_fdm_port": 9022,
+      "sitl_fdm_port": 9023,
+      "gazebo_model": "iris_3",
+      "spawn": [
+        -70.0,
+        -17.0,
+        0.0
+      ],
+      "takeoff_altitude_m": 50.0,
+      "mission_profile": "mountain",
+      "dds_param_file": "params/uav3_dds.parm"
+    },
+    {
+      "id": 4,
+      "sysid": 4,
+      "ns3_id": 4,
+      "instance": 3,
+      "namespace": "uav4",
+      "tap": "tap-uav4",
+      "wireless_ip": "10.42.0.14",
+      "sim_ip": "172.31.4.1",
+      "dds_port": 2022,
+      "mavlink_port": 5790,
+      "gazebo_fdm_port": 9032,
+      "sitl_fdm_port": 9033,
+      "gazebo_model": "iris_4",
+      "spawn": [
+        -70.0,
+        -24.5,
+        0.0
+      ],
+      "takeoff_altitude_m": 40.0,
+      "mission_profile": "pond_follower",
+      "dds_param_file": "params/uav4_dds.parm"
+    }
+  ]
+}

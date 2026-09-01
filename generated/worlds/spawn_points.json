@@ -1,0 +1,49 @@
+{
+  "gcs": {
+    "id": 0,
+    "model": "gcs",
+    "antenna_height_m": 2.9
+  },
+  "uavs": [
+    {
+      "id": 1,
+      "model": "iris_1",
+      "spawn": [
+        -70.0,
+        -22.0,
+        0.0
+      ],
+      "gazebo_fdm_port": 9002
+    },
+    {
+      "id": 2,
+      "model": "iris_2",
+      "spawn": [
+        -70.0,
+        -27.0,
+        0.0
+      ],
+      "gazebo_fdm_port": 9012
+    },
+    {
+      "id": 3,
+      "model": "iris_3",
+      "spawn": [
+        -70.0,
+        -17.0,
+        0.0
+      ],
+      "gazebo_fdm_port": 9022
+    },
+    {
+      "id": 4,
+      "model": "iris_4",
+      "spawn": [
+        -70.0,
+        -24.5,
+        0.0
+      ],
+      "gazebo_fdm_port": 9032
+    }
+  ]
+}
