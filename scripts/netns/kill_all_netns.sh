@@ -21,7 +21,8 @@ for pattern in \
     'metrics_logger' \
     'gzserver' \
     'gzclient' \
-    'mavproxy'
+    'mavproxy' \
+    'ros2-daemon'
 do
     if sudo pkill -9 -f -- "$pattern" 2>/dev/null; then
         echo "  killed: $pattern"

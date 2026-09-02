@@ -113,6 +113,9 @@ KILL_PATTERNS=(
     'detection_viewer.py'
     gcs_receiver
     metrics_logger
+    # Outlives the netns it was started in; a stale one then answers every
+    # ros2 CLI call with "!rclpy.ok()". Respawns on demand, so this is safe.
+    'ros2-daemon'
 )
 for pattern in "${KILL_PATTERNS[@]}"; do
     safe="[${pattern:0:1}]${pattern:1}"
@@ -518,7 +521,9 @@ until sudo ip netns exec gcsns sudo -H -u "$RUN_USER" \
 done
 echo "  SITL reachable from gcsns at 10.42.0.11:5760"
 
-# Run a ros2 command inside gcsns with the full workspace sourced.
+# Run a ros2 command inside gcsns with the full workspace sourced. Always pass
+# --no-daemon: the ros2cli daemon outlives the netns it was started in, and a
+# stale one answers over XML-RPC with "!rclpy.ok()" instead of any data.
 in_gcsns() {
     sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
         source /opt/ros/humble/setup.bash
@@ -538,8 +543,10 @@ wait_for_navsat() {
     if (( uav == 2 )); then log="$AGENT_LOG2"; fi
     local start=$SECONDS deadline=$((SECONDS + DDS_GPS_TIMEOUT)) tries=0
     echo "  Waiting for a message on $topic (up to ${DDS_GPS_TIMEOUT}s) ..."
+    local err="/tmp/navsat_probe_uav$uav.err"
     while true; do
-        if in_gcsns timeout 5 ros2 topic echo --once "$topic" >/dev/null 2>&1; then
+        if in_gcsns timeout 20 ros2 topic echo --once --no-daemon --spin-time 5 \
+                "$topic" >/dev/null 2>"$err"; then
             echo "  $topic is delivering messages ($((SECONDS - start))s)."
             return 0
         fi
@@ -551,9 +558,15 @@ wait_for_navsat() {
         sleep 1
     done
 
-    # Separate the two causes so the next step is unambiguous.
+    # A crashing CLI exits non-zero exactly like "no message yet", so show why.
     echo "ERROR: no data on $topic within ${DDS_GPS_TIMEOUT}s." >&2
-    if in_gcsns ros2 topic list 2>/dev/null | grep -qx "$topic"; then
+    if [[ -s "$err" ]]; then
+        echo "       last probe failed with:" >&2
+        tail -3 "$err" | sed 's/^/         /' >&2
+    fi
+
+    # Separate the two causes so the next step is unambiguous.
+    if in_gcsns ros2 topic list --no-daemon 2>/dev/null | grep -qx "$topic"; then
         echo "       The topic EXISTS but never published: UAV$uav has no GPS fix yet." >&2
         echo "       AP_DDS suppresses navsat until gps.is_healthy(). Gazebo must be" >&2
         echo "       stepping - check RTF in gzclient and $GAZEBO_LOG." >&2
