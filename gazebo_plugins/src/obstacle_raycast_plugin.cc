@@ -70,10 +70,10 @@ public:
     update_rate_hz_ = GetSdf<double>(sdf, "update_rate_hz", 10.0);
     model_refresh_rate_hz_ = GetSdf<double>(sdf, "model_refresh_rate_hz", 1.0);
 
-    // Per-link ray markers drawn in gzclient: green = clear line of sight,
-    // red = at least one obstacle between the two radios. Requesting a marker
-    // is a service round-trip per link, so this is throttled well below the
-    // raycast rate.
+    // Per-link ray markers drawn in gzclient: clear UAV<->UAV links are green,
+    // clear GCS<->UAV links are blue, and every blocked link is red. Requesting
+    // a marker is a service round-trip per link, so this is throttled well
+    // below the raycast rate.
     draw_markers_ = GetSdf<bool>(sdf, "draw_markers", true);
     marker_rate_hz_ = GetSdf<double>(sdf, "marker_rate_hz", 4.0);
     if (marker_rate_hz_ <= 0.0)
@@ -81,9 +81,9 @@ public:
       marker_rate_hz_ = 4.0;
     }
 
-    // Line style encodes WHICH link; colour encodes its STATE. GCS<->UAV links
-    // draw solid, UAV<->UAV links dashed, so the ground link is readable at a
-    // glance in a cluttered city view.
+    // Link type is encoded redundantly by colour and line style: GCS<->UAV
+    // links draw blue and solid when clear; UAV<->UAV links draw green and
+    // dashed when clear. Any blocked link draws red.
     dash_length_m_ = GetSdf<double>(sdf, "dash_length_m", 6.0);
     dash_gap_m_ = GetSdf<double>(sdf, "dash_gap_m", 4.0);
     max_dashes_ = GetSdf<uint32_t>(sdf, "max_dashes", 128u);
@@ -609,19 +609,32 @@ private:
 
     auto * material = marker.mutable_material();
     const float r = blocked ? 1.0f : 0.1f;
-    const float g = blocked ? 0.1f : 1.0f;
+    const float g = blocked ? 0.1f : (inter_uav ? 1.0f : 0.3f);
+    const float b = blocked ? 0.1f : (inter_uav ? 0.1f : 1.0f);
+
+    // Gazebo Classic's MarkerVisual builds LINE_LIST points with white vertex
+    // colours. On some Ogre/Gazebo 11 builds those vertex colours mask the
+    // numeric material fields below, leaving every marker visibly white. A
+    // named Gazebo material makes the DynamicLines renderable select an
+    // explicitly coloured Ogre material; keep the numeric fields as well for
+    // marker consumers which do honour them directly.
+    auto * script = material->mutable_script();
+    script->set_name(
+      blocked ? "Gazebo/RedGlow" :
+      (inter_uav ? "Gazebo/Green" : "Gazebo/Blue"));
+    script->add_uri("file://media/materials/scripts/gazebo.material");
 
     material->mutable_ambient()->set_r(r);
     material->mutable_ambient()->set_g(g);
-    material->mutable_ambient()->set_b(0.1f);
+    material->mutable_ambient()->set_b(b);
     material->mutable_ambient()->set_a(1.0f);
     material->mutable_diffuse()->set_r(r);
     material->mutable_diffuse()->set_g(g);
-    material->mutable_diffuse()->set_b(0.1f);
+    material->mutable_diffuse()->set_b(b);
     material->mutable_diffuse()->set_a(1.0f);
     material->mutable_emissive()->set_r(r);
     material->mutable_emissive()->set_g(g);
-    material->mutable_emissive()->set_b(0.1f);
+    material->mutable_emissive()->set_b(b);
     material->mutable_emissive()->set_a(1.0f);
 
     // Fire and forget: gzclient may not be running (headless runs), and the

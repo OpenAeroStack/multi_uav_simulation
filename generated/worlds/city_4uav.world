@@ -4156,17 +4156,16 @@
       <!-- ==============================
           Link ray markers (gzclient only)
           ============================== -->
-      <!-- Draw one line per radio pair: green = clear line of sight,
-           red = at least one obstacle on the link. -->
+      <!-- Draw one line per radio pair: green = clear UAV-to-UAV,
+           blue = clear GCS-to-UAV, red = blocked. -->
       <draw_markers>true</draw_markers>
       <!-- Each marker is an ignition-transport service request, so redraw
            well below update_rate_hz. -->
       <marker_rate_hz>4.0</marker_rate_hz>
-      <!-- Line style says WHICH link, colour says its STATE:
-             GCS <-> UAV   solid
-             UAV <-> UAV   dashed
-             green         clear line of sight
-             red           at least one obstacle on the link
+      <!-- Link type is shown by both clear colour and line style:
+             GCS <-> UAV   blue, solid
+             UAV <-> UAV   green, dashed
+             blocked       red
            A dash is one LINE_LIST segment; the gaps are the pairs we skip. -->
       <dash_length_m>6.0</dash_length_m>
       <dash_gap_m>4.0</dash_gap_m>

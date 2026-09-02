@@ -112,7 +112,7 @@ that flat list is what matters, and both ends must agree exactly.
 | `/uav_world_positions` | `std_msgs/Float32MultiArray` | `world_pos_publisher.py` | **NS-3**, obstacle plugin | 10 Hz | `[id, x, y, z, id, x, y, z, …]` — one 4-tuple per drone, `id` 0-based |
 | `/link_obstacle_loss` | `std_msgs/Float32MultiArray` | obstacle raycast plugin | **NS-3** | 10 Hz | `[i, j, loss_dB, …]` — one 3-tuple per drone *pair* |
 | `/ns3_link_rssi` | `std_msgs/Float32MultiArray` | **NS-3** (`PublishStats`) | loggers / your tools | 2 Hz | `[a, b, rx_dBm, …]` — received power per drone pair |
-| `/marker` | `ignition.msgs.Marker` | obstacle plugin | gzclient (viewer) | 10 Hz | line per pair, green = clear, red = blocked (visual only) |
+| `/marker` | `ignition.msgs.Marker` | obstacle plugin | gzclient (viewer) | 10 Hz | line per pair; clear UAV–UAV = green, clear GCS–UAV = blue, blocked = red (visual only) |
 
 **Why a flat float array and not a structured message?** Because it crosses a
 C++/Python boundary and a Gazebo/NS-3 boundary; a primitive array has zero
