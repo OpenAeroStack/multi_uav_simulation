@@ -4,9 +4,8 @@
 # UAV2/UAV3 get bare, unbridged dummy TAPs so the binary's required tap2/tap3
 # arguments are satisfied, but no namespace/SITL/traffic exists behind them.
 #
-# Does NOT auto-launch the mission, detector, or metrics_logger — run those
-# manually afterward, in separate terminals, so edge/ground/nav-only runs
-# stay independently controllable and debuggable.
+# Extends the initialization pipeline with single-UAV edge-mode human
+# detection. The mission and metrics_logger remain manually controlled.
 
 set -euo pipefail
 
@@ -24,6 +23,14 @@ GAZEBO_LOG="/tmp/gazebo_netns.log"
 AGENT_LOG="/tmp/agent_netns.log"
 BRIDGE_LOG="/tmp/bridge_netns.log"
 SITL_LOG_DIR="/tmp/sitl_netns_uav1"
+CAMERA_RELAY_LOG="/tmp/camera_relay_edge_netns.log"
+DETECTOR_LOG="/tmp/yolo_detector_edge_netns.log"
+GCS_RECEIVER_LOG="/tmp/gcs_receiver_edge_netns.log"
+
+YOLO_PYTHON="${YOLO_PYTHON:-$HOME/yolo_env/bin/python}"
+YOLO_MODEL="${YOLO_MODEL:-$HOME/yolo_env/yolov8n.pt}"
+VISION_STARTUP_TIMEOUT="${VISION_STARTUP_TIMEOUT:-45}"
+VISION_FRAME_RATE_HZ="${VISION_FRAME_RATE_HZ:-1.0}"
 
 HOME_GPS="6.0790684,80.1915283,0.00,0"
 WORLD_PATH="$PROJECT_DIR/worlds/small_city_single_uav_netns.world"
@@ -41,6 +48,9 @@ SITL_PID=""
 AGENT_PID=""
 BRIDGE_PID=""
 POSPUB_PID=""
+CAMERA_RELAY_PID=""
+DETECTOR_PID=""
+GCS_RECEIVER_PID=""
 
 echo "NS-3 RNG run : $RNG_RUN"
 
@@ -49,7 +59,9 @@ echo "NS-3 RNG run : $RNG_RUN"
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== [0] Pre-flight cleanup ==="
 for pattern in drone_bridge micro_ros_agent '/build/sitl/bin/arducopter' \
-               'three_uav_tapbridge_integrated' gzserver gzclient; do
+               'three_uav_tapbridge_integrated' gzserver gzclient \
+               'uav_vision/camera_relay' 'uav_vision.detector' \
+               'uav_vision/gcs_receiver'; do
     sudo pkill -9 -f -- "$pattern" 2>/dev/null && echo "  killed: $pattern" || true
 done
 for ns in gcsns uav1ns; do
@@ -68,7 +80,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 1 — Real wireless topology: gcsns + uav1ns only
 # ═══════════════════════════════════════════════════════════════════════════
-echo "=== [1/8] Wireless topology: gcsns + uav1ns ==="
+echo "=== [1/11] Wireless topology: gcsns + uav1ns ==="
 setup_ns() {
   local NS=$1 TAP=$2 BR=$3 VETH_H=$4 VETH_NS=$5 NS_IP=$6
   sudo ip netns add "$NS" 2>/dev/null || true
@@ -100,7 +112,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 2 — Management link: uav1ns <-> root (FDM physics, bypasses NS-3)
 # ═══════════════════════════════════════════════════════════════════════════
-echo "=== [2/8] Management link (SITL <-> Gazebo physics) ==="
+echo "=== [2/11] Management link (SITL <-> Gazebo physics) ==="
 sudo ip link add sim1h type veth peer name sim1n 2>/dev/null || true
 sudo ip addr add 172.31.1.1/30 dev sim1h 2>/dev/null || true
 sudo ip link set sim1h up
@@ -115,7 +127,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 3 — NS-3 wireless simulation (unmodified 4-node binary)
 # ═══════════════════════════════════════════════════════════════════════════
-echo "=== [3/8] Building + starting ns-3 (three_uav_tapbridge_integrated) ==="
+echo "=== [3/11] Building + starting ns-3 (three_uav_tapbridge_integrated) ==="
 (cd "$NS3_ROOT" && ./ns3 build three_uav_tapbridge_integrated)
 
 : > "$NS3_LOG"
@@ -164,7 +176,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 4 — Gazebo (root namespace)
 # ═══════════════════════════════════════════════════════════════════════════
-echo "=== [4/8] Starting Gazebo ==="
+echo "=== [4/11] Starting Gazebo ==="
 export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:$HOME/FYP/small_city_gazebo_world/models:${GAZEBO_MODEL_PATH:-}"
 export GAZEBO_PLUGIN_PATH="$PROJECT_DIR/install/multi_uav_gazebo_plugins/lib:${GAZEBO_PLUGIN_PATH:-}"
 export GAZEBO_RESOURCE_PATH="$PROJECT_DIR:$PROJECT_DIR/worlds:${GAZEBO_RESOURCE_PATH:-}"
@@ -189,7 +201,7 @@ echo ""
 # mobility model; without this, ns-3 nodes stay frozen at static placeholder
 # coordinates regardless of where the drone actually flies)
 # ═══════════════════════════════════════════════════════════════════════════
-echo "=== [4b/8] Starting world_pos_publisher.py (root namespace) ==="
+echo "=== [4b/11] Starting world_pos_publisher.py (root namespace) ==="
 POSPUB_LOG="/tmp/pospub_netns.log"
 : > "$POSPUB_LOG"
 python3 "$PROJECT_DIR/scripts/world_pos_publisher.py" > "$POSPUB_LOG" 2>&1 &
@@ -211,7 +223,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 5 — micro_ros_agent inside gcsns
 # ═══════════════════════════════════════════════════════════════════════════
-echo "=== [5/8] micro_ros_agent inside gcsns ==="
+echo "=== [5/11] micro_ros_agent inside gcsns ==="
 : > "$AGENT_LOG"
 sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
     source /opt/ros/humble/setup.bash
@@ -241,7 +253,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 6 — SITL inside uav1ns
 # ═══════════════════════════════════════════════════════════════════════════
-echo "=== [6/8] SITL inside uav1ns ==="
+echo "=== [6/11] SITL inside uav1ns ==="
 mkdir -p "$SITL_LOG_DIR"
 chown "$RUN_USER":"$(id -gn "$RUN_USER")" "$SITL_LOG_DIR"
 
@@ -290,7 +302,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 7 — Verify DDS GPS + SITL TCP reachable from gcsns
 # ═══════════════════════════════════════════════════════════════════════════
-echo "=== [7/8] Verifying DDS GPS + MAVLink reachability from gcsns ==="
+echo "=== [7/11] Verifying DDS GPS + MAVLink reachability from gcsns ==="
 
 echo "  Waiting for /ap/v1/navsat publisher + valid GPS..."
 deadline=$((SECONDS + DDS_GPS_TIMEOUT))
@@ -328,7 +340,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 8 — drone_bridge inside gcsns
 # ═══════════════════════════════════════════════════════════════════════════
-echo "=== [8/8] Starting drone_bridge inside gcsns ==="
+echo "=== [8/11] Starting drone_bridge inside gcsns ==="
 : > "$BRIDGE_LOG"
 sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
     source /opt/ros/humble/setup.bash
@@ -347,10 +359,102 @@ sudo kill -0 "$BRIDGE_PID" 2>/dev/null || {
 echo "  drone_bridge running: PID=$BRIDGE_PID"
 echo ""
 
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 9 — GCS endpoint for edge detection results
+# ═══════════════════════════════════════════════════════════════════════════
+echo "=== [9/11] Starting edge-result receiver inside gcsns ==="
+: > "$GCS_RECEIVER_LOG"
+sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
+    source /opt/ros/humble/setup.bash
+    source "$1"
+    exec ros2 run uav_vision gcs_receiver --ros-args \
+        -p uav_id:=1 -p processing_mode:=edge
+' vision-gcs-shell "$PROJECT_DIR/ros2/install/setup.bash" \
+    > "$GCS_RECEIVER_LOG" 2>&1 &
+GCS_RECEIVER_PID=$!
+sleep 2
+sudo kill -0 "$GCS_RECEIVER_PID" 2>/dev/null || {
+    echo "ERROR: edge-result receiver exited during startup." >&2
+    cat "$GCS_RECEIVER_LOG" >&2
+    exit 1
+}
+echo "  GCS receiver running: PID=$GCS_RECEIVER_PID log=$GCS_RECEIVER_LOG"
+echo ""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 10 — Camera relay in the UAV namespace (raw frames stay at the edge)
+# ═══════════════════════════════════════════════════════════════════════════
+echo "=== [10/11] Starting camera relay inside uav1ns ==="
+: > "$CAMERA_RELAY_LOG"
+sudo ip netns exec uav1ns sudo -H -u "$RUN_USER" bash -lc '
+    source /opt/ros/humble/setup.bash
+    source "$1"
+    exec ros2 run uav_vision camera_relay --ros-args \
+        -p uav_id:=1 -p processing_mode:=edge -p frame_rate_hz:="$2"
+' vision-relay-shell "$PROJECT_DIR/ros2/install/setup.bash" "$VISION_FRAME_RATE_HZ" \
+    > "$CAMERA_RELAY_LOG" 2>&1 &
+CAMERA_RELAY_PID=$!
+
+deadline=$((SECONDS + VISION_STARTUP_TIMEOUT))
+while ! grep -q "edge frame sent" "$CAMERA_RELAY_LOG"; do
+    if ! sudo kill -0 "$CAMERA_RELAY_PID" 2>/dev/null; then
+        echo "ERROR: camera relay exited during startup." >&2
+        cat "$CAMERA_RELAY_LOG" >&2
+        exit 1
+    fi
+    (( SECONDS >= deadline )) && {
+        echo "ERROR: camera relay received no frames from /uav1/camera/image_raw." >&2
+        echo "       Check $CAMERA_RELAY_LOG and $GAZEBO_LOG" >&2
+        exit 1
+    }
+    sleep 1
+done
+echo "  Camera frames flowing at ${VISION_FRAME_RATE_HZ} Hz: PID=$CAMERA_RELAY_PID log=$CAMERA_RELAY_LOG"
+echo ""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 11 — YOLO inference in the UAV namespace
+# ═══════════════════════════════════════════════════════════════════════════
+echo "=== [11/11] Starting YOLO human detector inside uav1ns ==="
+[[ -x "$YOLO_PYTHON" ]] || {
+    echo "ERROR: YOLO Python is not executable: $YOLO_PYTHON" >&2
+    exit 1
+}
+[[ -f "$YOLO_MODEL" ]] || {
+    echo "ERROR: YOLO model not found: $YOLO_MODEL" >&2
+    exit 1
+}
+: > "$DETECTOR_LOG"
+sudo ip netns exec uav1ns sudo -H -u "$RUN_USER" bash -lc '
+    source /opt/ros/humble/setup.bash
+    source "$1"
+    exec "$2" -m uav_vision.detector --ros-args \
+        -p uav_id:=1 -p processing_mode:=edge -p model_path:="$3"
+' vision-detector-shell "$PROJECT_DIR/ros2/install/setup.bash" \
+    "$YOLO_PYTHON" "$YOLO_MODEL" > "$DETECTOR_LOG" 2>&1 &
+DETECTOR_PID=$!
+
+deadline=$((SECONDS + VISION_STARTUP_TIMEOUT))
+while ! grep -q "Model loaded OK" "$DETECTOR_LOG"; do
+    if ! sudo kill -0 "$DETECTOR_PID" 2>/dev/null; then
+        echo "ERROR: YOLO detector exited during startup." >&2
+        cat "$DETECTOR_LOG" >&2
+        exit 1
+    fi
+    (( SECONDS >= deadline )) && {
+        echo "ERROR: YOLO detector did not finish loading within ${VISION_STARTUP_TIMEOUT}s." >&2
+        cat "$DETECTOR_LOG" >&2
+        exit 1
+    }
+    sleep 1
+done
+echo "  YOLO edge detector running: PID=$DETECTOR_PID log=$DETECTOR_LOG"
+echo ""
+
 echo "════════════════════════════════════════════════════════════"
-echo " PIPELINE READY — nothing auto-launched beyond this point."
+echo " PIPELINE READY — EDGE YOLO HUMAN DETECTION ACTIVE"
 echo "════════════════════════════════════════════════════════════"
-echo "  Run mission/detector/metrics_logger manually, INSIDE gcsns, e.g.:"
+echo "  Run the mission or metrics_logger manually when needed."
 echo ""
 echo "  sudo ip netns exec gcsns sudo -H -u $RUN_USER bash -lc '"
 echo "      source /opt/ros/humble/setup.bash"
@@ -358,13 +462,18 @@ echo "      source $PROJECT_DIR/ros2/install/setup.bash"
 echo "      python3 $PROJECT_DIR/ros2/uav_controller/uav_controller/uav1_patrol_mission.py"
 echo "  '"
 echo ""
+echo "  Detection topic at GCS: /detections/uav1"
+echo "  Saved positive frames : /tmp/yolo_frames"
 echo "  PIDs: ns3=$NS3_PID gazebo=$GAZEBO_PID pospub=$POSPUB_PID sitl=$SITL_PID agent=$AGENT_PID bridge=$BRIDGE_PID"
-echo "  Logs: $NS3_LOG  $GAZEBO_LOG  $POSPUB_LOG  $SITL_LOG_DIR/arducopter.log  $AGENT_LOG  $BRIDGE_LOG"
+echo "        relay=$CAMERA_RELAY_PID detector=$DETECTOR_PID receiver=$GCS_RECEIVER_PID"
+echo "  Vision logs: $CAMERA_RELAY_LOG  $DETECTOR_LOG  $GCS_RECEIVER_LOG"
+echo "  Core logs  : $NS3_LOG  $GAZEBO_LOG  $POSPUB_LOG  $SITL_LOG_DIR/arducopter.log  $AGENT_LOG  $BRIDGE_LOG"
 echo "  Ctrl+C to shut down everything."
 echo ""
 
 cleanup() {
     echo "Shutting down..."
+    sudo kill "$DETECTOR_PID" "$CAMERA_RELAY_PID" "$GCS_RECEIVER_PID" 2>/dev/null || true
     kill "$BRIDGE_PID" "$AGENT_PID" "$SITL_PID" "$GAZEBO_PID" "$NS3_PID" "$POSPUB_PID" 2>/dev/null || true
     sleep 1
     sudo ip netns del gcsns 2>/dev/null || true
