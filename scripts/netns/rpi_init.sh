@@ -14,7 +14,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# One row per board. Must match run_hitl.sh and sitl_init.sh.
+# One row per board. Must match detector_start.sh and sitl_init.sh.
 declare -A PI_HOST=(   [1]="anton@10.0.0.2"  [2]="anton@10.0.1.2" )
 declare -A HOST_LINK=( [1]="10.0.0.1"        [2]="10.0.1.1" )
 declare -A CAM_VLAN_IF=( [1]="eth-cam"       [2]="eth-cam2" )

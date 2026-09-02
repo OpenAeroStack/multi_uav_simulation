@@ -287,11 +287,11 @@ E(callout("<b>A comment after a line continuation.</b> Bash joins the next line 
 
 A(para("Running it", "h1"))
 E(code("""
-# the full two-board run, with cameras and the Gazebo viewer
-./scripts/netns/run_hitl.sh --uavs 2 --view --gui --mission
-
-# host only, no Raspberry Pi attached
-./scripts/netns/run_hitl.sh --uavs 2 --no-pi --mission
+# four steps, in order; leave 1 and 2 running in their own terminals
+./scripts/netns/rpi_init.sh                 # verify both Pi boards
+./scripts/netns/sitl_init.sh --gui --view   # host pipeline
+./scripts/netns/detector_start.sh           # Pi detectors + receivers
+./scripts/netns/run_missions.sh             # fly
 
 # tear everything down
 sudo bash scripts/netns/kill_all_netns.sh

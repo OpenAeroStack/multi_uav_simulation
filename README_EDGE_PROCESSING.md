@@ -94,13 +94,19 @@ Image↔numpy conversion.
 
 ## 5. Running it
 
-One command brings up the whole stack — host pipeline, the Pi's detector over SSH, and
-`gcs_receiver` inside `gcsns`. Ctrl+C tears it all down, including the remote detector.
+Four scripts, each verifying its stage before the next begins. Run them in order; leave
+steps 1 and 2 running in their own terminals.
 
 ```bash
-./scripts/netns/run_hitl.sh              # add --mission to fly the patrol automatically
-./scripts/netns/run_hitl.sh --no-pi      # host pipeline only, Pi unplugged
+./scripts/netns/rpi_init.sh                 # 0  board network, config, buffers, clock
+./scripts/netns/sitl_init.sh --gui --view   # 1  host pipeline, ends at PIPELINE READY
+./scripts/netns/detector_start.sh           # 2  Pi detectors + gcs_receivers
+./scripts/netns/run_missions.sh             # 3  fly
 ```
+
+They are separate on purpose: initialisation must be fully verified before a mission arms
+anything, and each stage can then be debugged on its own. Ctrl+C in step 2 also stops the
+detectors on the boards; Ctrl+C in step 1 tears down the whole pipeline.
 
 Check these first — each has caused a silent failure before:
 
@@ -154,7 +160,10 @@ lean on.
 
 | Path | What |
 |---|---|
-| `scripts/netns/run_hitl.sh` | one-command HITL run, with pre-flight checks |
+| `scripts/netns/rpi_init.sh` | verify both Pi boards before anything starts |
+| `scripts/netns/sitl_init.sh` | cold-start the host pipeline; ends at PIPELINE READY |
+| `scripts/netns/detector_start.sh` | Pi detectors over SSH + `gcs_receiver` in `gcsns` |
+| `scripts/netns/run_missions.sh` | fly `two_drone_mission.py` |
 | `scripts/netns/launch_single_uav_netns.sh` | 8-stage host bring-up; STEP 1c adds the VLANs + `br-uav2` |
 | `scripts/netns/kill_all_netns.sh` | teardown (also kills gzserver) |
 | `scripts/yolo_detect_node.py` | standalone detector + timing; runs on the Pi |

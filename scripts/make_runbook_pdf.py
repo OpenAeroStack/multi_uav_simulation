@@ -169,12 +169,13 @@ E(callout("10.0.0.1 must exist <b>before</b> Gazebo starts. Fast DDS 2.6 reads t
 # ── 2 ──
 A(para("2.  Start the host pipeline  [HOST]", "h1"))
 E(code("""
-./scripts/netns/run_hitl.sh --no-pi
+./scripts/netns/sitl_init.sh --gui --view
 """))
-A(para("Brings up netns, ns-3, Gazebo, SITL, micro_ros_agent, drone_bridge, the "
-       "VLANs and br-uav2, then gcs_receiver inside gcsns. Wait for "
-       "<b>HITL STACK RUNNING</b>. Use <font face='Courier'>--no-pi</font> when you "
-       "start the detector by hand.", "body"))
+A(para("Brings up netns, ns-3, Gazebo, SITL, micro_ros_agent, drone_bridge and the "
+       "VLANs. Wait for <b>PIPELINE READY</b>, then start the detectors with "
+       "<font face='Courier'>./scripts/netns/detector_start.sh</font> in a second "
+       "terminal and fly with "
+       "<font face='Courier'>./scripts/netns/run_missions.sh</font>.", "body"))
 E(table([
     ["Option", "Effect"],
     ["--mission", "fly uav1_patrol_mission.py automatically"],
@@ -255,7 +256,7 @@ A(para("Must run inside <font face='Courier'>gcsns</font>: drone_bridge lives th
 # ── 8 ──
 A(para("8.  Shut down  [HOST]", "h1"))
 E(code("""
-# Ctrl+C in the run_hitl.sh terminal tears down everything, or:
+# Ctrl+C in the detector_start.sh, then the sitl_init.sh terminal, or:
 bash scripts/netns/kill_all_netns.sh
 ssh anton@10.0.0.2 'pkill -f yolo_detect_node'
 """))

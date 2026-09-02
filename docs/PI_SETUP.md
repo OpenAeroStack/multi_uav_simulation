@@ -231,7 +231,7 @@ Point the detector at the model directory instead of the `.pt`; no code change i
 ### 3.5 Get the code onto the Pi + build
 
 The working Pi uses **`~/uav2_ws`**, with only `uav_vision` in it — not a full clone. Match
-that, because `run_hitl.sh` hardcodes the path:
+that, because `detector_start.sh` hardcodes the path:
 
 ```bash
 mkdir -p ~/uav2_ws/src ~/uav2_ws/config ~/models
@@ -458,8 +458,8 @@ export FASTRTPS_DEFAULT_PROFILES_FILE=$HOME/uav2_ws/config/fastdds_hitl_eth.xml
 Swap `model_path` for `yolov8n_384x640_ncnn_model` (270 ms) or `yolov8n.pt` (1,027 ms).
 **Do not pass `imgsz` with either exported model** — see §3.4b.
 
-In normal use you do not run this by hand: `./scripts/netns/run_hitl.sh` starts the whole
-stack including the Pi's detector over SSH, and tears it down with Ctrl+C. Expect ~12 s to
+In normal use you do not run this by hand: `./scripts/netns/detector_start.sh` starts the
+detector on every board over SSH, and tears them down with Ctrl+C. Expect ~12 s to
 load OpenVINO and a ~13 s first inference (it compiles the model on the first call), then
 ~250 ms steady.
 

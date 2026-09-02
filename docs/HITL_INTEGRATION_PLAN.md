@@ -130,7 +130,7 @@ correct: without ns-3 there is no radio.
 ping -c 3 10.0.0.2        # from the host
 
 # Radio link needs the stack:
-./scripts/netns/run_hitl.sh --no-pi     # wait for PIPELINE READY
+./scripts/netns/sitl_init.sh            # wait for PIPELINE READY
 ping -c 30 10.42.0.10 | tail -2         # from the Pi
 ```
 
@@ -248,7 +248,7 @@ it as a second axis alongside latency in Phase 6.
   symptom: 0.19 Hz delivered against a 5 Hz source, host transmitting 2 Mbps instead of
   110 Mbps. See §8.
 
-Both are checked by `run_hitl.sh` pre-flight. Persist them in
+Both are checked on both machines by `rpi_init.sh` (step 0). Persist them in
 `/etc/sysctl.d/60-ros2-dds.conf` on **both** machines — a `sysctl -w` is lost at reboot, and
 the failure it causes does not look like a buffer problem.
 
@@ -894,7 +894,10 @@ under 200 ms old. Supplying only 3.5 Hz would save 1 MB/s and make every frame u
 
 | Path | Purpose |
 |---|---|
-| `scripts/netns/run_hitl.sh` | **One-command HITL run** — pipeline + Pi detector + GCS, with pre-flight checks |
+| `scripts/netns/rpi_init.sh` | **Step 0** — verify both Pi boards: link, config, buffers, clock |
+| `scripts/netns/sitl_init.sh` | **Step 1** — cold-start the host pipeline; ends at PIPELINE READY |
+| `scripts/netns/detector_start.sh` | **Step 2** — Pi detectors over SSH + `gcs_receiver` per board |
+| `scripts/netns/run_missions.sh` | **Step 3** — fly `two_drone_mission.py` |
 | `scripts/netns/launch_single_uav_netns.sh` | 8-stage host bring-up; STEP 1c adds the VLANs + `br-uav2` |
 | `scripts/netns/pi_hitl_link.sh` | One-off VLAN setup on the Pi; superseded by `/etc/netplan/60-hitl-vlans.yaml`, kept for a machine that has not been configured yet |
 | `scripts/netns/kill_all_netns.sh` | Teardown (also kills gzserver) |
