@@ -80,7 +80,7 @@ RF_PI_IP="10.42.0.12"   # the Pi is UAV2 on the wireless subnet
 
 TAP_READY_TIMEOUT=30
 AGENT_READY_TIMEOUT=20
-DDS_GPS_TIMEOUT=90
+DDS_GPS_TIMEOUT=210   # GPS lock after --wipe; 90s was marginal on a loaded host
 SITL_SETTLE_SEC=15      # AP_DDS handshake headroom; see STEP 6 for why
 SITL_TCP_TIMEOUT=90
 GAZEBO_STARTUP_SEC=30
@@ -504,34 +504,8 @@ echo ""
 restore_tty
 echo "=== [7/8] Verifying DDS GPS + MAVLink reachability from gcsns ==="
 
-# A publisher count is not a working feed: wait for a real message, on both.
-wait_for_navsat() {
-    local uav=$1 topic="/ap/v$1/navsat"
-    echo "  Waiting for a message on $topic ..."
-    local deadline=$((SECONDS + DDS_GPS_TIMEOUT))
-    while true; do
-        if sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
-                source /opt/ros/humble/setup.bash
-                source "$HOME/ardu_ws/install/setup.bash"
-                source "$1"
-                timeout 5 ros2 topic echo --once "$2" >/dev/null 2>&1
-            ' t-shell "$PROJECT_DIR/ros2/install/setup.bash" "$topic"; then
-            echo "  $topic is delivering messages."
-            return 0
-        fi
-        (( SECONDS >= deadline )) && {
-            echo "ERROR: no data on $topic within ${DDS_GPS_TIMEOUT}s." >&2
-            echo "       AP_DDS is up but silent. Check $AGENT_LOG for an" >&2
-            echo "       'establish_session' later than the last 'create_topic'." >&2
-            exit 1
-        }
-        sleep 1
-    done
-}
-
-wait_for_navsat 1
-wait_for_navsat 2
-
+# TCP first: it is the cheap prerequisite, and a failure here explains a silent
+# navsat below. Checking navsat first buries a dead link under a 3-minute wait.
 echo "  Waiting for SITL TCP 5760 reachable from gcsns..."
 deadline=$((SECONDS + SITL_TCP_TIMEOUT))
 until sudo ip netns exec gcsns sudo -H -u "$RUN_USER" \
@@ -543,6 +517,57 @@ until sudo ip netns exec gcsns sudo -H -u "$RUN_USER" \
     sleep 0.5
 done
 echo "  SITL reachable from gcsns at 10.42.0.11:5760"
+
+# Run a ros2 command inside gcsns with the full workspace sourced.
+in_gcsns() {
+    sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
+        source /opt/ros/humble/setup.bash
+        source "$HOME/ardu_ws/install/setup.bash"
+        source "$1"
+        shift
+        "$@"
+    ' t-shell "$PROJECT_DIR/ros2/install/setup.bash" "$@"
+}
+
+# A publisher count is not a working feed: wait for a real message, on both.
+# AP_DDS creates the navsat writer at boot but publishes nothing until the GPS
+# is healthy (AP_DDS_Client.cpp: !gps.is_healthy() returns false), so a silent
+# topic almost always means "no GPS lock yet", not "DDS is broken".
+wait_for_navsat() {
+    local uav=$1 topic="/ap/v$1/navsat" log="$AGENT_LOG"
+    if (( uav == 2 )); then log="$AGENT_LOG2"; fi
+    local start=$SECONDS deadline=$((SECONDS + DDS_GPS_TIMEOUT)) tries=0
+    echo "  Waiting for a message on $topic (up to ${DDS_GPS_TIMEOUT}s) ..."
+    while true; do
+        if in_gcsns timeout 5 ros2 topic echo --once "$topic" >/dev/null 2>&1; then
+            echo "  $topic is delivering messages ($((SECONDS - start))s)."
+            return 0
+        fi
+        if (( SECONDS >= deadline )); then break; fi
+        tries=$((tries + 1))
+        if (( tries % 5 == 0 )); then
+            echo "    still waiting for a GPS lock ($((SECONDS - start))s)..."
+        fi
+        sleep 1
+    done
+
+    # Separate the two causes so the next step is unambiguous.
+    echo "ERROR: no data on $topic within ${DDS_GPS_TIMEOUT}s." >&2
+    if in_gcsns ros2 topic list 2>/dev/null | grep -qx "$topic"; then
+        echo "       The topic EXISTS but never published: UAV$uav has no GPS fix yet." >&2
+        echo "       AP_DDS suppresses navsat until gps.is_healthy(). Gazebo must be" >&2
+        echo "       stepping - check RTF in gzclient and $GAZEBO_LOG." >&2
+        echo "       If the host is loaded, re-run without --gui --view." >&2
+    else
+        echo "       The topic does NOT exist: the XRCE session never completed." >&2
+        echo "       Check $log for an 'establish_session' later than the" >&2
+        echo "       last 'create_topic' (SITL restarted under the agent)." >&2
+    fi
+    exit 1
+}
+
+wait_for_navsat 1
+wait_for_navsat 2
 echo ""
 
 # ── STEP 8 — drone_bridge inside gcsns ───────────────────────────────────────
