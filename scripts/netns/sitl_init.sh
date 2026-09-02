@@ -1,12 +1,14 @@
 #!/bin/bash
-# Single-UAV (+ GCS) netns/NS-3 launch — reduced from the 3-UAV pipeline.
-# Reuses the unmodified 4-node ns-3 binary (three_uav_tapbridge_integrated);
-# UAV2/UAV3 get bare, unbridged dummy TAPs so the binary's required tap2/tap3
-# arguments are satisfied, but no namespace/SITL/traffic exists behind them.
+# Step 1 of 4: cold-start the pipeline — netns, ns-3, Gazebo, SITL x2,
+# micro-ROS agents x2, drone_bridge x2. Ends at PIPELINE READY and flies nothing.
 #
-# Does NOT auto-launch the mission, detector, or metrics_logger — run those
-# manually afterward, in separate terminals, so edge/ground/nav-only runs
-# stay independently controllable and debuggable.
+#   ./scripts/netns/rpi_init.sh                 # 0 - verify both Raspberry Pi boards
+#   ./scripts/netns/sitl_init.sh --gui --view   # 1 - host pipeline, leave running
+#   ./scripts/netns/detector_start.sh           # 2 - Pi detectors + receivers
+#   ./scripts/netns/run_missions.sh             # 3 - fly
+#
+# Missions are deliberately separate: initialisation must be fully verified
+# before anything arms, and each half can then be debugged on its own.
 
 set -euo pipefail
 
@@ -14,11 +16,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RUN_USER="${SUDO_USER:-$USER}"
 
-# SITL and other children reconfigure the controlling terminal (they turn off
-# ONLCR, so a newline stops returning the cursor to column 0 and every line
-# prints one step further right). Save the settings now and restore them on
-# exit; every background process is also given its own stdin (< /dev/null) so
-# it cannot reach this terminal in the first place.
+# --gui opens the Gazebo 3D viewer; --view opens a camera window per aircraft.
+WITH_GUI=0
+WITH_VIEW=0
+for arg in "$@"; do
+    case "$arg" in
+        --gui)  WITH_GUI=1 ;;
+        --view) WITH_VIEW=1 ;;
+        -h|--help)
+            echo "usage: sitl_init.sh [--gui] [--view]"
+            echo "  --gui   open the Gazebo 3D viewer (gzclient)"
+            echo "  --view  open a camera + detections window per aircraft"
+            exit 0 ;;
+        *) echo "ERROR: unknown option: $arg" >&2; exit 2 ;;
+    esac
+done
+
+# SITL children turn off ONLCR; save the tty settings and restore them on exit.
 TTY_SAVED=""
 [[ -t 0 ]] && TTY_SAVED="$(stty -g 2>/dev/null || true)"
 restore_tty() { [[ -n "$TTY_SAVED" ]] && stty "$TTY_SAVED" 2>/dev/null || true; }
@@ -26,6 +40,7 @@ restore_tty() { [[ -n "$TTY_SAVED" ]] && stty "$TTY_SAVED" 2>/dev/null || true; 
 # Provides ARDUPILOT_HOME and other project-wide env vars
 source "$PROJECT_DIR/setup.sh"
 
+# Logs
 NS3_ROOT="$HOME/ns-allinone-3.38/ns-3.38"
 NS3_LOG="/tmp/ns3_2uav.log"
 GAZEBO_LOG="/tmp/gazebo_2uav.log"
@@ -38,20 +53,13 @@ AGENT_LOG2="/tmp/agent_2uav_uav2.log"
 BRIDGE_LOG2="/tmp/bridge_2uav_uav2.log"
 
 
-# One --home PER AIRCRAFT. Both SITLs shared HOME_GPS until now, so UAV2's
-# autopilot believed it started where UAV1 does: its EKF origin, its reported
-# position and its RTL point were all offset by the distance between the two
-# spawns. Harmless while they sat 10 m apart, corrupting once they do not.
-#
-# Each value must match that model's <pose> in the world file, converted with
-# the mapping proven in uav1_patrol_mission.py -- NOT plain ENU:
-#     north =  gazebo_x        east = -gazebo_y
-#
-#   iris_1_demo  <pose>-70 -22 ...>  ->  6.0790684, 80.1915283   (known good)
-#   iris_2_demo  <pose>-70 -32 ...>  ->  10 m EAST of UAV1       (derived)
-# Move a drone in the world file and you must move its home here too.
-HOME_GPS="6.0790684,80.1915283,0.00,0"    # UAV1
-HOME_GPS2="6.0790684,80.1916186,0.00,0"   # UAV2
+# One --home per aircraft, matching its <pose>. See docs/COORDINATE_FRAMES.pdf.
+
+# UAV1
+HOME_GPS="6.0790684,80.1915283,0.00,0"   
+# UAV2 
+HOME_GPS2="6.0790684,80.1916186,0.00,0"   
+
 WORLD_PATH="$PROJECT_DIR/worlds/small_city_2uav_netns.world"
 DDS_PARM="$PROJECT_DIR/params/uav1_dds_netns.parm"
 DDS_PARM2="$PROJECT_DIR/params/uav2_dds_netns.parm"
@@ -87,24 +95,40 @@ AGENT_PID2=""
 BRIDGE_PID2=""
 POSPUB_PID=""
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 0 — Cleanup
-# ═══════════════════════════════════════════════════════════════════════════
+# ── STEP 0 — Cleanup ─────────────────────────────────────────────────────────
 restore_tty
 echo "=== [0] Pre-flight cleanup ==="
-# pkill -f matches FULL command lines -- including its own parent sudo, whose
-# cmdline is literally `sudo pkill -9 -f -- gzserver`. Without the bracket below
-# each iteration SIGKILLs its own sudo. That is the "line NN: PID Killed sudo
-# pkill" spam, and because sudo puts the terminal in no-echo for the password
-# prompt and is killed before it can restore it, the whole session is left with
-# ONLCR off -- every later line prints one step further right.
-#
-# `[g]zserver` as a REGEX matches "gzserver"; as literal text in sudo's own
-# command line it does not match that regex. Self-match solved, same targets hit.
-for pattern in drone_bridge micro_ros_agent '/build/sitl/bin/arducopter' \
-               'three_uav_tapbridge_integrated' gzserver gzclient; do
+# `[g]zserver` stops pkill matching its own sudo. Stale procs corrupt the next run.
+KILL_PATTERNS=(
+    drone_bridge
+    micro_ros_agent
+    '/build/sitl/bin/arducopter'
+    'three_uav_tapbridge_integrated'
+    gzserver
+    gzclient
+    'world_pos_publisher.py'
+    'two_drone_mission.py'
+    'uav1_patrol_mission.py'
+    'uav2_road_patrol.py'
+    'detection_viewer.py'
+    gcs_receiver
+    metrics_logger
+)
+for pattern in "${KILL_PATTERNS[@]}"; do
     safe="[${pattern:0:1}]${pattern:1}"
     sudo pkill -9 -f -- "$safe" 2>/dev/null && echo "  killed: $pattern" || true
+done
+
+# Second pass: SIGKILL is not instant. Warn only; pgrep -f has false positives.
+sleep 1
+for pattern in "${KILL_PATTERNS[@]}"; do
+    safe="[${pattern:0:1}]${pattern:1}"
+    if pgrep -f -- "$safe" >/dev/null 2>&1; then
+        sudo pkill -9 -f -- "$safe" 2>/dev/null || true
+        sleep 0.3
+        pgrep -f -- "$safe" >/dev/null 2>&1 &&
+            echo "  WARNING: '$pattern' still matches a process — check with: pgrep -af '$pattern'" >&2
+    fi
 done
 for ns in gcsns uav1ns uav2ns; do
     sudo ip netns del "$ns" 2>/dev/null || true
@@ -112,21 +136,7 @@ done
 for br in br-gcs br-uav1 br-uav2 br-uav3 br-uav4; do
     sudo ip link del "$br" type bridge 2>/dev/null || true
 done
-# NOTE: eth-cam is deliberately NOT in this list.
-#
-# The camera VLAN is the drone's internal sensor cable. On a real airframe it
-# is present whenever the aircraft is powered, and it has nothing to do with
-# the radio. Deleting it here tied it to the simulator's lifetime, so between
-# runs the host answered untagged while the Pi kept sending VLAN-10 frames.
-# The result was 100% loss with the carrier up, and no route to the Pi at all
-# — not even SSH. It cost several sessions before the cause was identified.
-#
-# eth-cam is therefore owned by NetworkManager and persists across runs and
-# reboots. STEP 1c below still creates it if it is missing, so a machine that
-# has not been configured yet keeps working.
-#
-# eth-rf stays here: it is a pure L2 leg into br-uav2, which is torn down with
-# ns-3 every run, so it has nothing to persist for.
+# eth-cam is NOT deleted: it is the persistent sensor cable, owned by NetworkManager.
 for link in tap-gcs tap-uav1 tap-uav2 tap-uav3 tap-uav4 veth0h veth1h veth2h \
             sim1h sim2h eth-rf eth-rf2; do
     sudo ip link del "$link" 2>/dev/null || true
@@ -135,9 +145,7 @@ sleep 2
 echo "=== Cleanup done ==="
 echo ""
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 1 — Real wireless topology: gcsns + uav1ns only
-# ═══════════════════════════════════════════════════════════════════════════
+# ── STEP 1 — Real wireless topology: gcsns + uav1ns only ─────────────────────
 restore_tty
 echo "=== [1/8] Wireless topology: gcsns + uav1ns + uav2ns ==="
 setup_ns() {
@@ -173,24 +181,8 @@ echo "  tap-uav2 up (node 2 - Pi 1 attaches here, see 1c)"
 echo "  tap-uav4 up (node 4 - Pi 2 attaches here, see 1c)"
 echo ""
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 1c — HITL: attach the Raspberry Pi as UAV2 on the IMPAIRED link
-# ═══════════════════════════════════════════════════════════════════════════
-# The Pi has ONE ethernet port but needs TWO logically separate links:
-#
-#   VLAN 10 -> 10.0.0.x   camera in.  Behaves like the ribbon cable between a
-#                         camera module and the companion computer inside one
-#                         airframe, so it must NOT be impaired and must never
-#                         enter a bridge ns-3 can see.
-#   VLAN 42 -> 10.42.0.x  detections out. This IS the radio, so it goes
-#                         br-uav2 -> tap-uav2 -> ns-3 -> tap-gcs -> gcsns.
-#
-# 802.1Q keeps them separate over the single cable. The routing then enforces
-# itself: Gazebo can only reach the Pi at 10.0.0.2, and gcsns can only reach it
-# at 10.42.0.12, so neither can take the wrong path even by accident.
-#
-# Skipped automatically when no Pi-facing NIC is present, so host-only runs are
-# unaffected.
+# ── STEP 1c — HITL: attach the Raspberry Pi as UAV2 on the IMPAIRED link ─────
+# One cable, two VLANs: 10 = unimpaired camera in, 42 = detections out via ns-3.
 restore_tty
 echo "=== [1c] HITL: Pi edge node as UAV2 on the impaired link ==="
 if [[ -n "$PI_LINK_IF" ]] && [[ -d "/sys/class/net/$PI_LINK_IF" ]]; then
@@ -201,13 +193,7 @@ if [[ -n "$PI_LINK_IF" ]] && [[ -d "/sys/class/net/$PI_LINK_IF" ]]; then
     sudo ip link set tap-uav2 master br-uav2
     sudo ip link set br-uav2 up
 
-    # The camera address must live on the VLAN, not the parent: anything left
-    # on the untagged parent would not reach the Pi's tagged sub-interface.
-    #
-    # Preferably eth-cam already exists, created by NetworkManager, so that the
-    # sensor link is up from boot and independent of this script. Every command
-    # here is idempotent, so it is a no-op in that case and still does the right
-    # thing on a machine that has not been configured yet.
+    # Address must sit on the VLAN, not the untagged parent. All idempotent.
     if ip link show "$CAM_VLAN_IF" >/dev/null 2>&1; then
         echo "  $CAM_VLAN_IF already present (persistent) — left alone"
     else
@@ -248,9 +234,7 @@ else
 fi
 echo ""
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 2 — Management link: uav1ns <-> root (FDM physics, bypasses NS-3)
-# ═══════════════════════════════════════════════════════════════════════════
+# ── STEP 2 — Management link: uav1ns <-> root (FDM physics, bypasses NS-3) ────
 restore_tty
 echo "=== [2/8] Management link (SITL <-> Gazebo physics) ==="
 sudo ip link add sim1h type veth peer name sim1n 2>/dev/null || true
@@ -275,9 +259,7 @@ echo "  root=172.31.2.1 <-> uav2ns=172.31.2.2"
 
 echo ""
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 3 — NS-3 wireless simulation (unmodified 4-node binary)
-# ═══════════════════════════════════════════════════════════════════════════
+# ── STEP 3 — NS-3 wireless simulation (unmodified 4-node binary) ─────────────
 restore_tty
 echo "=== [3/8] Building + starting ns-3 (three_uav_tapbridge_integrated) ==="
 (cd "$NS3_ROOT" && ./ns3 build three_uav_tapbridge_integrated)
@@ -324,9 +306,7 @@ sudo ip netns exec gcsns ping -c 2 -W 2 10.42.0.11 || {
 echo "  Wireless link confirmed working."
 echo ""
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 4 — Gazebo (root namespace)
-# ═══════════════════════════════════════════════════════════════════════════
+# ── STEP 4 — Gazebo (root namespace) ─────────────────────────────────────────
 restore_tty
 echo "=== [4/8] Starting Gazebo ==="
 CITY="$HOME/FYP/small_city_gazebo_world"   # external city-world assets repo (models + terrain)
@@ -338,11 +318,8 @@ export GAZEBO_PLUGIN_PATH="$PROJECT_DIR/install/multi_uav_gazebo_plugins/lib:$HO
 [[ -f "$WORLD_PATH" ]] || { echo "ERROR: world file not found: $WORLD_PATH" >&2; exit 1; }
 
 : > "$GAZEBO_LOG"
-# HITL: pin Gazebo's DDS to the wired sensor link (10.0.0.x) so the Pi edge node
-# can subscribe to the camera. Scoped to THIS process only -- exporting it
-# globally would whitelist 10.0.0.x for the gcsns/uav1ns participants too, which
-# live on 10.42.0.x, and would break the netns DDS path. Harmless when no Pi is
-# attached (the address simply is not matched). See config/fastdds_hitl_eth.xml.
+# Pin Gazebo's DDS to the sensor link so the Pi can subscribe to the camera.
+# Scoped to THIS process: exporting it globally would break the netns DDS path.
 FASTRTPS_DEFAULT_PROFILES_FILE="$PROJECT_DIR/config/fastdds_hitl_eth.xml" \
 gzserver --verbose "$WORLD_PATH" -s libgazebo_ros_init.so -s libgazebo_ros_factory.so > "$GAZEBO_LOG" 2>&1 < /dev/null &
 GAZEBO_PID=$!
@@ -357,44 +334,18 @@ kill -0 "$GAZEBO_PID" 2>/dev/null || {
 echo "  Gazebo running: PID=$GAZEBO_PID"
 echo ""
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 4b — Position publisher (ns-3 mobility)
-#
-# WITHOUT THIS, EVERY ns-3 NODE STAYS FROZEN at its CLI-default formation
-# position for the whole flight. Nothing errors: the link still carries traffic,
-# pings still return, and the numbers look plausible -- they just describe a
-# fixed 50 m link instead of the drone that is actually flying. The obstacle
-# model has no changing geometry to shadow, so RSSI/SNR never respond to the
-# mission at all.
-#
-# This block existed in launch_netns_v2.sh and was not carried across when this
-# script replaced it. Runs in the ROOT namespace (that is where Gazebo is) and
-# needs Gazebo's DDS profile, or it cannot discover /gazebo/model_states.
-#
-# mirror=2:1 puts node 2 -- the Pi edge node -- at UAV1's coordinates. The Pi is
-# bolted to the same airframe as the autopilot, so it must be at the same place;
-# without it node 2 is never covered by the feed and stays frozen even when
-# node 1 moves. Drop the mirror once the Pi shares node 1 (TapBridge UseBridge).
-# ═══════════════════════════════════════════════════════════════════════════
+# ── STEP 4b — Position publisher (ns-3 mobility) ─────────────────────────────
+# Without this every ns-3 node stays frozen and the link numbers are fiction.
 restore_tty
 echo "=== [4b] Position publisher (feeds real UAV position to ns-3) ==="
 if [[ -f "$PROJECT_DIR/scripts/world_pos_publisher.py" ]]; then
     : > "$POSPUB_LOG"
-    # set +u before sourcing: this script runs under `set -euo pipefail`, and
-    # /opt/ros/humble/setup.bash reads AMENT_TRACE_SETUP_FILES unset, which
-    # under -u aborts the subshell before python is ever reached. The failure is
-    # quiet -- the launcher carries on, and the only symptom is ns-3 nodes that
-    # never move. Every other stage sidesteps this by using `bash -lc`.
+    # set +u: ROS setup.bash reads an unset var and would abort under -u.
     ( set +u
       source /opt/ros/humble/setup.bash
       export FASTRTPS_DEFAULT_PROFILES_FILE="$PROJECT_DIR/config/fastdds_hitl_eth.xml"
-      # KEEP --ros-args FIRST. Without it rclpy ignores every -p flag silently:
-      # they stay ordinary argv strings and the node comes up on ITS DEFAULTS
-      # (n_uavs=3, no mirror), which looks identical in ps but publishes the
-      # wrong node ids. Check /tmp/pospub_2uav.log for the "Mirroring:" line to
-      # confirm the parameters actually landed.
-      # Do NOT put a comment on the line after a trailing "\" -- bash joins the
-      # lines literally and the "#" then comments out the arguments.
+      # --ros-args MUST come first or rclpy silently ignores every -p flag.
+      # Never put a comment after a trailing backslash: it eats the arguments.
       exec python3 "$PROJECT_DIR/scripts/world_pos_publisher.py" \
                 --ros-args -p n_uavs:=1 -p mirror:=2:1
 
@@ -414,9 +365,7 @@ else
 fi
 echo ""
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 5 — micro_ros_agent inside gcsns
-# ═══════════════════════════════════════════════════════════════════════════
+# ── STEP 5 — micro_ros_agent inside gcsns ────────────────────────────────────
 restore_tty
 echo "=== [5/8] micro_ros_agent inside gcsns ==="
 : > "$AGENT_LOG"
@@ -474,21 +423,14 @@ done
 echo "  agent ready on UDP 2020 inside gcsns"
 echo ""
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 6 — SITL inside uav1ns
-# ═══════════════════════════════════════════════════════════════════════════
+# ── STEP 6 — SITL inside uav1ns ──────────────────────────────────────────────
 restore_tty
 echo "=== [6a/8] SITL inside uav1ns ==="
 mkdir -p "$SITL_LOG_DIR"
 chown "$RUN_USER":"$(id -gn "$RUN_USER")" "$SITL_LOG_DIR"
 
-# Run arducopter UNDER strace (ptrace). REQUIRED workaround: without it, SITL enters
-# an endless reboot loop once the Gazebo FDM connects with DDS enabled inside the
-# netns (SITL keeps re-loading defaults and re-execing, dropping the FDM link ->
-# "Broken ArduPilot connection"). Being ptrace-traced suppresses that auto-reboot, so
-# SITL settles and stays up. `-e trace=none` traces NO syscalls (near-zero overhead);
-# it is here purely for the ptrace side-effect. Matches the working setup on the other
-# laptop. Needs `strace` installed (sudo apt install -y strace).
+# strace REQUIRED: being ptrace-traced suppresses SITL's netns+DDS reboot loop.
+# `-e trace=none` traces nothing; it is here purely for that side-effect.
 sudo ip netns exec uav1ns sudo -H -u "$RUN_USER" bash -c '
     cd "$1"
     shift
@@ -553,25 +495,16 @@ while ! sudo ip netns exec uav1ns ss -H -lun "sport = :9003" | grep -q .; do
 done
 echo "  SITL alive, FDM port open"
 
-# Give AP_DDS time to finish its XRCE handshake before the bridges connect and
-# start pulling MAVLink streams out of the same process. launch_multi_dds.sh --
-# the flat launcher that does not show this problem -- waits 15 s here for the
-# same reason; the netns pipeline had 0.2 s and moved straight on.
+# AP_DDS needs to finish its XRCE handshake before the bridges pull MAVLink.
 echo "  Letting AP_DDS settle (${SITL_SETTLE_SEC}s)..."
 sleep "$SITL_SETTLE_SEC"
 echo ""
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 7 — Verify DDS GPS + SITL TCP reachable from gcsns
-# ═══════════════════════════════════════════════════════════════════════════
+# ── STEP 7 — Verify DDS GPS + SITL TCP reachable from gcsns ──────────────────
 restore_tty
 echo "=== [7/8] Verifying DDS GPS + MAVLink reachability from gcsns ==="
 
-# A PUBLISHER COUNT IS NOT A WORKING FEED. AP_DDS registers its publishers and
-# can then stop sending -- the topic still reports "Publisher count: 1" while
-# nothing arrives, which is exactly the failure that lets a mission take off and
-# then fly blind. So wait for an actual MESSAGE, on BOTH aircraft. The old check
-# looked at /ap/v1/navsat only, which is why UAV2 could come up dead unnoticed.
+# A publisher count is not a working feed: wait for a real message, on both.
 wait_for_navsat() {
     local uav=$1 topic="/ap/v$1/navsat"
     echo "  Waiting for a message on $topic ..."
@@ -612,17 +545,10 @@ done
 echo "  SITL reachable from gcsns at 10.42.0.11:5760"
 echo ""
 
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 8 — drone_bridge inside gcsns
-# ═══════════════════════════════════════════════════════════════════════════
+# ── STEP 8 — drone_bridge inside gcsns ───────────────────────────────────────
 restore_tty
-    # -r __node:= IS NOT COSMETIC. Both bridges are the same executable, so
-    # without a rename both register as /drone_bridge -- two nodes with one
-    # name in one ROS 2 domain, which is undefined behaviour. Discovery treats
-    # them as a single identity and the one that starts SECOND displaces the
-    # first, so UAV1's /uav1/gps stopped being visible to its mission every
-    # single run while UAV2 worked. Deterministic, not a race.
-    # launch_city_dds.sh on the dynamic-data branch renames all three.
+    # -r __node:= is REQUIRED: duplicate node names make the second displace
+    # the first, and UAV1 silently loses its topics every run.
 echo "=== [8/8] Starting drone_bridge inside gcsns ==="
 : > "$BRIDGE_LOG"
 sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
@@ -670,28 +596,69 @@ echo ""
 
 echo ""
 
+# ── Viewers ──────────────────────────────────────────────────────────────────
+# gzclient attaches to the running gzserver, so it can be opened or closed at
+# any time. Both cost host CPU; close them before a timing run.
+GZCLIENT_PID=""
+VIEWER_PIDS=()
+if (( WITH_GUI )); then
+    gzclient > /tmp/gzclient_2uav.log 2>&1 &
+    GZCLIENT_PID=$!
+    sleep 2
+    if kill -0 "$GZCLIENT_PID" 2>/dev/null; then
+        echo "  Gazebo viewer opened (pid $GZCLIENT_PID)"
+    else
+        echo "  WARNING: gzclient exited — see /tmp/gzclient_2uav.log" >&2
+    fi
+fi
+if (( WITH_VIEW )); then
+    for i in 1 2; do
+        FASTRTPS_DEFAULT_PROFILES_FILE="$PROJECT_DIR/config/fastdds_hitl_eth.xml" \
+        bash -lc "source /opt/ros/humble/setup.bash && \
+                  exec python3 '$PROJECT_DIR/scripts/detection_viewer.py' --ros-args \
+                       -p image_topic:=/uav$i/camera/image_raw \
+                       -p detection_topic:=/detections/uav$i" \
+            > "/tmp/viewer_2uav_uav$i.log" 2>&1 &
+        VIEWER_PIDS+=("$!")
+        echo "  uav$i camera window opened"
+    done
+fi
+echo ""
+
 restore_tty
-echo "════════════════════════════════════════════════════════════"
-echo " PIPELINE READY — nothing auto-launched beyond this point."
-echo "════════════════════════════════════════════════════════════"
-echo "  Run mission/detector/metrics_logger manually, INSIDE gcsns, e.g.:"
-echo ""
-echo "  sudo ip netns exec gcsns sudo -H -u $RUN_USER bash -lc '"
-echo "      source /opt/ros/humble/setup.bash"
-echo "      source $PROJECT_DIR/ros2/install/setup.bash"
-echo "      python3 $PROJECT_DIR/ros2/uav_controller/uav_controller/uav1_patrol_mission.py"
-echo "  '"
-echo ""
-echo "  PIDs: ns3=$NS3_PID gazebo=$GAZEBO_PID sitl=$SITL_PID sitl2=$SITL_PID2 agent=$AGENT_PID bridge=$BRIDGE_PID"
-echo "  Logs: $NS3_LOG  $GAZEBO_LOG  $SITL_LOG_DIR/arducopter.log  $AGENT_LOG  $BRIDGE_LOG"
-echo "  Ctrl+C to shut down everything."
+
+# say(): leading \r forces column 0. SITL children clear ONLCR, so a plain echo
+# starts where the previous line ended and the whole banner prints skewed.
+say() { printf '\r%s\n' "$*"; }
+
+say ""
+say "════════════════════════════════════════════════════════════"
+say " PIPELINE READY — nothing auto-launched beyond this point."
+say "════════════════════════════════════════════════════════════"
+say ""
+say "  Initialisation is complete and verified. Fly in a SECOND terminal:"
+say ""
+say "      ./scripts/netns/run_missions.sh"
+say ""
+say "  It re-checks every stage before arming, so a half-built stack fails"
+say "  immediately instead of thirty seconds into a flight."
+say ""
+say "  PIDs   ns3=$NS3_PID  gazebo=$GAZEBO_PID  pospub=$POSPUB_PID"
+say "$(printf '         uav1: sitl=%-8s agent=%-8s bridge=%s' "$SITL_PID"  "$AGENT_PID"  "$BRIDGE_PID")"
+say "$(printf '         uav2: sitl=%-8s agent=%-8s bridge=%s' "$SITL_PID2" "$AGENT_PID2" "$BRIDGE_PID2")"
+say ""
+say "  Logs   shared: $NS3_LOG  $GAZEBO_LOG  $POSPUB_LOG"
+say "         uav1:   $SITL_LOG_DIR/arducopter.log  $AGENT_LOG  $BRIDGE_LOG"
+say "         uav2:   $SITL_LOG_DIR2/arducopter.log  $AGENT_LOG2  $BRIDGE_LOG2"
+say ""
+say "  Ctrl+C here shuts down everything."
 echo ""
 
 cleanup() {
     restore_tty
     echo "Shutting down..."
     kill "$BRIDGE_PID" "$BRIDGE_PID2" "$AGENT_PID" "$AGENT_PID2" "$SITL_PID" "$SITL_PID2" "$POSPUB_PID" "$GAZEBO_PID" \
-         "$NS3_PID" 2>/dev/null || true
+         "$NS3_PID" ${GZCLIENT_PID:-} ${VIEWER_PIDS[@]:-} 2>/dev/null || true
     sleep 1
     sudo ip netns del gcsns 2>/dev/null || true
     sudo ip netns del uav1ns 2>/dev/null || true
@@ -703,9 +670,7 @@ cleanup() {
     sudo ip link del br-uav3 type bridge 2>/dev/null || true
     sudo ip link del br-uav4 type bridge 2>/dev/null || true
 
-    # eth-cam is left up on purpose — see the note in STEP 0. It is the sensor
-    # cable, not part of the simulation, and tearing it down here is what left
-    # the Pi unreachable between runs.
+    # eth-cam left up on purpose: it is the sensor cable, not the simulation.
     for l in tap-gcs tap-uav1 tap-uav2 tap-uav3 tap-uav4 veth0h veth1h veth2h \
              sim1h sim2h eth-rf eth-rf2; do
         sudo ip link del "$l" 2>/dev/null || true

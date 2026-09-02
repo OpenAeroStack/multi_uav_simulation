@@ -68,6 +68,7 @@ class DroneBridge(Node):
         self.rel_alt = 0.0
         self.battery = 0.0
         self.gps_ok  = False
+        self._navsat_seen = False
         self.armed   = False
         self.mode    = 'UNKNOWN'
 
@@ -90,31 +91,9 @@ class DroneBridge(Node):
                 stream_id, rate_hz, 1)
         self.get_logger().info(f'[UAV{self.uav_id}] Telemetry streams requested')
 
-        # ── callback groups ───────────────────────────────────────────────────
-        #
-        # WHY THIS EXISTS
-        #   The service handlers below legitimately take MINUTES: _srv_arm retries
-        #   arming for up to 120 s while the EKF settles, _srv_takeoff then waits
-        #   up to 120 s for altitude, and both block in _wait_for()'s sleep loop.
-        #
-        #   On the default single-threaded executor those sleeps hold the ONLY
-        #   callback thread, so _cb_navsat cannot run -- and since /uavN/gps is
-        #   republished from inside that callback, the position feed goes silent
-        #   for exactly as long as the service takes. A mission then sees a frozen
-        #   position and concludes the aircraft never moved. Measured: a 14.4 s
-        #   takeoff produced "no /uav2/gps for 14 s" the instant it returned.
-        #
-        #   Worse, _srv_arm waits on self.gps_ok, which is set BY the callback it
-        #   is starving: if GPS was not already flowing when the service was
-        #   called, that wait can never succeed. That is the "GPS not ready -- is
-        #   micro_ros_agent running?" failure.
-        #
-        #   So telemetry goes in a reentrant group (free to run at any time, on
-        #   any thread) and the slow services in their own group. main() drives
-        #   both with a MultiThreadedExecutor.
+        # Services block for minutes; telemetry must keep flowing meanwhile.
+        # Reentrant group for subscriptions, exclusive for the shared self.mav.
         self.cb_telemetry = ReentrantCallbackGroup()
-        # Mutually exclusive: the handlers share self.mav, and pymavlink's
-        # connection is not safe to write from two threads at once.
         self.cb_commands  = MutuallyExclusiveCallbackGroup()
 
         # ── DDS subscribers (telemetry) ───────────────────────────────────────
@@ -135,8 +114,7 @@ class DroneBridge(Node):
         self.pub_battery = self.create_publisher(Float32,   f'{ns}/battery', 10)
 
         # ── goto subscriber ───────────────────────────────────────────────────
-        # Mission nodes publish here, bridge forwards via MAVLink. It writes to
-        # self.mav, so it shares the command group rather than the telemetry one.
+        # Writes self.mav, so it shares the command group.
         self.create_subscription(
             GeoPoint, f'{ns}/goto',
             self._cb_goto, 10,
@@ -159,8 +137,7 @@ class DroneBridge(Node):
         threading.Thread(target=self._mav_loop, daemon=True).start()
 
         # ── GPS ready notifier ────────────────────────────────────────────────
-        # Telemetry group: this must still tick while a service is arming, or it
-        # would only report "GPS flowing" once the aircraft is already committed.
+        # Telemetry group: must tick while a service is arming.
         self._ready_logged = False
         self.create_timer(1.0, self._check_ready,
                           callback_group=self.cb_telemetry)
@@ -177,11 +154,10 @@ class DroneBridge(Node):
     # ── DDS callbacks ─────────────────────────────────────────────────────────
 
     def _cb_navsat(self, msg):
-        self.lat     = msg.latitude
-        self.lon     = msg.longitude
+        # DDS is no longer the source of /uavN/gps -- it supplies MSL altitude
+        # and proves the AP_DDS chain is alive for the launcher's readiness gate.
         self.alt_msl = msg.altitude
-        self.gps_ok  = (msg.latitude != 0.0 or msg.longitude != 0.0)
-        self.pub_gps.publish(msg)
+        self._navsat_seen = True
 
     def _cb_battery(self, msg):
         self.battery = msg.percentage * 100.0
@@ -227,6 +203,19 @@ class DroneBridge(Node):
                 alt_msg = Float32()
                 alt_msg.data = float(self.rel_alt)
                 self.pub_rel_alt.publish(alt_msg)
+
+                # Position from MAVLink, not only DDS. Both cross ns-3, but this
+                # is TCP and retransmits; best-effort navsat drops under load.
+                self.lat = msg.lat / 1e7
+                self.lon = msg.lon / 1e7
+                self.gps_ok = (self.lat != 0.0 or self.lon != 0.0)
+                fix = NavSatFix()
+                fix.header.stamp = self.get_clock().now().to_msg()
+                fix.header.frame_id = 'map'
+                fix.latitude  = self.lat
+                fix.longitude = self.lon
+                fix.altitude  = self.alt_msl
+                self.pub_gps.publish(fix)
                 continue
             # HEARTBEAT
             self.armed = bool(
@@ -246,9 +235,10 @@ class DroneBridge(Node):
 
     def _check_ready(self):
         if not self._ready_logged and self.gps_ok:
+            dds = 'DDS ok' if self._navsat_seen else 'DDS silent'
             self.get_logger().info(
                 f'[UAV{self.uav_id}] ✓ DDS GPS flowing '
-                f'({self.lat:.6f}, {self.lon:.6f})'
+                f'({self.lat:.6f}, {self.lon:.6f}) via MAVLink, {dds}'
                 f' — safe to call /uav{self.uav_id}/takeoff now')
             self._ready_logged = True
 
@@ -288,9 +278,7 @@ class DroneBridge(Node):
         self._set_mode('GUIDED')
         time.sleep(1.0)
 
-        # 120 s, as on the dynamic-data branch. Arming legitimately retries
-        # for a long time while the EKF settles and pre-arm checks clear;
-        # 40 s was tight enough to fail runs that would have armed.
+        # 120 s: arming retries while the EKF settles. 40 s failed valid runs.
         deadline   = time.time() + 120.0
         last_arm   = 0.0
         attempt    = 0
@@ -368,10 +356,7 @@ def main(args=None):
     rclpy.init(args=args)
     node = DroneBridge()
 
-    # MultiThreadedExecutor, NOT rclpy.spin(): the arm/takeoff handlers block for
-    # tens of seconds, and on a single thread that silences the position feed for
-    # the whole time (see the callback-group comment in __init__). Three threads
-    # is enough -- one long-running command, telemetry, and headroom.
+    # MultiThreaded, not rclpy.spin(): blocking handlers would silence telemetry.
     executor = MultiThreadedExecutor(num_threads=3)
     executor.add_node(node)
     try:

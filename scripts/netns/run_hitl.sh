@@ -69,7 +69,7 @@ PI_MODEL_PT="/home/anton/models/yolov8n.pt"                         # 1027 ms
 
 DDS_PROFILE="$PROJECT_DIR/config/fastdds_hitl_eth.xml"
 PIPELINE_1UAV="$PROJECT_DIR/scripts/netns/launch_single_uav_netns.sh"
-PIPELINE_2UAV="$PROJECT_DIR/scripts/netns/launch_2uav_netns.sh"
+PIPELINE_2UAV="$PROJECT_DIR/scripts/netns/sitl_init.sh"
 MISSION="$PROJECT_DIR/ros2/uav_controller/uav_controller/uav1_patrol_mission.py"
 # Separate file, not a flag on MISSION: a waypoint LIST is a different sequence
 # from "hold one station at a standoff", and lists do not fit ROS 2 parameters.
@@ -113,7 +113,7 @@ Usage: run_hitl.sh [options]
   --debug           detector saves annotated JPEGs to /tmp/yolo_frames on the Pi
                     (costs CPU + an SD write per detection — not for timing runs)
   --uavs <N>        how many aircraft to bring up (1 or 2, default 1)
-                    N=2 uses launch_2uav_netns.sh and drives BOTH Pi boards
+                    N=2 uses sitl_init.sh and drives BOTH Pi boards
   --view            open a camera+detections window per aircraft
                     (costs host CPU — close them before timing runs)
   --gui             open the Gazebo 3D viewer, to watch the drones fly

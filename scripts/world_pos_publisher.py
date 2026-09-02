@@ -108,18 +108,8 @@ class WorldPosPublisher(Node):
                         f"mirror entry '{pair}' is not dst:src (e.g. 2:1)")
                 self.mirror[int(dst)] = int(src)
 
-        # "3:iris_2,5:iris_4" -> {3: 'iris_2', 5: 'iris_4'}. An EXPLICIT node ->
-        # model assignment, for layouts the n_uavs loop below cannot express.
-        #
-        # That loop walks node id and model number together (node k <- iris_k),
-        # which assumes aircraft occupy nodes 1, 2, 3 ... consecutively. The HITL
-        # topology interleaves them with companion computers:
-        #     node 1 = SITL1   node 2 = Pi 1   node 3 = SITL2   node 4 = Pi 2
-        # so the second aircraft belongs on node 3, and no value of n_uavs can
-        # say that -- n_uavs=2 would put it on node 2, the Pi's slot.
-        #
-        # Entries here WIN over the automatic rule, and mirrors fill the rest:
-        #     -p n_uavs:=1 -p node_map:=3:iris_2 -p mirror:=2:1,4:3
+        # "3:iris_2" -> node 3 takes iris_2. For layouts the n_uavs loop cannot
+        # express, e.g. aircraft on 1,3 with companion computers on 2,4.
         self.node_map = {}
         spec = str(self.get_parameter('node_map').value).strip()
         if spec:
@@ -236,11 +226,8 @@ class WorldPosPublisher(Node):
         base = 1 if self.gcs_enabled else 0
         poses = {}                            # nid -> (x, y, z), for mirroring
         for k in range(self.n_uavs):
-            # base + k, NOT base + 1: the id must advance with the loop. Pinned
-            # to a constant it publishes every aircraft onto the SAME node and
-            # leaves node 1 with no position at all -- ns-3 then keeps node 1 at
-            # its initial formation coordinate, kilometres from where the drone
-            # really is, and every link metric for it is fiction.
+            # base + k, NOT base + 1: pinned to a constant it publishes every
+            # aircraft onto one node and leaves node 1 with no position at all.
             nid = base + k
             if nid in self.node_map:
                 continue                       # explicit assignment wins; see below
@@ -254,8 +241,7 @@ class WorldPosPublisher(Node):
             found += 1
 
         # ── explicitly mapped nodes ──────────────────────────────────────
-        # For layouts the consecutive rule cannot express (see node_map above).
-        # Emitted before the mirrors so a mirror can take its source from one.
+        # Before the mirrors, so a mirror can source from an explicit entry.
         for nid, model in self.node_map.items():
             idx = next((j for j, nm in enumerate(names)
                         if nm.startswith(model)), None)

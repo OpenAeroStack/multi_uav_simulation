@@ -10,7 +10,12 @@ for pattern in \
     'micro_ros_agent' \
     '/build/sitl/bin/arducopter' \
     'three_uav_tapbridge_integrated' \
+    'two_drone_mission' \
     'uav1_patrol_mission' \
+    'uav2_road_patrol' \
+    'gcs_receiver' \
+    'detection_viewer' \
+    'world_pos_publisher' \
     'detector.py' \
     'camera_relay.py' \
     'metrics_logger' \
