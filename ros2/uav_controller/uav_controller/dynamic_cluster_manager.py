@@ -68,10 +68,16 @@ class DynamicClusterManager(Node):
         # silent. See cluster_relay_routes.py for why this is Linux routing
         # and not an ns-3 routing protocol.
         self.declare_parameter("relay_enabled", True)
-        self.declare_parameter("relay_enter_snr_db", 5.0)
-        self.declare_parameter("relay_exit_snr_db", 10.0)
-        self.declare_parameter("relay_min_hop_snr_db", 5.0)
-        self.declare_parameter("relay_consecutive", 3)
+        # Thresholds sit in the gap measured on a 5-UAV city run: links that
+        # were carrying telemetry averaged 27-31 dB, while the link that was
+        # functionally dead averaged 5.3 dB. The old 5 dB enter threshold sat
+        # inside the dead link's own fading spread, so it never tripped
+        # reliably. These are compared against an EMA, not a raw sample.
+        self.declare_parameter("relay_enter_snr_db", 15.0)
+        self.declare_parameter("relay_exit_snr_db", 22.0)
+        self.declare_parameter("relay_min_hop_snr_db", 15.0)
+        self.declare_parameter("relay_consecutive", 2)
+        self.declare_parameter("relay_snr_ema_alpha", 0.3)
         self.declare_parameter("relay_gcs_netns", "gcsns")
         self.declare_parameter("relay_uav_netns_prefix", "uav")
         self.declare_parameter("relay_subnet_prefix", "10.42.0.")
@@ -270,6 +276,9 @@ class DynamicClusterManager(Node):
                 self.get_parameter("relay_min_hop_snr_db").value
             ),
             consecutive=int(self.get_parameter("relay_consecutive").value),
+            snr_ema_alpha=float(
+                self.get_parameter("relay_snr_ema_alpha").value
+            ),
         )
 
         self.create_timer(

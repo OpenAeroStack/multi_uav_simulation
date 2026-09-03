@@ -62,8 +62,9 @@ class RelayRouteManager:
         iface: str = 'wifi0',
         enter_snr_db: float = 5.0,
         exit_snr_db: float = 10.0,
-        min_hop_snr_db: float = 5.0,
+        min_hop_snr_db: float = 15.0,
         consecutive: int = 3,
+        snr_ema_alpha: float = 0.3,
         use_sudo: bool = True,
     ) -> None:
         self.log = logger
@@ -80,7 +81,18 @@ class RelayRouteManager:
         self.exit_snr_db = exit_snr_db
         self.min_hop_snr_db = min_hop_snr_db
         self.consecutive = max(1, int(consecutive))
+        self.snr_ema_alpha = min(1.0, max(0.01, float(snr_ema_alpha)))
         self.use_sudo = use_sudo
+
+        # Smoothed SNR, because the raw ns-3 value is a per-sample Rayleigh
+        # draw. Measured on a 5-UAV city run: a member whose telemetry was
+        # completely dead for 102 s still reported a direct SNR swinging
+        # -20.6..+14.6 dB (mean 5.3, sigma 5.1) — only 38% of samples sat
+        # below the old 5 dB threshold, so a 3-in-a-row streak resolved to a
+        # ~5% per-tick lottery and the relay engaged ~100 s late. Thresholding
+        # the EMA instead tracks what the link can actually sustain.
+        self._direct_ema: Dict[int, float] = {}
+        self._hop_ema: Dict[int, float] = {}
 
         # member id -> cluster head id currently relaying it
         self.relayed: Dict[int, int] = {}
@@ -231,6 +243,18 @@ class RelayRouteManager:
 
     # ── policy ────────────────────────────────────────────────────────────────
 
+    def _smooth(self, store: Dict[int, float], member: int,
+                sample: float) -> float:
+        """EMA of one member's SNR. Seeds on the first sample so a member is
+        never judged on a half-formed average."""
+        previous = store.get(member)
+        if previous is None:
+            store[member] = sample
+        else:
+            a = self.snr_ema_alpha
+            store[member] = a * sample + (1.0 - a) * previous
+        return store[member]
+
     def update(
         self,
         ch_id: int,
@@ -277,8 +301,10 @@ class RelayRouteManager:
                 self._pending.pop(member, None)
                 continue
 
-            direct = direct_snr_db.get(member, -100.0)
-            hop = hop_snr_db.get(member, -100.0)
+            direct = self._smooth(
+                self._direct_ema, member, direct_snr_db.get(member, -100.0))
+            hop = self._smooth(
+                self._hop_ema, member, hop_snr_db.get(member, -100.0))
             active = member in self.relayed
 
             if active:
