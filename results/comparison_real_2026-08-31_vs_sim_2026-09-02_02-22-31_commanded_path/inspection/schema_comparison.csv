@@ -1,0 +1,20 @@
+signal,real,simulation,status
+elapsed_time,elapsed_s,elapsed_time_s,COMPARABLE_AFTER_CONVERSION
+arrival_timestamp,log_timestamp_unix_s,wall_time_unix_s,DIRECTLY_COMPARABLE
+latitude,gps.csv:lat_deg,gps.csv:latitude_deg,DIRECTLY_COMPARABLE
+longitude,gps.csv:lon_deg,gps.csv:longitude_deg,DIRECTLY_COMPARABLE
+relative_altitude,gps.csv:relative_alt_m,gps.csv:relative_altitude_m,DIRECTLY_COMPARABLE
+ground_speed,gps.csv:ground_speed_mps,gps.csv:ground_speed_mps,DIRECTLY_COMPARABLE
+heading,gps.csv:heading_deg,gps.csv:heading_deg,DIRECTLY_COMPARABLE
+roll,vehicle_state.csv ATTITUDE:roll_deg,vehicle_state.csv:roll_deg,COMPARABLE_AFTER_CONVERSION
+pitch,vehicle_state.csv ATTITUDE:pitch_deg,vehicle_state.csv:pitch_deg,COMPARABLE_AFTER_CONVERSION
+yaw,vehicle_state.csv ATTITUDE:yaw_deg (heading convention),vehicle_state.csv:heading_deg,COMPARABLE_AFTER_CONVERSION
+waypoint_progress,MISSION_CURRENT/MISSION_ITEM_REACHED,GUIDED target/reached events,COMPARABLE_AFTER_CONVERSION
+telemetry_interarrival,GLOBAL_POSITION_INT .tlog arrivals,/uav1/rel_alt bridge arrivals,DIRECTLY_COMPARABLE
+mavlink_sequence,mavlink_sequence.csv,,REAL_ONLY
+snr_db,,network.csv:snr_db,SIM_ONLY
+signal_dbm,,network.csv:signal_dbm,SIM_ONLY
+radio_status,radio.csv (3 samples),,INSUFFICIENT_DATA
+packet_loss,,,INSUFFICIENT_DATA
+rtt,,,INSUFFICIENT_DATA
+throughput,,,INSUFFICIENT_DATA

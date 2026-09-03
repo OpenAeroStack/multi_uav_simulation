@@ -17,6 +17,13 @@ reprojected into one common ENU frame using the origin recorded in simulation
 metadata. No comparison is performed by CSV row index and no extrapolation is
 used.
 
+The trajectory phase also reads the source flight's QGC WPL 110 mission from
+`analysis/data/real_2026-08-31_18-03-14.waypoints`. It converts each unique,
+valid horizontal waypoint through the same ENU transformation and reports
+separate, geometry-only real-to-commanded and simulation-to-commanded
+point-to-polyline errors. These do not replace the time-aligned trajectory
+metrics.
+
 Each numbered script can also be run separately. With no `--output-dir`, an
 independent version-safe result directory is created. NumPy, Matplotlib, and
 pyproj are required; pandas is not required.

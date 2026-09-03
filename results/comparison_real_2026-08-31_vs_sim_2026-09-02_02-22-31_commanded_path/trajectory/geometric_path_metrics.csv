@@ -1,0 +1,16 @@
+metric,value,unit
+sim_to_real_mean_path_error_m,0.665776351,m
+sim_to_real_median_path_error_m,0.69660906,m
+sim_to_real_rmse_path_error_m,0.72941981,m
+sim_to_real_p95_path_error_m,1.13581577,m
+sim_to_real_max_path_error_m,1.40108825,m
+real_to_sim_mean_path_error_m,0.681707833,m
+real_to_sim_median_path_error_m,0.591127588,m
+real_to_sim_rmse_path_error_m,0.742725607,m
+real_to_sim_p95_path_error_m,1.20093942,m
+real_to_sim_max_path_error_m,1.32082662,m
+symmetric_mean_path_error_m,0.673742092,m
+symmetric_rmse_path_error_m,0.736102773,m
+symmetric_max_path_deviation_m,1.40108825,m
+real_path_point_count,178,count
+sim_path_point_count,59,count

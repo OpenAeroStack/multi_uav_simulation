@@ -3,6 +3,7 @@
 
 import argparse
 import math
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -10,6 +11,13 @@ from common import (add_common_args, aligned_gps, common_grid, coordinate_origin
                     gps_to_enu, interpolate, load_or_create_alignment, metric_rows,
                     path_distance, prepare_output, save_plot, validate_inputs,
                     write_csv, write_json)
+
+
+MISSION_WAYPOINT_FILE = (
+    Path(__file__).resolve().parent
+    / "data"
+    / "real_2026-08-31_18-03-14.waypoints"
+)
 
 
 def cumulative(time, east, north, end):
@@ -62,6 +70,56 @@ def directed_metrics(prefix, distances):
         f"{prefix}_rmse_path_error_m": float(np.sqrt(np.mean(distances ** 2))),
         f"{prefix}_p95_path_error_m": float(np.percentile(distances, 95)),
         f"{prefix}_max_path_error_m": float(np.max(distances)),
+    }
+
+
+def load_commanded_waypoints(path):
+    """Read valid, unique horizontal positions from a QGC WPL 110 mission."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0].strip() != "QGC WPL 110":
+        raise ValueError(f"Unsupported or missing QGC WPL 110 header: {path}")
+
+    waypoints = []
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        fields = line.split()
+        if len(fields) != 12:
+            raise ValueError(f"Expected 12 QGC waypoint fields in: {line}")
+        mission_index = int(fields[0])
+        latitude = float(fields[8])
+        longitude = float(fields[9])
+        altitude = float(fields[10])
+
+        # TAKEOFF has no valid horizontal coordinate in this mission.
+        if latitude == 0.0 and longitude == 0.0:
+            continue
+        # WP6 and LAND share one horizontal coordinate; retain it only once.
+        if (waypoints
+                and math.isclose(latitude, waypoints[-1]["latitude"], abs_tol=1e-10)
+                and math.isclose(longitude, waypoints[-1]["longitude"], abs_tol=1e-10)):
+            continue
+        waypoints.append({
+            "mission_index": mission_index,
+            "label": "Start" if mission_index == 0 else f"WP{mission_index}",
+            "latitude": latitude,
+            "longitude": longitude,
+            "altitude_m": altitude,
+        })
+
+    if len(waypoints) < 2:
+        raise ValueError(f"Commanded mission needs at least two unique GPS positions: {path}")
+    waypoints[-1]["label"] = f"Final Target (WP{waypoints[-1]['mission_index']}/Land)"
+    return waypoints
+
+
+def distance_summary(distances):
+    return {
+        "mean_m": float(np.mean(distances)),
+        "median_m": float(np.median(distances)),
+        "rmse_m": float(np.sqrt(np.mean(distances ** 2))),
+        "p95_m": float(np.percentile(distances, 95)),
+        "max_m": float(np.max(distances)),
     }
 
 
@@ -149,6 +207,86 @@ def run(real_dir, sim_dir, output):
             "real_to_sim_path_error_m": real_to_sim[index],
         } for index, point in enumerate(real_points)))
 
+    commanded_waypoints = load_commanded_waypoints(MISSION_WAYPOINT_FILE)
+    waypoint_lat = np.asarray([row["latitude"] for row in commanded_waypoints])
+    waypoint_lon = np.asarray([row["longitude"] for row in commanded_waypoints])
+    waypoint_east, waypoint_north, _ = gps_to_enu(
+        waypoint_lat, waypoint_lon, np.zeros_like(waypoint_lat), origin)
+    commanded_points = np.column_stack((waypoint_east, waypoint_north))
+    for index, waypoint in enumerate(commanded_waypoints):
+        waypoint["east_m"] = waypoint_east[index]
+        waypoint["north_m"] = waypoint_north[index]
+    write_csv(
+        output / "trajectory" / "commanded_waypoints_enu.csv",
+        ["mission_index", "label", "latitude", "longitude", "east_m",
+         "north_m", "altitude_m"],
+        commanded_waypoints)
+
+    real_to_commanded, _, _ = point_to_polyline_distances(
+        real_points, commanded_points)
+    sim_to_commanded, _, _ = point_to_polyline_distances(
+        sim_points, commanded_points)
+    commanded_metrics = [
+        {"trajectory": "real", **distance_summary(real_to_commanded)},
+        {"trajectory": "simulation", **distance_summary(sim_to_commanded)},
+    ]
+    write_csv(
+        output / "trajectory" / "commanded_path_error_metrics.csv",
+        ["trajectory", "mean_m", "median_m", "rmse_m", "p95_m", "max_m"],
+        commanded_metrics)
+
+    figure, axis = plt.subplots(figsize=(8.5, 7.0))
+    axis.plot(real_points[:, 0], real_points[:, 1], color="tab:blue",
+              linewidth=2.0, label="Real UAV trajectory", zorder=2)
+    axis.plot(sim_points[:, 0], sim_points[:, 1], color="tab:orange",
+              linewidth=2.0, label="Simulated UAV trajectory", zorder=2)
+    axis.plot(commanded_points[:, 0], commanded_points[:, 1], color="black",
+              linestyle="--", linewidth=1.8, marker="D", markersize=5.5,
+              label="Commanded mission path", zorder=3)
+    for index, waypoint in enumerate(commanded_waypoints):
+        if index in (0, len(commanded_waypoints) - 1):
+            dx = 7
+        else:
+            dx = 7 if index % 2 == 0 else -7
+        horizontal_alignment = "left" if dx > 0 else "right"
+        axis.annotate(
+            waypoint["label"],
+            (waypoint["east_m"], waypoint["north_m"]),
+            xytext=(dx, 7), textcoords="offset points",
+            ha=horizontal_alignment, va="bottom", fontsize=10,
+            fontweight="bold" if index in (0, len(commanded_waypoints) - 1) else "normal")
+    axis.set_title("Real vs Simulated Flight Path", fontsize=16, pad=12)
+    axis.set_xlabel("East–West displacement (m)", fontsize=13, labelpad=30)
+    axis.set_ylabel("North–South displacement (m)", fontsize=13)
+    axis.tick_params(labelsize=11)
+    axis.grid(True, alpha=.25)
+    axis.legend(fontsize=10, loc="center left", bbox_to_anchor=(1.03, .5))
+    axis.set_aspect("equal", adjustable="box")
+    all_points = np.vstack((real_points, sim_points, commanded_points))
+    x_min, y_min = np.min(all_points, axis=0)
+    x_max, y_max = np.max(all_points, axis=0)
+    span = max(x_max - x_min, y_max - y_min)
+    margin = max(0.75, span * 0.06)
+    axis.set_xlim(x_min - margin, x_max + margin)
+    axis.set_ylim(y_min - margin, y_max + margin)
+    direction_style = {
+        "transform": axis.transAxes,
+        "fontsize": 9.5,
+        "color": "0.38",
+        "clip_on": False,
+    }
+    axis.text(.97, .985, "↑ North", ha="right", va="top",
+              **direction_style)
+    axis.text(.03, .015, "South ↓", ha="left", va="bottom",
+              **direction_style)
+    axis.text(0, -.035, "← West", ha="left", va="top",
+              **direction_style)
+    axis.text(1, -.035, "East →", ha="right", va="top",
+              **direction_style)
+    save_plot(
+        output / "trajectory"
+        / "real_vs_sim_vs_commanded_path_directional_axes.png")
+
     plt.figure(figsize=(7.2, 6.2))
     plt.plot(re[mask_r], rn[mask_r], label="Real flight", linewidth=1.7)
     plt.plot(se[mask_s], sn[mask_s], label="Simulation", linewidth=1.7)
@@ -211,6 +349,13 @@ def run(real_dir, sim_dir, output):
     plt.title("Geometry-Only Path Error Along Each Trajectory")
     plt.grid(True, alpha=.3); plt.legend()
     save_plot(output / "trajectory" / "path_error_along_trajectory.png")
+
+    print("Commanded-path comparison")
+    for row, label in zip(commanded_metrics, ("Real", "Simulation")):
+        print(f"{label}:")
+        print(f"  mean path error = {row['mean_m']:.3f} m")
+        print(f"  RMSE = {row['rmse_m']:.3f} m")
+        print(f"  P95 = {row['p95_m']:.3f} m")
 
 
 def main():

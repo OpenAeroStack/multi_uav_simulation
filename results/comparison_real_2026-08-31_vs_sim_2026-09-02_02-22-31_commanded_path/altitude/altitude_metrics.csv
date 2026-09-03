@@ -1,0 +1,11 @@
+metric,value,unit
+real_mean_altitude_m,2.74938202,m
+sim_mean_altitude_m,2.95345763,m
+mean_altitude_error_m,0.309655715,m
+mae_altitude_m,0.36100147,m
+rmse_altitude_m,0.725705009,m
+p95_abs_altitude_error_m,2.15948402,m
+max_abs_altitude_error_m,2.24254902,m
+real_max_altitude_m,3.611,m
+sim_max_altitude_m,3.11299992,m
+comparison_duration_s,88.801884,s
