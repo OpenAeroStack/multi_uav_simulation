@@ -55,6 +55,11 @@ class DetectionViewer(Node):
         image_topic = self.get_parameter("image_topic").value
         det_topic = self.get_parameter("detection_topic").value
 
+        # Title from the topic, not hardcoded: two viewers both labelled UAV1
+        # is indistinguishable on screen. "/uav2/camera/image_raw" -> "UAV2".
+        parts = [p for p in image_topic.split("/") if p]
+        self.window = f"{parts[0].upper() if parts else 'UAV'} camera + edge detections"
+
         self.bridge = CvBridge()
         self.frame = None
         self.boxes = []
@@ -112,7 +117,7 @@ class DetectionViewer(Node):
         cv2.putText(img, banner, (10, 26), cv2.FONT_HERSHEY_SIMPLEX,
                     0.65, TEXT, 2, cv2.LINE_AA)
 
-        cv2.imshow("UAV1 camera + edge detections", img)
+        cv2.imshow(self.window, img)
         key = cv2.waitKey(1) & 0xFF
         if key == ord("s"):
             path = f"/tmp/detection_{self.saved:03d}.png"
