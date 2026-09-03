@@ -60,7 +60,61 @@ archive_run() {
     "$SCRIPT_DIR/../summarise_run.sh" "$archive" 2>/dev/null \
         | tee "$archive/summary.txt" | while IFS= read -r l; do say "$l"; done
     say "  archived -> $archive"
+
+    update_reports "$archive"
     say ""
+}
+
+# One running report per aircraft: what actually reached the GCS across ns-3.
+# Appended, never overwritten, so runs can be compared side by side.
+update_reports() {
+    local archive="$1" report="$PROJECT_DIR/report"
+    mkdir -p "$report"
+    for i in $BOARDS; do
+        local gcs="$archive/gcs_receiver_uav$i.log"
+        local det="$archive/detector_uav$i.log"
+        local out="$report/uav${i}_gcs.txt"
+        [[ -s "$gcs" ]] || { say "  report: no GCS log for UAV$i — skipped"; continue; }
+
+        local sent
+        sent=$(grep -c '\[Detector\] #' "$det" 2>/dev/null || echo 0)
+        {
+            echo "══════════════════════════════════════════════════════════════"
+            echo "run    : $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "model  : $(basename "${MODEL:-yolo11n_openvino_model}")"
+            echo "archive: $(basename "$archive")"
+            echo "──────────────────────────────────────────────────────────────"
+            # An empty result still crosses the link, so it is counted and then
+            # separated out: only non-empty messages carry a detected person.
+            awk -v sent="$sent" '
+                match($0, /size=[0-9]+B/) {
+                    b = substr($0, RSTART+5, RLENGTH-6) + 0
+                    n++; sum += b
+                    if (b > mx) mx = b
+                    if (mn == 0 || b < mn) mn = b
+                    if ($0 ~ /"detections": \[\]/) empty++; else withdet++
+                }
+                match($0, /receipt=[0-9.]+/) {
+                    r = substr($0, RSTART+8, RLENGTH-8) + 0
+                    if (!r0) r0 = r
+                    r1 = r
+                }
+                END {
+                    dur = r1 - r0
+                    printf "messages received : %d over ns-3\n", n
+                    printf "  carrying person : %d (%.1f %%)\n", withdet, (n ? 100*withdet/n : 0)
+                    printf "  empty result    : %d\n", empty
+                    if (n) {
+                        printf "payload bytes     : mean %.0f | min %d | max %d\n", sum/n, mn, mx
+                        printf "total transferred : %d B\n", sum
+                    }
+                    if (dur > 0) printf "duration / rate   : %.1f s | %.2f msg/s\n", dur, n/dur
+                    if (sent > 0) printf "sent by the Pi    : %d -> delivery %.1f %%\n", sent, 100*n/sent
+                }' "$gcs"
+            echo ""
+        } >> "$out"
+        say "  report: $out"
+    done
 }
 
 CLEANED=0
