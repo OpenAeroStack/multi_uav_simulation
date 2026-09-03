@@ -160,33 +160,28 @@ grep -E "arrived|reached|mission complete" "$LOG" 2>/dev/null | tail -6 \
     | while read -r l; do say "        $l"; done || true
 say ""
 
-# ── Thermal summary ─────────────────────────────────────────────────────────
-# throttled=0x0 means the board never throttled; any other value invalidates a
-# timing comparison against a run that stayed cool.
-say "=== Thermal ==="
-for i in $BOARDS; do
-    tlog="/tmp/thermal_uav$i.log"
-    if [[ ! -s "$tlog" ]]; then
-        say "  board $i: no samples ($tlog)"
-        continue
-    fi
-    say "$(awk -v b="$i" '
-        {
-            if (match($0, /temp=[0-9.]+/)) {
-                t = substr($0, RSTART+5, RLENGTH-5) + 0
-                if (t > max) max = t
-                sum += t; n++
-            }
-            if (match($0, /throttled=0x[0-9a-fA-F]+/)) {
-                v = substr($0, RSTART+10, RLENGTH-10)
-                if (v != "0x0") flag = v
-            }
-        }
-        END {
-            printf "  board %s: %d samples | mean %.1f C | peak %.1f C | throttled %s",
-                   b, n, (n ? sum/n : 0), max, (flag ? flag : "0x0 (never)")
-        }' "$tlog")"
+# ── Archive ─────────────────────────────────────────────────────────────────
+# /tmp logs are truncated by the next run and cleared on reboot, so every run
+# is copied out before anything can overwrite it. Timestamped: never collides.
+ARCHIVE="$HOME/results/$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$ARCHIVE"
+for f in /tmp/mission_2uav.log /tmp/thermal_uav*.log \
+         /tmp/detector_uav*.log /tmp/gcs_receiver_uav*.log; do
+    [[ -e "$f" ]] && cp "$f" "$ARCHIVE"/ 2>/dev/null || true
 done
+
+# Record what produced these numbers; a run is not comparable without it.
+{
+    echo "date       : $(date -Is)"
+    echo "mission    : $MISSION"
+    echo "model      : ${MODEL:-<detector_start.sh default>}"
+    git -C "$PROJECT_DIR" log -1 --format='commit     : %h %s' 2>/dev/null || true
+    git -C "$PROJECT_DIR" status --short 2>/dev/null | sed 's/^/modified   : /' || true
+} > "$ARCHIVE/run_info.txt"
+
+"$SCRIPT_DIR/../summarise_run.sh" "$ARCHIVE" | tee "$ARCHIVE/summary.txt" \
+    | while read -r l; do say "$l"; done
+say "  archived -> $ARCHIVE"
 say ""
 
 exit "$STATUS"
