@@ -179,8 +179,10 @@ done
     git -C "$PROJECT_DIR" status --short 2>/dev/null | sed 's/^/modified   : /' || true
 } > "$ARCHIVE/run_info.txt"
 
+# IFS= is required: a bare `read -r` strips the leading spaces and the
+# summary's indentation collapses into an unreadable block.
 "$SCRIPT_DIR/../summarise_run.sh" "$ARCHIVE" | tee "$ARCHIVE/summary.txt" \
-    | while read -r l; do say "$l"; done
+    | while IFS= read -r l; do say "$l"; done
 say "  archived -> $ARCHIVE"
 say ""
 
