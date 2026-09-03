@@ -177,3 +177,6 @@ test_logs/
 # imgsz MUST be [544,960]: NCNN bakes in a fixed input shape and detector.py
 # runs imgsz=960 on a 1280x720 frame, which letterboxes to 960x544.
 yolov8n_ncnn_model/
+
+# Per-run logs archived by run_missions.sh. Data, not source.
+results/

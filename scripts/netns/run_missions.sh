@@ -163,7 +163,7 @@ say ""
 # ── Archive ─────────────────────────────────────────────────────────────────
 # /tmp logs are truncated by the next run and cleared on reboot, so every run
 # is copied out before anything can overwrite it. Timestamped: never collides.
-ARCHIVE="$HOME/results/$(date +%Y%m%d_%H%M%S)"
+ARCHIVE="$PROJECT_DIR/results/$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$ARCHIVE"
 for f in /tmp/mission_2uav.log /tmp/thermal_uav*.log \
          /tmp/detector_uav*.log /tmp/gcs_receiver_uav*.log; do
