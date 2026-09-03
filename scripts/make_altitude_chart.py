@@ -71,14 +71,10 @@ def main():
         ax.spines[side].set_visible(False)
     ax.spines["bottom"].set_color("#C9D1DA")
 
-    fig.text(0.055, 0.012,
-             "Source: models/iris_1_netns/model.sdf · computed, not measured · "
-             "640×384, HFOV 0.6 rad, 45° pitch, 1.7 m target\n"
-             "px = H·sin(p)·cos(p)·384 / (h·VFOV) · dashed line marks the ~30 px "
-             "practical floor for YOLO-family detectors.",
-             fontsize=7, color=FAINT, linespacing=1.6)
+    fig.text(0.055, 0.018, "Source: models/iris_1_netns/model.sdf",
+             fontsize=7, color=FAINT)
 
-    fig.tight_layout(rect=[0, 0.075, 1, 1])
+    fig.tight_layout(rect=[0, 0.045, 1, 1])
     OUT.parent.mkdir(exist_ok=True)
     fig.savefig(OUT, facecolor="white", edgecolor="none")
     print(f"  {OUT.relative_to(ROOT)}  {OUT.stat().st_size // 1024} KB")
