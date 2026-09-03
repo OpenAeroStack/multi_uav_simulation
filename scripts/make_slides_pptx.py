@@ -265,24 +265,25 @@ def slide_detection(prs, d):
     s = blank(prs)
     header(s, "02", "Human detection on the airframe", "EDGE INFERENCE")
 
-    text(s, 0.55, 1.12, 12.2, 0.5,
+    text(s, 0.55, 1.10, 12.2, 0.4,
          "Each board subscribes to its own aircraft's camera, runs YOLO11n under OpenVINO, "
-         "and publishes only the bounding boxes. The camera geometry — not the model — "
-         "governs whether a person is detectable at all.",
-         size=12.5, color=MUTED, spacing=1.15)
+         "and publishes only the bounding boxes. Whether a person is detectable at all is "
+         "set by six physical and software parameters, derived and measured below.",
+         size=11.5, color=MUTED, spacing=1.12)
 
-    # geometry figure
-    box(s, 0.55, 1.80, 7.55, 3.15, fill=SUNK, line=RULE)
-    gy = 4.30                                        # ground line
-    rule(s, 0.95, gy, 6.75, 0.028, FAINT)
-    text(s, 0.95, gy + 0.10, 1.0, 0.2, "GROUND", size=8.5, color=FAINT,
+    # ── geometry figure (compact, left) ──────────────────────────────────────
+    fig_x, fig_y, fig_w, fig_h = 0.55, 1.62, 5.55, 2.70
+    box(s, fig_x, fig_y, fig_w, fig_h, fill=SUNK, line=RULE)
+    gy = fig_y + 2.10                                # ground line
+    rule(s, fig_x + 0.30, gy, fig_w - 0.75, 0.026, FAINT)
+    text(s, fig_x + 0.30, gy + 0.09, 1.0, 0.18, "GROUND", size=7.5, color=FAINT,
          font=MONO, bold=True)
 
-    # frustum as a triangle
-    # Freeform, so the cone's apex sits on the aircraft rather than beside it.
-    ff = s.shapes.build_freeform(Inches(1.78), Inches(2.40))
-    ff.add_line_segments([(Inches(3.05), Inches(gy)),
-                          (Inches(6.35), Inches(gy))], close=True)
+    apex_x, apex_y = fig_x + 1.05, fig_y + 0.30
+    near_x, far_x = fig_x + 2.05, fig_x + 4.55
+    ff = s.shapes.build_freeform(Inches(apex_x), Inches(apex_y))
+    ff.add_line_segments([(Inches(near_x), Inches(gy)),
+                          (Inches(far_x), Inches(gy))], close=True)
     tri = ff.convert_to_shape()
     tri.shadow.inherit = False
     tri.fill.solid()
@@ -290,78 +291,91 @@ def slide_detection(prs, d):
     tri.line.color.rgb = SENSOR
     tri.line.width = Pt(1.0)
 
-    box(s, 1.35, 2.06, 0.85, 0.30, fill=WHITE, line=RULE)
-    text(s, 1.44, 2.11, 0.7, 0.22, "UAV", size=9.5, bold=True)
-    rule(s, 1.76, 2.36, 0.018, gy - 2.36, FAINT)
-    text(s, 1.20, 3.10, 0.5, 0.2, "30 m", size=9, color=MUTED, font=MONO)
+    box(s, apex_x - 0.32, apex_y - 0.08, 0.72, 0.26, fill=WHITE, line=RULE)
+    text(s, apex_x - 0.25, apex_y - 0.04, 0.6, 0.18, "UAV", size=8, bold=True)
+    rule(s, apex_x, apex_y + 0.19, 0.016, gy - apex_y - 0.19, FAINT)
+    text(s, apex_x - 0.42, gy - 1.10, 0.6, 0.18, "30 m", size=7.5, color=MUTED, font=MONO)
 
-    rule(s, 1.78, gy - 0.035, 1.27, 0.05, RADIO)
-    text(s, 1.55, gy - 0.32, 2.2, 0.2, "blind zone 0–20.6 m",
-         size=8.5, color=RADIO, font=MONO, bold=True)
-    text(s, 2.86, gy + 0.10, 0.9, 0.2, "20.6 m", size=8.5, color=MUTED, font=MONO)
-    text(s, 6.02, gy + 0.10, 0.9, 0.2, "43.6 m", size=8.5, color=MUTED, font=MONO)
-    text(s, 4.30, gy - 0.30, 1.6, 0.2, "visible band", size=9, color=SENSOR,
+    rule(s, apex_x, gy - 0.03, near_x - apex_x, 0.045, RADIO)
+    text(s, apex_x - 0.1, gy - 0.27, 1.9, 0.18, "blind: 0–20.6 m",
+         size=7.5, color=RADIO, font=MONO, bold=True)
+    text(s, near_x - 0.28, gy + 0.09, 0.8, 0.18, "20.6 m", size=7.5, color=MUTED, font=MONO)
+    text(s, far_x - 0.28, gy + 0.09, 0.8, 0.18, "43.6 m", size=7.5, color=MUTED, font=MONO)
+    mid_x = (near_x + far_x) / 2
+    text(s, mid_x - 0.55, gy - 0.26, 1.3, 0.18, "visible band", size=7.5, color=SENSOR,
          font=MONO, bold=True)
-    rule(s, 4.75, gy - 0.18, 0.035, 0.18, INK)
-    text(s, 4.42, gy - 0.52, 1.2, 0.2, "≈30 px", size=8.5, color=INK, font=MONO)
+    rule(s, mid_x, gy - 0.15, 0.03, 0.15, INK)
+    text(s, mid_x - 0.35, gy - 0.44, 1.0, 0.18, "≈30 px", size=7.5, color=INK, font=MONO)
 
-    text(s, 6.55, 2.10, 1.45, 1.9,
-         ["45° down-pitch", "0.6 rad H-FOV", "640×384 @ 5 Hz", "",
-          "band = 0.687h", "        … 1.453h", "", "person px", "  ≈ 889 / h"],
-         size=9, color=MUTED, font=MONO, spacing=1.3)
+    text(s, fig_x + fig_w - 1.85, fig_y + 0.16, 1.75, 1.6,
+         ["45° pitch · 0.6 rad", "640×384 @ 5 Hz", "", "band = 0.687h", "       … 1.453h"],
+         size=7.5, color=MUTED, font=MONO, spacing=1.25)
 
-    # pipeline table
-    text(s, 8.45, 1.80, 4.3, 0.22, "PIPELINE, PER AIRCRAFT", size=9,
+    text(s, fig_x + 0.10, fig_y + fig_h - 0.26, fig_w - 0.2, 0.2,
+         "GSD & pixel-height derivation → parameters 1 and 3, right", size=7.5,
+         color=FAINT, font=MONO)
+
+    # ── sensitivity parameters (right) ───────────────────────────────────────
+    px, py, pw = 6.30, 1.62, 6.48
+    text(s, px, py, pw, 0.2, "DETECTION SENSITIVITY PARAMETERS", size=9,
          color=FAINT, font=MONO, bold=True)
-    rows = [("Capture", "640×384 RGB @ 5 Hz"),
-            ("Transport", "VLAN 10, unimpaired"),
-            ("Model", "YOLO11n · OpenVINO FP32"),
-            ("Input shape", "1×3×384×640 (frozen)"),
-            ("Filter", "conf 0.40 · class 0"),
-            ("Result out", "JSON, 73–504 B"),
-            ("Return path", "VLAN 42/43 → ns-3 → GCS")]
-    y = 2.10
-    for k, v in rows:
-        text(s, 8.45, y, 1.45, 0.22, k, size=9.5, color=MUTED)
-        text(s, 10.00, y, 2.8, 0.22, v, size=9.5, font=MONO)
-        rule(s, 8.45, y + 0.27, 4.32, 0.008, RULE)
-        y += 0.40
 
-    # findings
-    fx = 0.55
-    text(s, fx, 5.20, 5.9, 0.22, "FRAMES ARE DROPPED BY DESIGN", size=9,
-         color=FAINT, font=MONO, bold=True)
-    text(s, fx, 5.45, 5.9, 1.0,
-         "The subscription is BEST_EFFORT, KEEP_LAST, depth 1. While inference runs, "
-         "arriving frames overwrite a single slot, so the detector always works on the "
-         "newest image instead of falling behind a queue. The frames it discards are "
-         "frames it could not have processed anyway.",
-         size=10, color=MUTED, spacing=1.18)
+    # Each row is label + ONE value line, kept ASCII-only: an unmatched glyph
+    # (Greek theta) silently falls back to a wider font mid-string and the
+    # resulting overflow collides with the row below it.
+    srows = [
+        ("1  Ground Sampling Distance (GSD)",
+         "GSD = 2h*tan(HFOV/2)/W  =  2.9 cm/px @ 30 m (nadir-equiv)"),
+        ("2  Camera resolution",
+         "640x384 px, frozen by the OpenVINO export shape"),
+        ("3  Person height in pixels",
+         "px = 889 / altitude(m)  ->  30 px @ 30 m, 45 px @ 20 m"),
+        ("4  Altitude",
+         "drives GSD & pixel height directly; reliable window ~15-25 m"),
+        ("5  Flight speed -> motion blur",
+         "blur(px) = v x t_exposure / GSD -- not modeled by Gazebo's camera"),
+        ("6  Gimbal pitch",
+         "pixel height peaks at 45 deg; steeper widens the COCO->aerial gap"),
+        ("7  Inference backend (measured)",
+         "OpenVINO 236 ms < NCNN 270 < MNN 342 < PyTorch 1,027 (PI_SETUP.md)"),
+        ("8  Confidence vs IoU",
+         "conf 0.40 explicit  vs  IoU 0.70 (NMS default) -- different filters"),
+    ]
+    y = py + 0.30
+    row_h = 0.375
+    for label, value in srows:
+        text(s, px, y, pw, 0.17, label, size=8.5, bold=True)
+        text(s, px, y + 0.175, pw, 0.16, value, size=8, color=MUTED, font=MONO)
+        rule(s, px, y + row_h - 0.035, pw, 0.008, RULE)
+        y += row_h
 
-    text(s, fx, 6.45, 5.9, 0.22, "GEOMETRY IS THE LIMIT, NOT THE MODEL", size=9,
-         color=FAINT, font=MONO, bold=True)
-    text(s, fx, 6.70, 5.9, 1.0,
-         "At 30 m a standing person subtends about 30 px — the floor of what YOLO "
-         "resolves reliably. At 20 m it is ~45 px. Camera resolution cannot help: the "
-         "exported model input is frozen at 384×640, so a larger sensor image is simply "
-         "scaled back down.",
-         size=10, color=MUTED, spacing=1.18)
+    # ── bottom: what it means + what was measured ────────────────────────────
+    by = py + 0.30 + row_h * len(srows) + 0.14
 
-    text(s, 6.85, 5.20, 5.9, 0.22, "MEASURED CONSEQUENCE", size=9,
+    text(s, 0.55, by, 5.9, 0.2, "WHAT THIS MEANS FOR THIS DEPLOYMENT", size=9,
          color=FAINT, font=MONO, bold=True)
-    text(s, 6.85, 5.45, 5.9, 1.9,
-         [(f'UAV1 flew a hold 41 m from a static group and detected a person in '
-           f'{d["UAV1"]["hits"]} of {d["UAV1"]["frames"]} frames '
-           f'({d["UAV1"]["hitpct"]:.1f} %).', {}),
-          ("", {"size": 5}),
-          (f'UAV2 flew along the walking subject\'s own path and detected one in '
-           f'{d["UAV2"]["hits"]} of {d["UAV2"]["frames"]} frames '
-           f'({d["UAV2"]["hitpct"]:.1f} %).', {}),
-          ("", {"size": 5}),
-          ("Same model, same settings, same boards. The difference is where the camera "
-           "was pointed and for how long — a stationary hold sees the target for a "
-           "hundred frames; a fly-past sees it for a handful.", {"color": INK})],
-         size=10, color=MUTED, spacing=1.18)
+    text(s, 0.55, by + 0.24, 5.9, 1.55,
+         "Frames are dropped by design: BEST_EFFORT, KEEP_LAST, depth 1 means the "
+         "detector always works the newest frame instead of a queue, so discarded "
+         "frames were never processable anyway. Geometry, not the model, sets the "
+         "ceiling — camera resolution is frozen at the export shape, so a person's "
+         "pixel height is fixed by altitude and pitch alone once conf and IoU are set.",
+         size=9.5, color=MUTED, spacing=1.16)
+
+    text(s, 6.85, by, 5.9, 0.2, "MEASURED CONSEQUENCE", size=9,
+         color=FAINT, font=MONO, bold=True)
+    text(s, 6.85, by + 0.24, 5.9, 1.55,
+         [(f'UAV1 held station near a static group: {d["UAV1"]["hits"]} of '
+           f'{d["UAV1"]["frames"]} frames detected a person ({d["UAV1"]["hitpct"]:.1f} %).',
+           {}),
+          ("", {"size": 4}),
+          (f'UAV2 overflew the walking subject at the same altitude and settings: '
+           f'{d["UAV2"]["hits"]} of {d["UAV2"]["frames"]} ({d["UAV2"]["hitpct"]:.1f} %).',
+           {}),
+          ("", {"size": 4}),
+          ("Same model, same conf/IoU, same boards. The gap is dwell time on target — "
+           "exactly what parameters 3-6 above predict.", {"color": INK})],
+         size=9.5, color=MUTED, spacing=1.16)
 
 
 # ── slide 3 — results ───────────────────────────────────────────────────────
