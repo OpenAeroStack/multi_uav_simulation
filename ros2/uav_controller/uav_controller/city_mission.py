@@ -173,10 +173,12 @@ class CityMission(Node):
             self.get_parameter('num_uavs').value
         )
 
-        if self.num_uavs not in (3, 4, 5):
+        # No upper bound: UAV1-UAV3 hold the three named roles (city relay
+        # head, pond, mountain) and every UAV past those runs the generic
+        # follower worker, so the fleet size is whatever fleet.yaml says.
+        if self.num_uavs < 1:
             raise ValueError(
-                'city_mission currently supports num_uavs = 3, 4, or 5; '
-                f'received {self.num_uavs}'
+                f'city_mission needs at least 1 UAV; received {self.num_uavs}'
             )
 
         self.get_logger().info(
@@ -633,272 +635,110 @@ class CityMission(Node):
                 errors.append((3, str(e)))
 
 
-    def _mission_uav4(self):
-        """
-        UAV4 — Pond follower.
+    # ── generic follower ──────────────────────────────────────────────────────
 
-        Spawn placement is handled by fleet.yaml:
-          UAV4 is positioned midway between UAV1 and UAV2.
+    FOLLOWER_AREAS = (
+        ('Pond',     POND_LAT, POND_LON, POND_ALT),
+        ('Mountain', MTN_LAT,  MTN_LON,  MTN_ALT),
+    )
 
-        Mission behaviour:
-          - same altitude as UAV2 (40 m)
-          - same pond patrol turn sequence as UAV2
-          - nearby parallel lane to avoid putting UAV2/UAV4 on the exact
-            same GPS point at the same altitude
+    @classmethod
+    def follower_assignment(cls, uid):
         """
-        uid = 4
+        Map a follower UAV id (4, 5, 6, ...) onto a patrol area and a lane.
+
+        Followers alternate between the pond and the mountain so the two
+        survey areas stay balanced as the fleet grows, and each new pair
+        takes the next lane out:
+
+            UAV4 -> Pond     lane 1      UAV6 -> Pond     lane 2
+            UAV5 -> Mountain lane 1      UAV7 -> Mountain lane 2
+
+        Lane k sits k * FOLLOWER_LANE_OFFSET_M east of the area centre, so
+        no two UAVs share a GPS point at the same altitude.
+        """
+        index = uid - 4
+        name, lat, lon, alt = cls.FOLLOWER_AREAS[index % len(cls.FOLLOWER_AREAS)]
+        lane = index // len(cls.FOLLOWER_AREAS) + 1
+        return name, lat, lon, alt, lane
+
+    def _mission_follower(self, uid):
+        """
+        Generic follower mission for every UAV beyond UAV1-UAV3.
+
+        Behaviour matches the leader of its assigned area (same altitude,
+        same north -> south -> centre sweep), flown in a parallel lane. This
+        one worker replaces the former hand-written _mission_uav4/_mission_uav5,
+        so a fleet of any size needs no new mission code.
+        """
         s = self.states[uid]
+        area, area_lat, area_lon, alt, lane = self.follower_assignment(uid)
+        tag = f'{area} follower'
 
-        # Shift the pond patrol centre 10 m east. The turn pattern remains
-        # north -> south -> centre, identical to UAV2.
         patrol_lat, patrol_lon = move_gps(
-            POND_LAT, POND_LON, FOLLOWER_LANE_OFFSET_M, 90.0
+            area_lat, area_lon, FOLLOWER_LANE_OFFSET_M * lane, 90.0
         )
 
         try:
-            self.get_logger().info(
-                '[UAV4] Pond follower — Waiting for GPS...'
-            )
+            self.get_logger().info(f'[UAV{uid}] {tag} — Waiting for GPS...')
 
             while s.lat is None:
                 time.sleep(0.3)
 
-            self.get_logger().info(
-                '[UAV4] GPS ready. Waiting 15s...'
-            )
+            self.get_logger().info(f'[UAV{uid}] GPS ready. Waiting 15s...')
             time.sleep(15.0)
 
-            # Phase 1 — takeoff to same altitude as UAV2
+            # Phase 1 — takeoff to the same altitude as the area leader
             self.get_logger().info(
-                '[UAV4] Phase 1 — Takeoff to 40m'
-            )
+                f'[UAV{uid}] Phase 1 — Takeoff to {alt:.0f}m')
 
             if not self._call_service(
                     self.takeoff_clients[uid], uid, '/takeoff', 90):
-                raise RuntimeError('UAV4 takeoff failed')
+                raise RuntimeError(f'UAV{uid} takeoff failed')
 
             time.sleep(1.0)
             self.barriers['takeoff'].wait()
 
-            # Phase 2 — fly to parallel pond lane
+            # Phase 2 — fly out to this follower's parallel lane
             self.get_logger().info(
-                '[UAV4] Phase 2 — Flying to pond follower lane'
-            )
+                f'[UAV{uid}] Phase 2 — Flying to {area.lower()} follower lane')
 
-            self._fly_to(
-                uid,
-                patrol_lat,
-                patrol_lon,
-                POND_ALT,
-                'Pond Follower Area'
-            )
+            self._fly_to(uid, patrol_lat, patrol_lon, alt,
+                         f'{area} Follower Area')
 
             self.barriers['positions'].wait()
 
-            # Phase 3 — exact same turn pattern as UAV2:
-            # north edge -> south edge -> centre.
+            # Phase 3 — same turn pattern as the leader: north, south, centre
             self.get_logger().info(
-                '[UAV4] Phase 3 — Pond sweep leg 1 (north)'
-            )
-
-            p1_lat, p1_lon = move_gps(
-                patrol_lat,
-                patrol_lon,
-                SWEEP_DIST,
-                0.0
-            )
-
-            self._fly_to(
-                uid,
-                p1_lat,
-                p1_lon,
-                POND_ALT,
-                'Pond Follower North Edge'
-            )
+                f'[UAV{uid}] Phase 3 — {area} sweep leg 1 (north)')
+            p1_lat, p1_lon = move_gps(patrol_lat, patrol_lon, SWEEP_DIST, 0.0)
+            self._fly_to(uid, p1_lat, p1_lon, alt,
+                         f'{area} Follower North Edge')
 
             self.get_logger().info(
-                '[UAV4] Phase 3 — Pond sweep leg 2 (south)'
-            )
+                f'[UAV{uid}] Phase 3 — {area} sweep leg 2 (south)')
+            p2_lat, p2_lon = move_gps(patrol_lat, patrol_lon, SWEEP_DIST, 180.0)
+            self._fly_to(uid, p2_lat, p2_lon, alt,
+                         f'{area} Follower South Edge')
 
-            p2_lat, p2_lon = move_gps(
-                patrol_lat,
-                patrol_lon,
-                SWEEP_DIST,
-                180.0
-            )
-
-            self._fly_to(
-                uid,
-                p2_lat,
-                p2_lon,
-                POND_ALT,
-                'Pond Follower South Edge'
-            )
-
-            self._fly_to(
-                uid,
-                patrol_lat,
-                patrol_lon,
-                POND_ALT,
-                'Pond Follower Centre'
-            )
+            self._fly_to(uid, patrol_lat, patrol_lon, alt,
+                         f'{area} Follower Centre')
 
             self.barriers['sweep'].wait()
 
-            self.get_logger().info(
-                f'[UAV4] Holding {HOLD_TIME}s'
-            )
+            self.get_logger().info(f'[UAV{uid}] Holding {HOLD_TIME}s')
             time.sleep(HOLD_TIME)
 
             self.barriers['hold'].wait()
 
-            self.get_logger().info('[UAV4] RTL')
-            self._call_service(
-                self.rtl_clients[uid], uid, '/rtl'
-            )
+            self.get_logger().info(f'[UAV{uid}] RTL')
+            self._call_service(self.rtl_clients[uid], uid, '/rtl')
             self._wait_for_land(uid)
 
-            self.get_logger().info(
-                '[UAV4] ✅ Mission complete'
-            )
+            self.get_logger().info(f'[UAV{uid}] ✅ Mission complete')
 
         except Exception as e:
-            self.get_logger().error(
-                f'[UAV4] ERROR: {e}'
-            )
-
-            with errors_lock:
-                errors.append((uid, str(e)))
-
-
-    def _mission_uav5(self):
-        """
-        UAV5 — Mountain follower.
-
-        Spawn placement is handled by fleet.yaml:
-          UAV5 is positioned midway between UAV1 and UAV3.
-
-        Mission behaviour:
-          - same altitude as UAV3 (50 m)
-          - same mountain patrol turn sequence as UAV3
-          - nearby parallel lane to avoid putting UAV3/UAV5 on the exact
-            same GPS point at the same altitude
-        """
-        uid = 5
-        s = self.states[uid]
-
-        # Shift the mountain patrol centre 10 m west. The sweep bearings
-        # remain 60 deg -> 120 deg -> centre, identical to UAV3.
-        patrol_lat, patrol_lon = move_gps(
-            MTN_LAT, MTN_LON, FOLLOWER_LANE_OFFSET_M, 270.0
-        )
-
-        try:
-            self.get_logger().info(
-                '[UAV5] Mountain follower — Waiting for GPS...'
-            )
-
-            while s.lat is None:
-                time.sleep(0.3)
-
-            self.get_logger().info(
-                '[UAV5] GPS ready. Waiting 15s...'
-            )
-            time.sleep(15.0)
-
-            # Phase 1 — takeoff to same altitude as UAV3
-            self.get_logger().info(
-                '[UAV5] Phase 1 — Takeoff to 50m'
-            )
-
-            if not self._call_service(
-                    self.takeoff_clients[uid], uid, '/takeoff', 90):
-                raise RuntimeError('UAV5 takeoff failed')
-
-            time.sleep(1.0)
-            self.barriers['takeoff'].wait()
-
-            # Phase 2 — fly to parallel mountain lane
-            self.get_logger().info(
-                '[UAV5] Phase 2 — Flying to mountain follower lane'
-            )
-
-            self._fly_to(
-                uid,
-                patrol_lat,
-                patrol_lon,
-                MTN_ALT,
-                'Mountain Follower Area'
-            )
-
-            self.barriers['positions'].wait()
-
-            # Phase 3 — exact same turn pattern as UAV3.
-            self.get_logger().info(
-                '[UAV5] Phase 3 — Mountain sweep leg 1 (deeper)'
-            )
-
-            p1_lat, p1_lon = move_gps(
-                patrol_lat,
-                patrol_lon,
-                SWEEP_DIST,
-                60.0
-            )
-
-            self._fly_to(
-                uid,
-                p1_lat,
-                p1_lon,
-                MTN_ALT,
-                'Mountain Follower Deep'
-            )
-
-            p2_lat, p2_lon = move_gps(
-                patrol_lat,
-                patrol_lon,
-                SWEEP_DIST,
-                120.0
-            )
-
-            self._fly_to(
-                uid,
-                p2_lat,
-                p2_lon,
-                MTN_ALT,
-                'Mountain Follower Ridge'
-            )
-
-            self._fly_to(
-                uid,
-                patrol_lat,
-                patrol_lon,
-                MTN_ALT,
-                'Mountain Follower Entry'
-            )
-
-            self.barriers['sweep'].wait()
-
-            self.get_logger().info(
-                f'[UAV5] Holding {HOLD_TIME}s'
-            )
-            time.sleep(HOLD_TIME)
-
-            self.barriers['hold'].wait()
-
-            self.get_logger().info('[UAV5] RTL')
-            self._call_service(
-                self.rtl_clients[uid], uid, '/rtl'
-            )
-            self._wait_for_land(uid)
-
-            self.get_logger().info(
-                '[UAV5] ✅ Mission complete'
-            )
-
-        except Exception as e:
-            self.get_logger().error(
-                f'[UAV5] ERROR: {e}'
-            )
+            self.get_logger().error(f'[UAV{uid}] ERROR: {e}')
 
             with errors_lock:
                 errors.append((uid, str(e)))
@@ -917,24 +757,19 @@ class CityMission(Node):
         self.get_logger().info(
             '║'
         )
-        self.get_logger().info(
-            '║  UAV1 → original city / relay mission @ 60m'
-        )
-        self.get_logger().info(
-            '║  UAV2 → original pond sweep mission       @ 40m'
-        )
-        self.get_logger().info(
-            '║  UAV3 → original mountain sweep mission   @ 50m'
-        )
+        for uid, role in (
+            (1, 'city / relay head          @ 60m'),
+            (2, 'pond sweep                 @ 40m'),
+            (3, 'mountain sweep             @ 50m'),
+        ):
+            if uid <= self.num_uavs:
+                self.get_logger().info(f'║  UAV{uid} → {role}')
 
-        if self.num_uavs >= 4:
+        for uid in range(4, self.num_uavs + 1):
+            area, _, _, alt, lane = self.follower_assignment(uid)
             self.get_logger().info(
-                '║  UAV4 → UAV2-style pond follower          @ 40m'
-            )
-
-        if self.num_uavs >= 5:
-            self.get_logger().info(
-                '║  UAV5 → UAV3-style mountain follower      @ 50m'
+                f'║  UAV{uid} → {area.lower()} follower, lane {lane}'
+                f'{"":<8}@ {alt:.0f}m'
             )
 
         self.get_logger().info(
@@ -947,40 +782,30 @@ class CityMission(Node):
         )
         time.sleep(15.0)
 
-        # UAV1-UAV3 are always present and retain the original mission.
-        threads = [
-            threading.Thread(
-                target=self._mission_uav1,
-                name='UAV1-HEAD',
-                daemon=True
-            ),
-            threading.Thread(
-                target=self._mission_uav2,
-                name='UAV2-Pond',
-                daemon=True
-            ),
-            threading.Thread(
-                target=self._mission_uav3,
-                name='UAV3-Mountain',
-                daemon=True
-            ),
+        # The three named roles, included only as far as the fleet reaches,
+        # so num_uavs = 1 or 2 is a valid (if small) mission rather than a
+        # crash on a missing UAV.
+        named_roles = [
+            (1, self._mission_uav1, 'UAV1-HEAD'),
+            (2, self._mission_uav2, 'UAV2-Pond'),
+            (3, self._mission_uav3, 'UAV3-Mountain'),
         ]
 
-        # Add followers only when they exist in the selected fleet.
-        if self.num_uavs >= 4:
-            threads.append(
-                threading.Thread(
-                    target=self._mission_uav4,
-                    name='UAV4-Pond-Follower',
-                    daemon=True
-                )
-            )
+        threads = [
+            threading.Thread(target=target, name=name, daemon=True)
+            for uid, target, name in named_roles
+            if uid <= self.num_uavs
+        ]
 
-        if self.num_uavs >= 5:
+        # Every UAV past UAV3 is a follower and runs the same generic worker,
+        # so the fleet size is bounded only by fleet.yaml.
+        for uid in range(4, self.num_uavs + 1):
+            area, _, _, _, lane = self.follower_assignment(uid)
             threads.append(
                 threading.Thread(
-                    target=self._mission_uav5,
-                    name='UAV5-Mountain-Follower',
+                    target=self._mission_follower,
+                    args=(uid,),
+                    name=f'UAV{uid}-{area}-Follower-L{lane}',
                     daemon=True
                 )
             )
