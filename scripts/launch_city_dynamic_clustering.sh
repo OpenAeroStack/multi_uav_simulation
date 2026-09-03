@@ -610,6 +610,25 @@ echo
 
 
 ###############################################################################
+# Resolve config/fleet.yaml -> generated/fleet.json
+#
+# setup_ns3_wireless_topology.sh builds the namespaces and TAPs from
+# fleet.json, while the rest of this script reads fleet.yaml directly. If
+# fleet.json is not regenerated here, editing fleet.yaml alone silently
+# builds the wireless topology for the PREVIOUS fleet size and every UAV
+# past that count comes up with no namespace. Regenerating it here is what
+# makes config/fleet.yaml the single source of truth.
+###############################################################################
+
+echo "Resolving fleet configuration (fleet.yaml -> fleet.json)..."
+
+python3 "$PROJECT_DIR/scripts/generate_fleet.py" \
+    --config "$FLEET_CONFIG" \
+    --outdir "$PROJECT_DIR/generated" \
+    --clean
+
+
+###############################################################################
 # Generate parameter files
 ###############################################################################
 
