@@ -1,0 +1,45 @@
+====================================================================
+RUN SUMMARY
+====================================================================
+
+MISSION
+   uav  reached  assumed  lost  recov  gaveup  t/out  landed  done
+     1       10        0     0      0       0      0     yes   yes
+     2        4        0     0      0       0      0     yes   yes
+     3        4        0     0      0       0      0     yes   yes
+     4        4        0     0      0       0      0     yes   yes
+     5        4        0     0      0       0      0     yes   yes
+
+  all 5 UAVs completed
+  mission reported: COMPLETE
+
+CLUSTERING AND RELAY
+  elections logged : 1
+    : Epoch 1: primary=UAV1, backup=UAV5, reason=initial_election
+  relay changes    : 6
+    UAV4 -> relay via UAV1 (direct 12.2 dB < 15.0, hop 37.1 dB)
+    UAV2 -> relay via UAV1 (direct 13.6 dB < 15.0, hop 36.5 dB)
+    UAV4 -> direct (direct 26.9 dB, hop 35.9 dB)
+    UAV2 -> direct (direct 27.0 dB, hop 35.8 dB)
+    UAV2 -> relay via UAV1 (direct 12.7 dB < 15.0, hop 36.5 dB)
+    UAV2 -> direct (direct 27.1 dB, hop 37.5 dB)
+
+DDS SESSION HEALTH
+  UAV1: established=1 participants=6 -> 6 session drop(s)
+  UAV2: established=1 participants=9 -> 13 session drop(s)
+  UAV3: established=1 participants=6 -> 10 session drop(s)
+  UAV4: established=1 participants=8 -> 12 session drop(s)
+  UAV5: established=1 participants=5 -> 4 session drop(s)
+
+GCS LINK QUALITY (ns-3)
+  node 0 = GCS. Links to the GCS decide whether telemetry flows.
+      link    mean     min     max  samples
+     GCS-1    50.8    27.3    64.2      873
+     GCS-2    43.4   -10.7    62.1      873
+     GCS-3    49.1    -5.6    67.4      873
+     GCS-4    45.2    -8.8    62.5      873
+     GCS-5    48.4     4.7    65.7      873
+
+  every GCS link averaged above the 15 dB relay threshold
+
+====================================================================

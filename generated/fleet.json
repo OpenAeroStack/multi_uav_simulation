@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "num_uavs": 5,
-  "num_radio_nodes": 6,
-  "expected_link_pairs": 15,
+  "num_uavs": 4,
+  "num_radio_nodes": 5,
+  "expected_link_pairs": 10,
   "gcs": {
     "id": 0,
     "ns3_id": 0,
@@ -127,29 +127,6 @@
       "takeoff_altitude_m": 40.0,
       "mission_profile": "pond_follower",
       "dds_param_file": "params/uav4_dds.parm"
-    },
-    {
-      "id": 5,
-      "sysid": 5,
-      "ns3_id": 5,
-      "instance": 4,
-      "namespace": "uav5",
-      "tap": "tap-uav5",
-      "wireless_ip": "10.42.0.15",
-      "sim_ip": "172.31.5.1",
-      "dds_port": 2023,
-      "mavlink_port": 5800,
-      "gazebo_fdm_port": 9042,
-      "sitl_fdm_port": 9043,
-      "gazebo_model": "iris_5",
-      "spawn": [
-        -70.0,
-        -19.5,
-        0.0
-      ],
-      "takeoff_altitude_m": 50.0,
-      "mission_profile": "mountain_follower",
-      "dds_param_file": "params/uav5_dds.parm"
     }
   ]
 }

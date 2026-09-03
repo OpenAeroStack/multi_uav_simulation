@@ -4076,12 +4076,6 @@
         <uri>model://iris_4</uri>
       </include>
     </model>
-    <model name="iris_5">
-      <pose>-70 -19.5 0 0 0 0</pose>
-      <include>
-        <uri>model://iris_5</uri>
-      </include>
-    </model>
     <model name="gcs">
       <static>true</static>
       <pose>-70 -7 0 0 0 0</pose>
