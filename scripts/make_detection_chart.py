@@ -28,7 +28,7 @@ OUT = ROOT / "report" / "detection_rate.png"
 # Altitude is read per run from that run's own mission log, because the config
 # only ever describes the most recent flight.
 GEOMETRY = {"UAV1": "holds station,\nstatic group",
-            "UAV2": "overflies a\nwalking subject"}
+            "UAV2": "overflies\nwalkers on the road"}
 ALT_FALLBACK = {"UAV1": 30.0, "UAV2": 20.0}
 
 W_PX, H_PX, HFOV, PITCH, PERSON_M = 640, 384, 0.6, math.radians(45), 1.7
@@ -144,7 +144,7 @@ def main():
             return
 
     uavs = ["UAV1", "UAV2"]
-    fig, ax = plt.subplots(figsize=(8.2, 5.0), dpi=150)
+    fig, ax = plt.subplots(figsize=(10.0, 5.2), dpi=150)
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
 
@@ -167,13 +167,14 @@ def main():
 
     bars = ax.bar(xs, heights, width=0.66, color=colors, zorder=3)
 
+    # Five runs per aircraft: the labels have to shrink or they collide.
     for (x, run_lbl, frac, fps), h in zip(sublabels, heights):
         ax.annotate(f"{h:.1f} %", (x, h), textcoords="offset points",
-                    xytext=(0, 18), ha="center", va="bottom",
-                    fontsize=11, fontweight="bold", color=INK)
-        ax.annotate(f"{frac} frames", (x, h), textcoords="offset points",
-                    xytext=(0, 5), ha="center", va="bottom",
-                    fontsize=8, color=MUTED)
+                    xytext=(0, 15), ha="center", va="bottom",
+                    fontsize=9, fontweight="bold", color=INK)
+        ax.annotate(frac, (x, h), textcoords="offset points",
+                    xytext=(0, 4), ha="center", va="bottom",
+                    fontsize=7, color=MUTED)
         ax.annotate(f"{run_lbl}\n{fps:.2f} fps", (x, 0), textcoords="offset points",
                     xytext=(0, -14), ha="center", va="top",
                     fontsize=8.5, color=MUTED, linespacing=1.5)
@@ -188,7 +189,7 @@ def main():
                     ha="center", va="top", fontsize=9.5, color=INK,
                     linespacing=1.6, fontweight="bold")
 
-    ax.set_ylim(0, 19)
+    ax.set_ylim(0, max(heights) * 1.28 + 1)
     ax.set_xlim(-0.7, pos - 1.2)
     ax.set_xticks([])
     ax.set_ylabel("frames containing a detected person (%)",
@@ -200,21 +201,13 @@ def main():
         ax.spines[side].set_visible(False)
     ax.spines["bottom"].set_color("#C9D1DA")
 
-    ax.set_title("Per-frame human detection rate — measured, two runs",
-                 fontsize=12.5, fontweight="bold", color=INK, pad=30, loc="left")
-    ax.text(0, 1.022,
-            "UAV2 flies lower, so its target is larger in pixels — and it detects "
-            "10x less. Mission geometry, not GSD, dominates.",
-            transform=ax.transAxes, fontsize=8.8, color=MUTED)
+    ax.set_title(f"Per-frame human detection rate — {len(runs)} runs",
+                 fontsize=12.5, fontweight="bold", color=INK, pad=16, loc="left")
 
-    fig.text(0.055, 0.012,
-             "Source: results/*/summary.txt · same model, conf 0.40, IoU 0.70 on both aircraft.\n"
-             "UAV1 repeats to within 0.1 pp across runs even though its throughput fell "
-             "2.85 → 1.31 fps under thermal throttling: per-frame accuracy is\n"
-             "independent of how many frames get processed.",
-             fontsize=7, color=FAINT, linespacing=1.6)
+    fig.text(0.055, 0.018, "Source: results/*/summary.txt · conf 0.40, IoU 0.70",
+             fontsize=7, color=FAINT)
 
-    fig.tight_layout(rect=[0, 0.135, 1, 1])
+    fig.tight_layout(rect=[0, 0.115, 1, 1])
     OUT.parent.mkdir(exist_ok=True)
     fig.savefig(OUT, facecolor="white", edgecolor="none")
     print(f"  {OUT.relative_to(ROOT)}  {OUT.stat().st_size // 1024} KB")
