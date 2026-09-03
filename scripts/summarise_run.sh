@@ -92,13 +92,36 @@ for i in $BOARDS; do
                 n++; sum += t
                 if (t > mx) mx = t
             }
+            # A clock below its maximum IS throttling, measured directly —
+            # stronger evidence than temperature, which only implies it.
+            match($0, /frequency\([0-9]+\)=[0-9]+/) {
+                split(substr($0, RSTART, RLENGTH), a, "=")
+                f = a[2] / 1000000
+                fn++; fsum += f
+                if (f > fmx) fmx = f
+                if (fmn == 0 || f < fmn) fmn = f
+            }
+            match($0, /volt=[0-9.]+V/) {
+                v = substr($0, RSTART+5, RLENGTH-6) + 0
+                vn++; vsum += v
+            }
+            match($0, /load=[0-9.]+/) {
+                l = substr($0, RSTART+5, RLENGTH-5) + 0
+                ln++; lsum += l
+                if (l > lmx) lmx = l
+            }
             match($0, /throttled=0x[0-9a-fA-F]+/) {
-                v = substr($0, RSTART+10, RLENGTH-10)
-                if (v != "0x0") flag = v
+                s = substr($0, RSTART+10, RLENGTH-10)
+                if (s != "0x0") flag = s
             }
             END {
                 printf "  thermal : %d samples | mean %.1f C | peak %.1f C | throttled %s\n",
                        n, (n ? sum/n : 0), mx, (flag ? flag : "0x0 (never)")
+                if (fn) printf "  clock   : mean %.0f MHz | min %.0f | max %.0f%s\n",
+                       fsum/fn, fmn, fmx, (fmn < fmx ? "   <- clock was reduced" : "")
+                if (vn) printf "  core    : mean %.3f V\n", vsum/vn
+                if (ln) printf "  load    : mean %.2f | peak %.2f (of 4 cores)\n",
+                       lsum/ln, lmx
             }' "$thr"
     else
         printf '  thermal : no log (%s)\n' "$thr"

@@ -197,8 +197,12 @@ for i in $BOARDS; do
     ssh -n -o ConnectTimeout=5 "${PI_HOST[$i]}" "
         $THERMAL_MARKER=1
         while true; do
-            printf '%s %s %s\n' \"\$(date +%s)\" \
-                   \"\$(vcgencmd measure_temp)\" \"\$(vcgencmd get_throttled)\"
+            printf '%s %s %s %s %s load=%s\n' \"\$(date +%s)\" \
+                   \"\$(vcgencmd measure_temp)\" \
+                   \"\$(vcgencmd measure_clock arm)\" \
+                   \"\$(vcgencmd measure_volts core)\" \
+                   \"\$(vcgencmd get_throttled)\" \
+                   \"\$(cut -d' ' -f1 /proc/loadavg)\"
             sleep $THERMAL_INTERVAL
         done" >> "$tlog" 2>&1 &
     THERMAL_PIDS+=("$!")
