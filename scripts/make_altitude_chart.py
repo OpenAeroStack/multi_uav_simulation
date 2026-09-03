@@ -72,8 +72,9 @@ def main():
     ax.spines["bottom"].set_color("#C9D1DA")
 
     fig.text(0.055, 0.012,
-             "Computed geometry: 640×384, HFOV 0.6 rad, 45° pitch, 1.7 m target · "
-             "px = H·sin(p)·cos(p)·384 / (h·VFOV)\nDashed line marks the ~30 px "
+             "Source: models/iris_1_netns/model.sdf · computed, not measured · "
+             "640×384, HFOV 0.6 rad, 45° pitch, 1.7 m target\n"
+             "px = H·sin(p)·cos(p)·384 / (h·VFOV) · dashed line marks the ~30 px "
              "practical floor for YOLO-family detectors.",
              fontsize=7, color=FAINT, linespacing=1.6)
 

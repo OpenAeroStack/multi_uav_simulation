@@ -23,7 +23,7 @@ W_PX, H_PX, HFOV = 640, 384, 0.6
 PERSON_M, ALT_M = 1.7, 30.0
 VFOV = 2 * math.atan((H_PX / 2) / ((W_PX / 2) / math.tan(HFOV / 2)))
 
-ACCENT, INK, MUTED, GRID = "#0B6E7F", "#141C26", "#5B6775", "#E6EAF0"
+ACCENT, INK, MUTED, FAINT, GRID = "#0B6E7F", "#141C26", "#5B6775", "#8A94A1", "#E6EAF0"
 
 
 def person_px(pitch_deg, h=ALT_M):
@@ -61,7 +61,13 @@ def main():
         ax.spines[side].set_visible(False)
     ax.spines["bottom"].set_color("#C9D1DA")
 
-    fig.tight_layout()
+    fig.text(0.055, 0.012,
+             "Source: models/iris_1_netns/model.sdf · computed, not measured · "
+             "640×384, HFOV 0.6 rad, 1.7 m target at 30 m\n"
+             "px = H·sin(p)·cos(p)·384 / (h·VFOV), which peaks at 45°.",
+             fontsize=7, color=FAINT, linespacing=1.6)
+
+    fig.tight_layout(rect=[0, 0.075, 1, 1])
     OUT.parent.mkdir(exist_ok=True)
     fig.savefig(OUT, facecolor="white", edgecolor="none")
     print(f"  {OUT.relative_to(ROOT)}  {OUT.stat().st_size // 1024} KB")
