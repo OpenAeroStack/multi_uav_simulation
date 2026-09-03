@@ -33,6 +33,36 @@ say() { printf '\r%s\n' "$*"; }
 # Kill by PATTERN, not $!. The mission runs under
 # `sudo ip netns exec ... sudo ... bash -lc`, so $! is the OUTER sudo and
 # killing it leaves the python child flying the aircraft.
+MISSION_STARTED=0
+
+# Called from cleanup(), so an interrupted flight is archived too. Ctrl+C is
+# the normal way to end a long mission; archiving only on success loses it.
+archive_run() {
+    (( MISSION_STARTED )) || return 0
+    local archive="$PROJECT_DIR/results/$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$archive"
+    for f in /tmp/mission_2uav.log /tmp/thermal_uav*.log \
+             /tmp/detector_uav*.log /tmp/gcs_receiver_uav*.log; do
+        [[ -e "$f" ]] && cp "$f" "$archive"/ 2>/dev/null || true
+    done
+
+    # Record what produced these numbers; a run is not comparable without it.
+    {
+        echo "date       : $(date -Is)"
+        echo "mission    : $MISSION"
+        echo "model      : ${MODEL:-<detector_start.sh default>}"
+        git -C "$PROJECT_DIR" log -1 --format='commit     : %h %s' 2>/dev/null || true
+        git -C "$PROJECT_DIR" status --short 2>/dev/null | sed 's/^/modified   : /' || true
+    } > "$archive/run_info.txt"
+
+    # IFS= is required: a bare `read -r` strips the leading spaces and the
+    # summary's indentation collapses into an unreadable block.
+    "$SCRIPT_DIR/../summarise_run.sh" "$archive" 2>/dev/null \
+        | tee "$archive/summary.txt" | while IFS= read -r l; do say "$l"; done
+    say "  archived -> $archive"
+    say ""
+}
+
 CLEANED=0
 cleanup() {
     (( CLEANED )) && return 0
@@ -54,6 +84,9 @@ cleanup() {
         say "  mission stopped — the aircraft keep their last command"
         say "  land them with:  ros2 service call /uavN/rtl std_srvs/srv/Trigger"
     fi
+
+    # Last: the thermal probes must be dead first or the log is still growing.
+    archive_run
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT
@@ -136,6 +169,7 @@ sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc "
     exec python3 '$MISSION'
 " > "$LOG" 2>&1 &
 WRAPPER_PID=$!
+MISSION_STARTED=1
 
 say "  two_drone_mission -> $LOG"
 say ""
@@ -160,30 +194,5 @@ grep -E "arrived|reached|mission complete" "$LOG" 2>/dev/null | tail -6 \
     | while read -r l; do say "        $l"; done || true
 say ""
 
-# ── Archive ─────────────────────────────────────────────────────────────────
-# /tmp logs are truncated by the next run and cleared on reboot, so every run
-# is copied out before anything can overwrite it. Timestamped: never collides.
-ARCHIVE="$PROJECT_DIR/results/$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$ARCHIVE"
-for f in /tmp/mission_2uav.log /tmp/thermal_uav*.log \
-         /tmp/detector_uav*.log /tmp/gcs_receiver_uav*.log; do
-    [[ -e "$f" ]] && cp "$f" "$ARCHIVE"/ 2>/dev/null || true
-done
-
-# Record what produced these numbers; a run is not comparable without it.
-{
-    echo "date       : $(date -Is)"
-    echo "mission    : $MISSION"
-    echo "model      : ${MODEL:-<detector_start.sh default>}"
-    git -C "$PROJECT_DIR" log -1 --format='commit     : %h %s' 2>/dev/null || true
-    git -C "$PROJECT_DIR" status --short 2>/dev/null | sed 's/^/modified   : /' || true
-} > "$ARCHIVE/run_info.txt"
-
-# IFS= is required: a bare `read -r` strips the leading spaces and the
-# summary's indentation collapses into an unreadable block.
-"$SCRIPT_DIR/../summarise_run.sh" "$ARCHIVE" | tee "$ARCHIVE/summary.txt" \
-    | while IFS= read -r l; do say "$l"; done
-say "  archived -> $ARCHIVE"
-say ""
 
 exit "$STATUS"
