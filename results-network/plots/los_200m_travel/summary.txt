@@ -1,0 +1,26 @@
+## CHANNEL VALIDATION SUMMARY
+
+Sample source:             periodic_model_evaluation
+
+State:                     LoS
+Samples:                   1801
+Mean distance:             113.299 m
+Distance std:              73.292 m
+Configured Nakagami m:     3.00
+Estimated m (moments):     2.833
+Estimated m (MLE):         2.943
+Normalized power mean:     1.0005
+Normalized power variance: 0.3533
+Mean faded RSSI:           -65.478 dBm
+RSSI standard deviation:   8.902 dB
+WARNING: distance varied over a 185.03 m range; Nakagami validation is strongest during a stationary hover.
+
+## LOG-DISTANCE VALIDATION
+
+Samples:                   1801
+Configured n:              2.00
+Estimated n:               2.000
+RMSE:                      0.000000 dB
+MAE:                       0.000000 dB
+Bias:                      -0.000000 dB
+R²:                        1.000000

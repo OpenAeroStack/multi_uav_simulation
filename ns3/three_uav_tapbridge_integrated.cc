@@ -54,6 +54,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -144,6 +145,23 @@ static std::atomic<bool> g_rosRunning{true};
 // Written from the NS-3 main thread inside PublishStats().
 static std::ofstream g_csv;
 
+// Focused GCS/UAV channel-validation CSV.  Unlike g_csv, this records one
+// selected link at a user-controlled interval and includes the model constants
+// needed by the offline analysis script.
+static std::ofstream g_validationCsv;
+struct ValidationConfig
+{
+  double txPowerDbm = 20.0;
+  double noiseFloorDbm = -94.0;
+  double pathLossExponent = 2.0;
+  double referenceDistanceM = 1.0;
+  double referenceLossDb = 46.73;
+  double periodSec = 0.02;
+  uint32_t txNode = 0;
+  uint32_t rxNode = 1;
+};
+static ValidationConfig g_validationConfig;
+
 // Per-packet PHY-level SNR/RSSI CSV (opened only if --snrLogFile is given).
 // Written from the MonitorSnifferRx trace callback.
 static std::ofstream g_snrFile;
@@ -169,6 +187,9 @@ struct PhyCounters
   uint64_t rxDropped  = 0;
 };
 static std::array<PhyCounters, 4> g_phyStats;
+static PhyCounters g_frameworkPrevTx;
+static PhyCounters g_frameworkPrevRx;
+static bool g_frameworkHavePrevious = false;
 
 static void PhyTxEndCb(uint32_t nodeId, Ptr<const Packet> p)
 {
@@ -481,6 +502,95 @@ void PublishStats(Ptr<DynamicObstacleLossModel> obstacleLoss,
                       pathLossOnly, txPowerDbm, noiseFloorDbm, periodSec, nodes);
 }
 
+// Periodic model-evaluation samples for one selected link.  CalcRxPower() is
+// the same propagation-chain entry point used by YansWifiChannel, so the
+// faded value is produced by DynamicObstacleLossModel itself; it is not
+// reconstructed by the logger.  This is nevertheless a scheduled channel
+// evaluation, not evidence of a successfully received packet.
+static void PublishValidation(Ptr<DynamicObstacleLossModel> obstacleLoss,
+                              Ptr<PropagationLossModel> pathLossOnly,
+                              NodeContainer nodes)
+{
+  const auto & cfg = g_validationConfig;
+  const uint32_t txNode = cfg.txNode;
+  const uint32_t rxNode = cfg.rxNode;
+  Ptr<MobilityModel> txMob = nodes.Get(txNode)->GetObject<MobilityModel>();
+  Ptr<MobilityModel> rxMob = nodes.Get(rxNode)->GetObject<MobilityModel>();
+  if (txMob && rxMob && g_validationCsv.is_open())
+    {
+      const double pathLossOnlyRx =
+          pathLossOnly->CalcRxPower(cfg.txPowerDbm, txMob, rxMob);
+      const auto info = obstacleLoss->GetLinkLossInfo(
+          nodes.Get(txNode)->GetId(), nodes.Get(rxNode)->GetId());
+      const double afterObstacleRx = pathLossOnlyRx - info.obstacleLossDb;
+
+      // This call performs exactly one evaluation of the configured chain:
+      // obstacle attenuation + custom Nakagami draw + log-distance loss.
+      const double fadedRx = obstacleLoss->CalcRxPower(cfg.txPowerDbm, txMob, rxMob);
+      const double fadingDb = fadedRx - afterObstacleRx;
+      const double snrDb = fadedRx - cfg.noiseFloorDbm;
+      const double distance = txMob->GetDistanceFrom(rxMob);
+      const uint32_t positionMask = g_posSeenMask.load();
+      const bool positionsKnown =
+          (positionMask & (1u << txNode)) && (positionMask & (1u << rxNode));
+      const double now = Simulator::Now().GetSeconds();
+      const double wallTime = std::chrono::duration_cast<std::chrono::duration<double>>(
+          std::chrono::system_clock::now().time_since_epoch()).count();
+      const auto & tx = g_phyStats[txNode];
+      const auto & rx = g_phyStats[rxNode];
+
+      uint64_t deltaTxPackets = 0, deltaTxBytes = 0;
+      uint64_t deltaRxPackets = 0, deltaRxBytes = 0, deltaRxDrops = 0;
+      if (g_frameworkHavePrevious)
+        {
+          deltaTxPackets = tx.txPackets - g_frameworkPrevTx.txPackets;
+          deltaTxBytes = tx.txBytes - g_frameworkPrevTx.txBytes;
+          deltaRxPackets = rx.rxOkPackets - g_frameworkPrevRx.rxOkPackets;
+          deltaRxBytes = rx.rxOkBytes - g_frameworkPrevRx.rxOkBytes;
+          deltaRxDrops = rx.rxDropped - g_frameworkPrevRx.rxDropped;
+        }
+      g_frameworkPrevTx = tx;
+      g_frameworkPrevRx = rx;
+      g_frameworkHavePrevious = true;
+
+      const double dropDenom =
+          static_cast<double>(deltaRxPackets + deltaRxDrops);
+      const double intervalPhyDropRate =
+          dropDenom > 0.0 ? deltaRxDrops / dropDenom : 0.0;
+      const double intervalRxMbps =
+          deltaRxBytes * 8.0 / (cfg.periodSec * 1e6);
+
+      g_validationCsv << std::fixed << std::setprecision(8)
+          << wallTime << ',' << now << ',' << txNode << ',' << rxNode << ','
+          << distance << ','
+          << cfg.txPowerDbm << ',' << cfg.pathLossExponent << ','
+          << cfg.referenceDistanceM << ',' << cfg.referenceLossDb << ','
+          << pathLossOnlyRx << ','
+          << info.obstacleLossDb << ',' << afterObstacleRx << ',' << fadedRx
+          << ',' << fadingDb << ',' << snrDb << ','
+          << (info.blocked ? "NLoS" : "LoS") << ',' << info.fadingM << ','
+          << (info.known ? 1 : 0) << ',' << (positionsKnown ? 1 : 0) << ','
+          << "periodic_model_evaluation" << ','
+          << tx.txPackets << ',' << rx.rxOkPackets << ',' << rx.rxDropped << ','
+          << tx.txBytes << ',' << rx.rxOkBytes << ','
+          << deltaTxPackets << ',' << deltaRxPackets << ',' << deltaRxDrops << ','
+          << deltaTxBytes << ',' << deltaRxBytes << ','
+          << intervalPhyDropRate << ',' << intervalRxMbps << '\n';
+
+      // Bound possible data loss on Ctrl+C without forcing a disk flush at a
+      // 20 ms sampling interval.
+      static double lastFlushSec = -1.0;
+      if (lastFlushSec < 0.0 || now - lastFlushSec >= 1.0)
+        {
+          g_validationCsv.flush();
+          lastFlushSec = now;
+        }
+    }
+
+  Simulator::Schedule(Seconds(cfg.periodSec), &PublishValidation,
+                      obstacleLoss, pathLossOnly, nodes);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  CheckIntegration -- one-shot co-simulation sanity report.
 //
@@ -613,6 +723,9 @@ int main(int argc, char* argv[])
   double      noiseFloor     = -94.0;
   double      statsPeriod    = 0.5;    // s, ROS publish + validation CSV rate
   double      posLogPeriod   = 2.0;    // s, 0 = off
+  const double pathLossExponent = 2.0;
+  const double referenceDistanceM = 1.0;
+  const double referenceLossDb = 46.73;
 
   // Obstacle model knobs -- previously reachable only by editing C++.
   double      mLos           = 3.0;
@@ -652,6 +765,14 @@ int main(int argc, char* argv[])
   std::string csvPath        = "";
   std::string snrLogFile     = "";
   std::string animFile       = "three_uav_anim.xml";
+  bool        validationEnabled = false;
+  std::string validationLink = "0-1";
+  double      validationIntervalMs = 20.0;
+  std::string validationOutput = "";
+  bool        frameworkValidation = false;
+  std::string frameworkValidationLink = "0-1";
+  double      frameworkValidationIntervalMs = 100.0;
+  std::string frameworkValidationOutput = "";
 
   CommandLine cmd(__FILE__);
   cmd.AddValue("tap0",           "TAP name for GCS",                    tapNames[0]);
@@ -684,7 +805,47 @@ int main(int argc, char* argv[])
   cmd.AddValue("csvPath",        "Per-link validation CSV (empty=off)", csvPath);
   cmd.AddValue("snrLogFile",     "Per-packet SNR CSV (empty=off)",      snrLogFile);
   cmd.AddValue("animFile",       "NetAnim XML output path",             animFile);
+  cmd.AddValue("validationEnabled", "Enable focused channel validation", validationEnabled);
+  cmd.AddValue("validationLink", "Directed link as TX-RX (for example 0-1)", validationLink);
+  cmd.AddValue("validationIntervalMs", "Validation sampling interval ms", validationIntervalMs);
+  cmd.AddValue("validationOutput", "Focused validation CSV output path", validationOutput);
+  cmd.AddValue("frameworkValidation", "Enable synchronized channel and PHY logging",
+               frameworkValidation);
+  cmd.AddValue("frameworkValidationLink", "Framework link as TX-RX",
+               frameworkValidationLink);
+  cmd.AddValue("frameworkValidationIntervalMs", "Framework sampling interval ms",
+               frameworkValidationIntervalMs);
+  cmd.AddValue("frameworkValidationOutput", "Framework validation CSV output path",
+               frameworkValidationOutput);
   cmd.Parse(argc, argv);
+
+  if (frameworkValidation)
+    {
+      if (validationEnabled)
+        NS_FATAL_ERROR("Enable either validationEnabled or frameworkValidation, not both");
+      validationEnabled = true;
+      validationLink = frameworkValidationLink;
+      validationIntervalMs = frameworkValidationIntervalMs;
+      validationOutput = frameworkValidationOutput;
+    }
+
+  uint32_t validationTx = 0;
+  uint32_t validationRx = 1;
+  char validationTrailing = '\0';
+  if (validationEnabled)
+    {
+      if (std::sscanf(validationLink.c_str(), "%u-%u%c", &validationTx,
+                      &validationRx, &validationTrailing) != 2 ||
+          validationTx >= 4 || validationRx >= 4 || validationTx == validationRx)
+        {
+          NS_FATAL_ERROR("validationLink must identify two different nodes in "
+                         "the form 0-1 (valid node ids: 0..3)");
+        }
+      if (validationIntervalMs <= 0.0)
+        NS_FATAL_ERROR("validationIntervalMs must be greater than zero");
+      if (validationOutput.empty())
+        NS_FATAL_ERROR("validationOutput is required when validationEnabled=true");
+    }
 
   // ADDED: explicit RNG run control. Without it, two "identical" runs draw the
   // same fading sequence, which quietly understates variance in any averaged
@@ -711,6 +872,39 @@ int main(int argc, char* argv[])
                  "blocked,fading_m,known\n";
       else
         NS_LOG_WARN("Could not open validation CSV: " << csvPath);
+    }
+
+  if (validationEnabled)
+    {
+      g_validationConfig.txPowerDbm = txPowerDbm;
+      g_validationConfig.noiseFloorDbm = noiseFloor;
+      g_validationConfig.pathLossExponent = pathLossExponent;
+      g_validationConfig.referenceDistanceM = referenceDistanceM;
+      g_validationConfig.referenceLossDb = referenceLossDb;
+      g_validationConfig.periodSec = validationIntervalMs / 1000.0;
+      g_validationConfig.txNode = validationTx;
+      g_validationConfig.rxNode = validationRx;
+      g_validationCsv.open(validationOutput);
+      if (!g_validationCsv.is_open())
+        NS_FATAL_ERROR("Could not open validation output: " << validationOutput);
+      g_validationCsv
+        << "wall_time_s,timestamp_s,tx_node,rx_node,distance_m,tx_power_dbm,"
+           "path_loss_exponent,reference_distance_m,reference_loss_db,"
+           "path_loss_only_rssi_dbm,obstacle_loss_db,"
+           "after_obstacle_rssi_dbm,faded_rssi_dbm,fading_db,snr_db,"
+           "los_state,nakagami_m,obstacle_report_received,"
+           "position_report_received,sample_source,"
+           "phy_tx_packets,phy_rx_packets,phy_drop_packets,"
+           "phy_tx_bytes,phy_rx_bytes,interval_phy_tx_packets,"
+           "interval_phy_rx_packets,interval_phy_drop_packets,"
+           "interval_phy_tx_bytes,interval_phy_rx_bytes,"
+           "interval_phy_drop_rate,interval_phy_rx_throughput_mbps\n";
+      g_validationCsv.flush();
+      NS_LOG_UNCOND((frameworkValidation ? "[FRAMEWORK VALIDATION] Recording "
+                                         : "[VALIDATION] Recording ")
+                    << validationTx << '-' << validationRx
+                    << " every " << validationIntervalMs << " ms -> "
+                    << validationOutput);
     }
 
   // ── Global config ────────────────────────────────────────────────────────
@@ -840,14 +1034,14 @@ int main(int argc, char* argv[])
   // Exponent 2.0: UAV-to-UAV air-to-air links are close to free space. (The
   // 2.7 "urban ground-level" value from the original script was wrong for this
   // geometry; the 3.0 in rt_new.cc likewise.)
-  logDist->SetAttribute("Exponent",          DoubleValue(2.0));
-  logDist->SetAttribute("ReferenceDistance", DoubleValue(1.0));
+  logDist->SetAttribute("Exponent",          DoubleValue(pathLossExponent));
+  logDist->SetAttribute("ReferenceDistance", DoubleValue(referenceDistanceM));
   // 46.73 dB = Friis at 1 m for 802.11a channel 36 (5180 MHz):
   //   lambda = c / 5.18e9 = 0.05788 m
   //   FSPL(1m) = 20*log10(4*pi*1/lambda) = 46.73 dB
   // rt_new.cc used 47.3 dB, which corresponds to ~5.5 GHz -- not a channel in
   // use here. The obstacle_loss value (46.67) was the closer of the two.
-  logDist->SetAttribute("ReferenceLoss",     DoubleValue(46.73));
+  logDist->SetAttribute("ReferenceLoss",     DoubleValue(referenceLossDb));
 
   obstacleLoss->SetNext(logDist);
 
@@ -1069,6 +1263,11 @@ int main(int argc, char* argv[])
                       Ptr<PropagationLossModel>(logDist), txPowerDbm,
                       noiseFloor, statsPeriod, nodes);
 
+  if (validationEnabled)
+    Simulator::Schedule(MilliSeconds(validationIntervalMs), &PublishValidation,
+                        obstacleLoss, Ptr<PropagationLossModel>(logDist),
+                        nodes);
+
   if (posLogPeriod > 0.0)
     Simulator::Schedule(Seconds(posLogPeriod), &LogNodePositions,
                         nodes, posLogPeriod);
@@ -1141,6 +1340,7 @@ int main(int argc, char* argv[])
   }
 
   if (g_csv.is_open())     g_csv.close();
+  if (g_validationCsv.is_open()) g_validationCsv.close();
   if (g_snrFile.is_open()) g_snrFile.close();
   if (enableNetAnim)       NS_LOG_UNCOND("NetAnim XML -> " << animFile);
 

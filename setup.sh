@@ -8,10 +8,8 @@
 #   export ARDUPILOT_HOME="$HOME/ardupilot"
 #   export ARDUPILOT_HOME="/opt/ardupilot"
 #   export ARDUPILOT_HOME="/media/user/drive-uuid/ardupilot"
-# REMOVED: pointed at a directory that does not exist on this machine:
-# export ARDUPILOT_HOME="$HOME/ardu_ws/src/ardupilot"
-# ADDED: the built ArduPilot tree actually lives here:
-export ARDUPILOT_HOME="$HOME/FYP/ardu_ws/src/ardupilot"
+# Keep an existing override, otherwise use the ArduPilot checkout in ardu_ws.
+export ARDUPILOT_HOME="${ARDUPILOT_HOME:-$HOME/ardu_ws/src/ardupilot}"
 # ============================================================
 
 export PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,8 +20,8 @@ fi
 
 export GAZEBO_RESOURCE_PATH="/usr/share/gazebo-11:${GAZEBO_RESOURCE_PATH:-}"
 export GAZEBO_MODEL_DATABASE_URI=""
-export GAZEBO_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/gazebo-11/plugins:/opt/ros/humble/lib:${GAZEBO_PLUGIN_PATH}
-export LD_LIBRARY_PATH=/opt/ros/humble/lib:${LD_LIBRARY_PATH}
+export GAZEBO_PLUGIN_PATH="/usr/lib/x86_64-linux-gnu/gazebo-11/plugins:/opt/ros/humble/lib:${GAZEBO_PLUGIN_PATH:-}"
+export LD_LIBRARY_PATH="/opt/ros/humble/lib:${LD_LIBRARY_PATH:-}"
 
 if [[ ! -d "$ARDUPILOT_HOME" ]]; then
   echo "ERROR: ARDUPILOT_HOME not found at: $ARDUPILOT_HOME"

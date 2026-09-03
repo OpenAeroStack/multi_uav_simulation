@@ -1,0 +1,2 @@
+samples,configured_n,estimated_n,regression_intercept,rmse_db,mae_db,bias_db,r_squared
+1801.0,2.0,2.0000000000059135,-26.729999999929337,2.9547205310192007e-09,2.514310676619827e-09,-4.158249560586602e-11,1.0

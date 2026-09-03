@@ -1,0 +1,2 @@
+state,configured_m,samples,mean_distance_m,distance_std_m,distance_range_m,mean_obstacle_loss_db,obstacle_std_db,obstacle_range_db,mean_rssi_dbm,rssi_std_db,normalized_power_mean,normalized_power_variance,moments_m,mle_m,mle_scale
+LoS,3.0,3201,199.96900315932209,0.009564902881209671,0.033184770000019626,0.0,0.0,0.0,-73.53306325707904,2.7662033927714895,1.0002255825810564,0.3454870588795311,2.895770450257195,2.922966240373438,0.342195393421057

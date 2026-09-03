@@ -1,0 +1,53 @@
+FRAMEWORK VALIDATION SUMMARY
+----------------------------
+
+Metric                         LoS             NLoS
+-----------------------------------------------------
+Samples                              9419             907
+Mean distance (m)                   68.55           68.09
+Obstacle loss (dB)                   0.00           17.56
+Nakagami m                           3.00            1.00
+Mean RSSI (dBm)                    -61.73          -83.24
+Mean SNR (dB)                       32.27           10.76
+PHY drop rate (%)                    0.25            2.30
+Application PDR (%)                 97.22           69.12
+Throughput (Mbps)                   0.937           0.692
+RTT (ms)                           522.57          508.26
+
+RELATIVE CHANGES (NLoS minus LoS)
+Distance difference:       -0.46 m
+RSSI change:               -21.51 dB
+SNR change:                -21.51 dB
+PDR change:                -28.11 points
+PHY drop-rate change:      +2.05 points
+Throughput change:         -0.245 Mbps
+
+TRANSITIONS
+LoS -> NLoS at t=796.00 s
+NLoS -> LoS at t=798.40 s
+LoS -> NLoS at t=811.70 s
+NLoS -> LoS at t=823.80 s
+LoS -> NLoS at t=834.00 s
+NLoS -> LoS at t=841.60 s
+LoS -> NLoS at t=921.50 s
+NLoS -> LoS at t=931.10 s
+LoS -> NLoS at t=962.00 s
+NLoS -> LoS at t=968.30 s
+LoS -> NLoS at t=1034.00 s
+
+FIRST SUSTAINED LoS -> NLoS EVENT
+Metric                         Before          After
+-----------------------------------------------------
+Obstacle loss (dB)                   0.00            0.24
+RSSI (dBm)                         -64.15          -62.67
+SNR (dB)                            29.85           31.33
+PHY drops                            3.00            0.00
+PHY drop rate (%)                    0.27            0.00
+Application PDR (%)                   N/A             N/A
+Throughput (Mbps)                     N/A             N/A
+
+The observed network changes are temporally aligned with the Gazebo-derived blockage event; this is not a claim of strict physical causality.
+
+Channel/RSSI values are periodic simulated link evaluations.
+PHY counters come from actual WifiPhy trace events.
+PDR and throughput come from actual sequenced UDP traffic through TapBridge.

@@ -14,11 +14,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RUN_USER="${SUDO_USER:-$USER}"
 RNG_RUN="${RNG_RUN:-1}"
+VALIDATION_ENABLED="${VALIDATION_ENABLED:-false}"
+VALIDATION_LINK="${VALIDATION_LINK:-0-1}"
+VALIDATION_INTERVAL_MS="${VALIDATION_INTERVAL_MS:-20}"
+FRAMEWORK_VALIDATION="${FRAMEWORK_VALIDATION:-false}"
+FRAMEWORK_VALIDATION_LINK="${FRAMEWORK_VALIDATION_LINK:-0-1}"
+FRAMEWORK_VALIDATION_INTERVAL_MS="${FRAMEWORK_VALIDATION_INTERVAL_MS:-100}"
 
 # Provides ARDUPILOT_HOME and other project-wide env vars
 source "$PROJECT_DIR/setup.sh"
 
-NS3_ROOT="$HOME/ns-allinone-3.38/ns-3.38"
+NS3_ROOT="${NS3_ROOT:-$HOME/ns-allinone-3.38/ns-3.38}"
+NS3_SCENARIO_DIR="$NS3_ROOT/scratch/multi_uav_simulation"
+ARDU_WS_ROOT="${ARDU_WS_ROOT:-$(cd "$ARDUPILOT_HOME/../.." && pwd)}"
+ARDU_WS_SETUP="${ARDU_WS_SETUP:-$ARDU_WS_ROOT/install/setup.bash}"
+ROS2_SETUP="$PROJECT_DIR/ros2/install/setup.bash"
+VALIDATION_OUTPUT="${VALIDATION_OUTPUT:-$PROJECT_DIR/results-network/data/channel_validation.csv}"
+FRAMEWORK_VALIDATION_OUTPUT="${FRAMEWORK_VALIDATION_OUTPUT:-$PROJECT_DIR/results-network/data/framework-validation/framework_run.csv}"
 NS3_LOG="/tmp/ns3_single.log"
 GAZEBO_LOG="/tmp/gazebo_netns.log"
 AGENT_LOG="/tmp/agent_netns.log"
@@ -28,6 +40,29 @@ SITL_LOG_DIR="/tmp/sitl_netns_uav1"
 HOME_GPS="6.0790684,80.1915283,0.00,0"
 WORLD_PATH="$PROJECT_DIR/worlds/small_city_single_uav_netns.world"
 DDS_PARM="$PROJECT_DIR/params/uav1_dds_netns.parm"
+
+require_dir() {
+    [[ -d "$1" ]] || { echo "ERROR: required directory not found: $1" >&2; exit 1; }
+}
+
+require_file() {
+    [[ -f "$1" ]] || { echo "ERROR: required file not found: $1" >&2; exit 1; }
+}
+
+require_dir "$NS3_ROOT"
+require_dir "$NS3_SCENARIO_DIR"
+require_file "$ARDUPILOT_HOME/build/sitl/bin/arducopter"
+require_file "$ARDU_WS_SETUP"
+require_file "$ROS2_SETUP"
+require_file "$WORLD_PATH"
+require_file "$DDS_PARM"
+
+if [[ "$VALIDATION_ENABLED" == "true" ]]; then
+    mkdir -p "$(dirname "$VALIDATION_OUTPUT")"
+fi
+if [[ "$FRAMEWORK_VALIDATION" == "true" ]]; then
+    mkdir -p "$(dirname "$FRAMEWORK_VALIDATION_OUTPUT")"
+fi
 
 TAP_READY_TIMEOUT=30
 AGENT_READY_TIMEOUT=20
@@ -43,6 +78,14 @@ BRIDGE_PID=""
 POSPUB_PID=""
 
 echo "NS-3 RNG run : $RNG_RUN"
+if [[ "$VALIDATION_ENABLED" == "true" ]]; then
+    echo "Validation   : link=$VALIDATION_LINK interval=${VALIDATION_INTERVAL_MS}ms"
+    echo "               output=$VALIDATION_OUTPUT"
+fi
+if [[ "$FRAMEWORK_VALIDATION" == "true" ]]; then
+    echo "Framework    : link=$FRAMEWORK_VALIDATION_LINK interval=${FRAMEWORK_VALIDATION_INTERVAL_MS}ms"
+    echo "               output=$FRAMEWORK_VALIDATION_OUTPUT"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 0 — Cleanup
@@ -116,16 +159,33 @@ echo ""
 # STEP 3 — NS-3 wireless simulation (unmodified 4-node binary)
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== [3/8] Building + starting ns-3 (three_uav_tapbridge_integrated) ==="
+cp "$PROJECT_DIR/ns3/three_uav_tapbridge_integrated.cc" \
+   "$PROJECT_DIR/ns3/dynamic_obstacle_loss_model.cc" \
+   "$PROJECT_DIR/ns3/dynamic_obstacle_loss_model.hh" \
+   "$PROJECT_DIR/ns3/CMakeLists.txt" \
+   "$NS3_SCENARIO_DIR/"
 (cd "$NS3_ROOT" && ./ns3 build three_uav_tapbridge_integrated)
 
 : > "$NS3_LOG"
-SNR_LOG="/tmp/ns3_snr.csv"
+if [[ "$FRAMEWORK_VALIDATION" == "true" ]]; then
+    SNR_LOG="${SNR_LOG:-$(dirname "$FRAMEWORK_VALIDATION_OUTPUT")/framework_packet_snr.csv}"
+else
+    SNR_LOG="${SNR_LOG:-/tmp/ns3_snr.csv}"
+fi
 (
     cd "$NS3_ROOT"
     exec ./ns3 run "three_uav_tapbridge_integrated \
         --tap0=tap-gcs --tap1=tap-uav1 --tap2=tap-uav2 --tap3=tap-uav3 \
         --simTime=0 --uavAltitude=30 \
-        --snrLogFile=$SNR_LOG --posLogPeriod=2.0 --rngRun=${RNG_RUN}"
+        --snrLogFile=$SNR_LOG --posLogPeriod=2.0 --rngRun=${RNG_RUN} \
+        --validationEnabled=${VALIDATION_ENABLED} \
+        --validationLink=${VALIDATION_LINK} \
+        --validationIntervalMs=${VALIDATION_INTERVAL_MS} \
+        --validationOutput=${VALIDATION_OUTPUT} \
+        --frameworkValidation=${FRAMEWORK_VALIDATION} \
+        --frameworkValidationLink=${FRAMEWORK_VALIDATION_LINK} \
+        --frameworkValidationIntervalMs=${FRAMEWORK_VALIDATION_INTERVAL_MS} \
+        --frameworkValidationOutput=${FRAMEWORK_VALIDATION_OUTPUT}"
 ) > "$NS3_LOG" 2>&1 &
 NS3_PID=$!
 echo "  ns-3 PID=$NS3_PID  log=$NS3_LOG"
@@ -165,11 +225,9 @@ echo ""
 # STEP 4 — Gazebo (root namespace)
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== [4/8] Starting Gazebo ==="
-export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:$HOME/FYP/small_city_gazebo_world/models:${GAZEBO_MODEL_PATH:-}"
+export GAZEBO_MODEL_PATH="$PROJECT_DIR/models:${GAZEBO_MODEL_PATH:-}"
 export GAZEBO_PLUGIN_PATH="$PROJECT_DIR/install/multi_uav_gazebo_plugins/lib:${GAZEBO_PLUGIN_PATH:-}"
 export GAZEBO_RESOURCE_PATH="$PROJECT_DIR:$PROJECT_DIR/worlds:${GAZEBO_RESOURCE_PATH:-}"
-
-[[ -f "$WORLD_PATH" ]] || { echo "ERROR: world file not found: $WORLD_PATH" >&2; exit 1; }
 
 : > "$GAZEBO_LOG"
 gazebo --verbose "$WORLD_PATH" -s libgazebo_ros_init.so -s libgazebo_ros_factory.so > "$GAZEBO_LOG" 2>&1 &
@@ -215,10 +273,10 @@ echo "=== [5/8] micro_ros_agent inside gcsns ==="
 : > "$AGENT_LOG"
 sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
     source /opt/ros/humble/setup.bash
-    source "$HOME/FYP/ardu_ws/install/setup.bash"
     source "$1"
+    source "$2"
     exec ros2 run micro_ros_agent micro_ros_agent udp4 --port 2019
-' agent-shell "$PROJECT_DIR/ros2/install/setup.bash" > "$AGENT_LOG" 2>&1 &
+' agent-shell "$ARDU_WS_SETUP" "$ROS2_SETUP" > "$AGENT_LOG" 2>&1 &
 AGENT_PID=$!
 
 deadline=$((SECONDS + AGENT_READY_TIMEOUT))
@@ -297,10 +355,10 @@ deadline=$((SECONDS + DDS_GPS_TIMEOUT))
 while true; do
     info=$(sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
         source /opt/ros/humble/setup.bash
-    source "$HOME/FYP/ardu_ws/install/setup.bash"
         source "$1"
+        source "$2"
         ros2 topic info /ap/v1/navsat 2>/dev/null
-    ' t-shell "$PROJECT_DIR/ros2/install/setup.bash" || true)
+    ' t-shell "$ARDU_WS_SETUP" "$ROS2_SETUP" || true)
     if echo "$info" | grep -q "Publisher count: [1-9]"; then
         echo "  /ap/v1/navsat has a live publisher."
         break
@@ -332,11 +390,11 @@ echo "=== [8/8] Starting drone_bridge inside gcsns ==="
 : > "$BRIDGE_LOG"
 sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc '
     source /opt/ros/humble/setup.bash
-    source "$HOME/FYP/ardu_ws/install/setup.bash"
     source "$1"
+    source "$2"
     exec ros2 run uav_controller drone_bridge --ros-args \
         -p uav_id:=1 -p mavlink_host:=10.42.0.11 -p mavlink_port:=5760
-' bridge-shell "$PROJECT_DIR/ros2/install/setup.bash" > "$BRIDGE_LOG" 2>&1 &
+' bridge-shell "$ARDU_WS_SETUP" "$ROS2_SETUP" > "$BRIDGE_LOG" 2>&1 &
 BRIDGE_PID=$!
 sleep 3
 sudo kill -0 "$BRIDGE_PID" 2>/dev/null || {
