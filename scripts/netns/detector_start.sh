@@ -139,12 +139,16 @@ say "=== gcs_receivers (inside gcsns) ==="
 for i in $BOARDS; do
     log="/tmp/gcs_receiver_uav$i.log"
     : > "$log"
+    # -r __node:= is REQUIRED: two nodes sharing a name is undefined behaviour
+    # in ROS 2, and it routed one aircraft's detections into the other's
+    # receiver (delivery read 189 % on UAV1 and 35 % on UAV2 in one run).
     # uav_vision lives in <repo>/install, not <repo>/ros2/install.
     sudo ip netns exec gcsns sudo -H -u "$RUN_USER" \
         env FASTRTPS_DEFAULT_PROFILES_FILE="$DDS_PROFILE" \
         bash -lc "source /opt/ros/humble/setup.bash && \
                   source '$PROJECT_DIR/install/setup.bash' && \
                   exec ros2 run uav_vision gcs_receiver --ros-args \
+                       -r __node:=gcs_receiver_uav$i \
                        -p uav_id:=$i -p processing_mode:=edge" \
         > "$log" 2>&1 &
     PIDS+=("$!")

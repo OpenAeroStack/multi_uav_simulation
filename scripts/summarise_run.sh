@@ -117,8 +117,11 @@ for i in $BOARDS; do
             END {
                 printf "  thermal : %d samples | mean %.1f C | peak %.1f C | throttled %s\n",
                        n, (n ? sum/n : 0), mx, (flag ? flag : "0x0 (never)")
+                # 25 MHz threshold: measure_clock reports exact Hz, so a
+                # steady clock still varies by a few hundred Hz run to run.
                 if (fn) printf "  clock   : mean %.0f MHz | min %.0f | max %.0f%s\n",
-                       fsum/fn, fmn, fmx, (fmn < fmx ? "   <- clock was reduced" : "")
+                       fsum/fn, fmn, fmx,
+                       (fmx - fmn > 25 ? "   <- clock was reduced" : "")
                 if (vn) printf "  core    : mean %.3f V\n", vsum/vn
                 if (ln) printf "  load    : mean %.2f | peak %.2f (of 4 cores)\n",
                        lsum/ln, lmx
