@@ -132,6 +132,58 @@
       </script>
     </actor>
 
+    <!-- Walker on road_x_1. Road is y=-45, 8.4 m wide, so |y+45| < 4.2 keeps
+         the actor on tarmac. Leg is 60 m in 55 s = 1.09 m/s;
+         the 114 s cycle is deliberately not a multiple of the others, so the
+         three walkers drift out of phase instead of moving as a block. -->
+    <actor name="actor_2">
+      <skin>
+        <filename>file://media/models/walk.dae</filename>
+      </skin>
+      <animation name="walking">
+        <filename>file://media/models/walk.dae</filename>
+        <interpolate_x>true</interpolate_x>
+      </animation>
+      <script>
+        <loop>true</loop>
+        <delay_start>0.0</delay_start>
+        <auto_start>true</auto_start>
+        <trajectory id="0" type="walking">
+          <waypoint><time>0</time>   <pose>-15 -43.2 0.015 0 0 0</pose></waypoint>
+          <waypoint><time>55</time>  <pose>45 -43.2 0.015 0 0 0</pose></waypoint>
+          <waypoint><time>57</time>  <pose>45 -43.2 0.015 0 0 3.14159</pose></waypoint>
+          <waypoint><time>112</time> <pose>-15 -43.2 0.015 0 0 3.14159</pose></waypoint>
+          <waypoint><time>114</time> <pose>-15 -43.2 0.015 0 0 0</pose></waypoint>
+        </trajectory>
+      </script>
+    </actor>
+
+    <!-- Walker on road_x_1. Road is y=-45, 8.4 m wide, so |y+45| < 4.2 keeps
+         the actor on tarmac. Leg is 60 m in 46 s = 1.30 m/s;
+         the 96 s cycle is deliberately not a multiple of the others, so the
+         three walkers drift out of phase instead of moving as a block. -->
+    <actor name="actor_3">
+      <skin>
+        <filename>file://media/models/walk.dae</filename>
+      </skin>
+      <animation name="walking">
+        <filename>file://media/models/walk.dae</filename>
+        <interpolate_x>true</interpolate_x>
+      </animation>
+      <script>
+        <loop>true</loop>
+        <delay_start>0.0</delay_start>
+        <auto_start>true</auto_start>
+        <trajectory id="0" type="walking">
+          <waypoint><time>0</time>   <pose>25 -46.8 0.015 0 0 3.14159</pose></waypoint>
+          <waypoint><time>46</time>  <pose>-35 -46.8 0.015 0 0 3.14159</pose></waypoint>
+          <waypoint><time>48</time>  <pose>-35 -46.8 0.015 0 0 0</pose></waypoint>
+          <waypoint><time>94</time> <pose>25 -46.8 0.015 0 0 0</pose></waypoint>
+          <waypoint><time>96</time> <pose>25 -46.8 0.015 0 0 3.14159</pose></waypoint>
+        </trajectory>
+      </script>
+    </actor>
+
 
 
 
