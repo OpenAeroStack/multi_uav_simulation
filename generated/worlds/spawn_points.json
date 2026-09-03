@@ -44,6 +44,26 @@
         0.0
       ],
       "gazebo_fdm_port": 9032
+    },
+    {
+      "id": 5,
+      "model": "iris_5",
+      "spawn": [
+        -70.0,
+        -19.5,
+        0.0
+      ],
+      "gazebo_fdm_port": 9042
+    },
+    {
+      "id": 6,
+      "model": "iris_6",
+      "spawn": [
+        -70.0,
+        -37.0,
+        0.0
+      ],
+      "gazebo_fdm_port": 9052
     }
   ]
 }

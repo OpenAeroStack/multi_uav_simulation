@@ -43,6 +43,7 @@ import json
 import math
 import threading
 import time
+from pathlib import Path
 from collections import deque
 from typing import Dict, List, Optional, Tuple
 
@@ -61,7 +62,27 @@ from rclpy.qos import (
 from std_msgs.msg import Bool, Float32, Float32MultiArray, Int32, String
 
 
-MAX_UAVS = 5
+def _configured_max_uavs(default: int = 12) -> int:
+    """
+    Upper bound on the fleet this dashboard will display.
+
+    Read from config/fleet.yaml so growing the fleet needs no edit here, with
+    headroom above the configured size so a dashboard started before a resize
+    still picks the extra UAVs up. A hardcoded value silently clamped the view
+    and made a larger fleet look like it had lost UAVs.
+    """
+    try:
+        import yaml
+        path = (Path(__file__).resolve().parents[1]
+                / 'config' / 'fleet.yaml')
+        configured = int(yaml.safe_load(
+            path.read_text(encoding='utf-8'))['fleet']['num_uavs'])
+        return max(default, configured + 4)
+    except Exception:
+        return default
+
+
+MAX_UAVS = _configured_max_uavs()
 HISTORY = 240          # samples kept per timeline (~4 min at 1 Hz)
 STALE_SEC = 5.0        # a feed older than this is shown as stale
 
@@ -83,14 +104,28 @@ ACCENT = "#58a6ff"
 RELAY = "#bc8cff"
 
 # One stable colour per node so a UAV keeps its identity across every panel.
-NODE_COLORS = {
-    0: "#f0883e",   # GCS
-    1: "#58a6ff",
-    2: "#3fb950",
-    3: "#e3b341",
-    4: "#ff7b72",
-    5: "#bc8cff",
-}
+_UAV_PALETTE = (
+    "#58a6ff", "#3fb950", "#e3b341", "#ff7b72", "#bc8cff",
+    "#39c5cf", "#db6d28", "#a5d6ff", "#7ee787", "#ffa198",
+)
+
+
+class _NodeColors(dict):
+    """
+    Colour per node, cycling the palette past the end so any fleet size gets
+    a distinct-ish colour rather than every extra UAV sharing one fallback.
+    Kept dict-like because callers use NODE_COLORS.get(id, fallback).
+    """
+
+    def get(self, node_id, default=None):
+        if node_id == 0:
+            return "#f0883e"          # GCS
+        if isinstance(node_id, int) and node_id > 0:
+            return _UAV_PALETTE[(node_id - 1) % len(_UAV_PALETTE)]
+        return default
+
+
+NODE_COLORS = _NodeColors()
 
 
 def node_label(node_id: int) -> str:
