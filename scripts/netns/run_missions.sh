@@ -51,6 +51,9 @@ archive_run() {
         echo "date       : $(date -Is)"
         echo "mission    : $MISSION"
         echo "model      : ${MODEL:-<detector_start.sh default>}"
+        echo "drones     : ${DRONES_ONLY:-<all>}"
+        echo "uav1_alt   : ${UAV1_ALTITUDE:-<config default>}"
+        echo "uav2_alt   : ${UAV2_ALTITUDE:-<config default>}"
         git -C "$PROJECT_DIR" log -1 --format='commit     : %h %s' 2>/dev/null || true
         git -C "$PROJECT_DIR" status --short 2>/dev/null | sed 's/^/modified   : /' || true
     } > "$archive/run_info.txt"
@@ -224,6 +227,9 @@ say "=== Mission ==="
 sudo ip netns exec gcsns sudo -H -u "$RUN_USER" bash -lc "
     source /opt/ros/humble/setup.bash
     source '$PROJECT_DIR/ros2/install/setup.bash'
+    export DRONES_ONLY='${DRONES_ONLY:-}'
+    export UAV1_ALTITUDE='${UAV1_ALTITUDE:-}'
+    export UAV2_ALTITUDE='${UAV2_ALTITUDE:-}'
     exec python3 '$MISSION'
 " > "$LOG" 2>&1 &
 WRAPPER_PID=$!

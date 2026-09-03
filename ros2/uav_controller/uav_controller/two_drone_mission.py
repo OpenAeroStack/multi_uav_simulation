@@ -13,9 +13,9 @@ crosses the ns-3 simulated radio:
 Mission flow:
   1. Both wait for a GPS fix, then settle              ← barrier_ready
   2. Both arm and take off to their altitude           ← barrier_takeoff
-  3. Both fly their waypoint route
-  4. Both hold on station                              ← barrier_hold
-  5. Both RTL together
+  3. Both fly their waypoint route                     
+  4. Both hold on station                              
+  5. Both RTL together                                 ← barrier_landing
 
 Waypoints are GAZEBO world coordinates, read straight from the .world file.
 Altitudes differ per aircraft: that vertical separation is the only collision
@@ -28,6 +28,7 @@ invisible from the root namespace.
 """
 
 import math
+import os
 import threading
 import time
 
@@ -45,7 +46,7 @@ from geographic_msgs.msg import GeoPoint
 # -41.3 to 116.3; person_center sits at (40.5, -187.9).
 DRONES = [
     {
-        "name":     "UAV1",
+        "name":     "UAV1",              # this mission detects the stable humans
         "uav_id":   1,
         "spawn":    (-70.0, -22.0),      # iris_1_demo <pose> in the world file
         "altitude": 30.0,
@@ -56,10 +57,11 @@ DRONES = [
         ],
     },
     {
-        "name":     "UAV2",
+        "name":     "UAV2",              # this mission detects the walking humans
         "uav_id":   2,
         "spawn":    (-70.0, -32.0),      # iris_2_demo <pose>
-        "altitude": 30.0,                # 
+        "altitude": 20.0,                # 
+        "hold_at_waypoint": 15.0,        # hold at the sec15ond waypoint
         "waypoints": [
             (-30.0, -45.0),              # west end of road_x_1
             ( 30.0, -45.0),              # east end
@@ -72,6 +74,7 @@ SETTLE_TIME     = 15.0    # s — let DDS discovery finish before arming
 HOLD_TIME       = 20.0    # s — on station before RTL
 WAYPOINT_RADIUS = 5.0     # m — how close counts as "arrived"
 CLIMB_TOLERANCE = 0.9     # fraction of target altitude that counts as reached
+CLIMB_TOLERANCE_MIN_M = 2.0   # floor on that band, so low targets stay reachable
 
 GPS_TIMEOUT     = 30.0    # s — waiting for the first fix
 GPS_STALE       = 20.0    # s — a frozen feed is not a healthy one
@@ -82,12 +85,25 @@ WAYPOINT_TIMEOUT = 300.0  # s — 240 m at 1 m/s needs ~240 s
 METRES_PER_DEG_LAT = 111320.0
 EARTH_RADIUS_M     = 6371000.0
 
+# Overrides for automated sweeps, so a run does not need this file edited:
+#   DRONES_ONLY=UAV1  UAV1_ALTITUDE=15  python3 two_drone_mission.py
+_only = os.environ.get("DRONES_ONLY", "").strip()
+if _only:
+    _keep = {n.strip() for n in _only.split(",") if n.strip()}
+    DRONES = [d for d in DRONES if d["name"] in _keep]
+    if not DRONES:
+        raise SystemExit(f"DRONES_ONLY={_only!r} matched no aircraft")
+for _d in DRONES:
+    _alt = os.environ.get(f"{_d['name']}_ALTITUDE", "").strip()
+    if _alt:
+        _d["altitude"] = float(_alt)
+
 # Barriers: every drone blocks here until all of them arrive.
 N_DRONES = len(DRONES)
-barrier_ready   = threading.Barrier(N_DRONES)
-barrier_takeoff = threading.Barrier(N_DRONES)
-barrier_hold    = threading.Barrier(N_DRONES)
-barrier_waypoints = threading.Barrier(N_DRONES)  
+barrier_ready   = threading.Barrier(N_DRONES)       # both have GPS before either arms
+barrier_takeoff = threading.Barrier(N_DRONES)       # boht at altitude before either flies the route
+barrier_landing    = threading.Barrier(N_DRONES)    # both drone before RT
+ 
 
 errors      = []
 errors_lock = threading.Lock()
@@ -135,6 +151,7 @@ class Drone:
         self.spawn     = cfg["spawn"]
         self.altitude  = cfg["altitude"]
         self.waypoints = cfg["waypoints"]
+        self.wp_hold   = cfg.get("hold_at_waypoints", 0.0)
         self.ns        = f"/uav{self.uav_id}"
 
         self.lat = None
@@ -214,15 +231,20 @@ class Drone:
         self.goto(self.lat, self.lon, altitude)
         self.log(f"climbing to {altitude:.0f} m")
 
+        # A band, not a floor: the aircraft takes off to takeoff_altitude
+        # (30 m), so any lower target is reached by DESCENDING. A one-sided
+        # ">= 0.9 * target" test passes instantly at 30 m and never checks it.
+        tol = max(altitude * (1.0 - CLIMB_TOLERANCE), CLIMB_TOLERANCE_MIN_M)
         deadline = time.time() + CLIMB_TIMEOUT
         while rclpy.ok() and time.time() < deadline:
             time.sleep(0.1)
             self.check_gps_fresh()
-            if self.rel_alt >= altitude * CLIMB_TOLERANCE:
-                self.log(f"  reached {self.rel_alt:.1f} m")
+            if abs(self.rel_alt - altitude) <= tol:
+                self.log(f"  reached {self.rel_alt:.1f} m (target {altitude:.0f})")
                 return
         raise MissionAborted(
-            f"climb timeout: {self.rel_alt:.1f} m after {CLIMB_TIMEOUT:.0f} s")
+            f"altitude timeout: {self.rel_alt:.1f} m vs target {altitude:.0f} m "
+            f"after {CLIMB_TIMEOUT:.0f} s")
 
     def fly_to(self, lat, lon, label):
         """Fly to a waypoint and wait until it is actually reached."""
@@ -288,13 +310,14 @@ def run_mission(node, cfg):
             drone.log(f"wp{n}: gazebo ({gx:.1f}, {gy:.1f}) "
                       f"= {east:+.0f} m E, {north:+.0f} m N from take-off")
             drone.fly_to(lat, lon, f"wp{n}")
-            drone.log(f"wp{n} reached — waiting for the other aircraft")
-            barrier_waypoints.wait()
+            drone.log(f"wp{n} complete")
+
 
         # ── Phase 3: hold together ──────────────────────────────────────────
         drone.hold(HOLD_TIME)
-        drone.log("hold complete — waiting at the hold barrier")
-        barrier_hold.wait()
+        drone.log("hold complete — waiting for the other aircraft before RTL")
+        barrier_landing.wait()
+
 
         # ── Phase 4: RTL ────────────────────────────────────────────────────
         drone.call_service(drone.rtl_cli, f"{drone.ns}/rtl")
@@ -305,7 +328,7 @@ def run_mission(node, cfg):
         with errors_lock:
             errors.append((drone.name, str(exc)))
         # Break every barrier: the other aircraft must not wait forever.
-        for b in (barrier_ready, barrier_takeoff, barrier_hold, barrier_waypoints):
+        for b in (barrier_ready, barrier_takeoff, barrier_landing):
             b.abort()
 
         try:
