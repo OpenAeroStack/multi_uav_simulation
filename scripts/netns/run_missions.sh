@@ -19,6 +19,12 @@ MISSION="$PROJECT_DIR/ros2/uav_controller/uav_controller/two_drone_mission.py"
 LOG=/tmp/mission_2uav.log
 BOARDS="1 2"
 
+# Thermal probes. Same hosts as detector_start.sh; keep the two in step.
+declare -A PI_HOST=( [1]="anton@10.0.0.2"  [2]="anton@10.0.1.2" )
+THERMAL_INTERVAL=2
+THERMAL_MARKER=UAV_THERMAL_PROBE
+THERMAL_PIDS=()
+
 # Leading \r forces column 0: SITL and ssh children clear ONLCR, and without it
 # every line prints one step further right than the last.
 say() { printf '\r%s\n' "$*"; }
@@ -31,6 +37,14 @@ CLEANED=0
 cleanup() {
     (( CLEANED )) && return 0
     CLEANED=1
+
+    # Remote loop first: a bare ssh kill can leave it sampling forever.
+    for i in $BOARDS; do
+        ssh -n -o ConnectTimeout=4 "${PI_HOST[$i]}" \
+            "pkill -f -- '[U]AV_THERMAL_PROBE'" >/dev/null 2>&1 || true
+    done
+    for pid in "${THERMAL_PIDS[@]:-}"; do kill -TERM "$pid" 2>/dev/null || true; done
+
     if pgrep -f -- '[t]wo_drone_mission' >/dev/null 2>&1; then
         say ""
         say "=== Stopping the mission ==="
@@ -85,6 +99,31 @@ say ""
 # on a backgrounded process stalls with no visible reason.
 sudo -v
 
+# ── Thermal probes ──────────────────────────────────────────────────────────
+# Inference time is only comparable between runs if the boards were in the same
+# thermal state; a throttled Pi runs identical maths slower, never differently.
+say "=== Thermal probes ==="
+for i in $BOARDS; do
+    tlog="/tmp/thermal_uav$i.log"
+    : > "$tlog"
+    # The marker is only there to give cleanup() something to pkill on.
+    ssh -n -o ConnectTimeout=5 "${PI_HOST[$i]}" "
+        $THERMAL_MARKER=1
+        while true; do
+            printf '%s %s %s\n' \"\$(date +%s)\" \
+                   \"\$(vcgencmd measure_temp)\" \"\$(vcgencmd get_throttled)\"
+            sleep $THERMAL_INTERVAL
+        done" >> "$tlog" 2>&1 &
+    THERMAL_PIDS+=("$!")
+    say "  board $i -> $tlog"
+done
+sleep 3
+for i in $BOARDS; do
+    [[ -s "/tmp/thermal_uav$i.log" ]] \
+        || say "  WARNING: board $i thermal probe is silent — see /tmp/thermal_uav$i.log"
+done
+say ""
+
 # ── Fly ─────────────────────────────────────────────────────────────────────
 # Inside gcsns: drone_bridge lives there and its services are invisible from
 # the root namespace, where the mission would wait forever.
@@ -119,6 +158,35 @@ fi
 say ""
 grep -E "arrived|reached|mission complete" "$LOG" 2>/dev/null | tail -6 \
     | while read -r l; do say "        $l"; done || true
+say ""
+
+# ── Thermal summary ─────────────────────────────────────────────────────────
+# throttled=0x0 means the board never throttled; any other value invalidates a
+# timing comparison against a run that stayed cool.
+say "=== Thermal ==="
+for i in $BOARDS; do
+    tlog="/tmp/thermal_uav$i.log"
+    if [[ ! -s "$tlog" ]]; then
+        say "  board $i: no samples ($tlog)"
+        continue
+    fi
+    say "$(awk -v b="$i" '
+        {
+            if (match($0, /temp=[0-9.]+/)) {
+                t = substr($0, RSTART+5, RLENGTH-5) + 0
+                if (t > max) max = t
+                sum += t; n++
+            }
+            if (match($0, /throttled=0x[0-9a-fA-F]+/)) {
+                v = substr($0, RSTART+10, RLENGTH-10)
+                if (v != "0x0") flag = v
+            }
+        }
+        END {
+            printf "  board %s: %d samples | mean %.1f C | peak %.1f C | throttled %s",
+                   b, n, (n ? sum/n : 0), max, (flag ? flag : "0x0 (never)")
+        }' "$tlog")"
+done
 say ""
 
 exit "$STATUS"
