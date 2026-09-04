@@ -11,3 +11,68 @@ total transferred : 35946 B
 duration / rate   : 123.3 s | 2.81 msg/s
 sent by the Pi    : 357 -> delivery 97.2 %
 
+══════════════════════════════════════════════════════════════
+run    : 2026-09-03 22:13:41
+model  : yolo11n_openvino_model
+archive: 20260903_221341
+──────────────────────────────────────────────────────────────
+messages received : 187 over ns-3
+  carrying person : 45 (24.1 %)
+  empty result    : 142
+payload bytes     : mean 115 | min 73 | max 422
+total transferred : 21518 B
+duration / rate   : 112.4 s | 1.66 msg/s
+sent by the Pi    : 170 -> delivery 110.0 %
+
+══════════════════════════════════════════════════════════════
+run    : 2026-09-04 01:13:45
+model  : yolo11n_openvino_model
+archive: 20260904_011345
+──────────────────────────────────────────────────────────────
+messages received : 274 over ns-3
+  carrying person : 51 (18.6 %)
+  empty result    : 223
+payload bytes     : mean 116 | min 72 | max 560
+total transferred : 31891 B
+duration / rate   : 174.9 s | 1.57 msg/s
+sent by the Pi    : 145 -> delivery 189.0 %
+
+══════════════════════════════════════════════════════════════
+run    : 2026-09-04 01:30:12
+model  : yolo11n_openvino_model
+archive: 20260904_013012
+──────────────────────────────────────────────────────────────
+messages received : 341 over ns-3
+  carrying person : 62 (18.2 %)
+  empty result    : 279
+payload bytes     : mean 117 | min 73 | max 505
+total transferred : 39788 B
+duration / rate   : 152.3 s | 2.24 msg/s
+sent by the Pi    : 379 -> delivery 90.0 %
+
+══════════════════════════════════════════════════════════════
+run    : 2026-09-04 02:23:43
+model  : yolo11n_openvino_model
+archive: 20260904_022343
+──────────────────────────────────────────────────────────────
+messages received : 361 over ns-3
+  carrying person : 73 (20.2 %)
+  empty result    : 288
+payload bytes     : mean 117 | min 73 | max 576
+total transferred : 42413 B
+duration / rate   : 129.9 s | 2.78 msg/s
+sent by the Pi    : 366 -> delivery 98.6 %
+
+══════════════════════════════════════════════════════════════
+run    : 2026-09-04 12:42:06
+model  : yolo11n_openvino_model
+archive: 20260904_124206
+──────────────────────────────────────────────────────────────
+messages received : 467 over ns-3
+  carrying person : 33 (7.1 %)
+  empty result    : 434
+payload bytes     : mean 87 | min 71 | max 432
+total transferred : 40432 B
+duration / rate   : 146.6 s | 3.19 msg/s
+sent by the Pi    : 493 -> delivery 94.7 %
+
